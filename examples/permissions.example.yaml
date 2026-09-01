@@ -1,0 +1,20 @@
+permissions:
+  defaultAction: ask
+  deny:
+    - command: [rm#recursive, rm#force]
+      reason: no recursive/forced destructive deletion
+    - command: [sudo]
+      reason: no privilege escalation
+    - command: [ssh]
+      reason: no direct remote shell
+    - paths: [.dsh/**]
+      reason: protect harness metadata
+  allow:
+    - command: [git pull, pnpm, node, npm run]
+      reason: routine project development
+    - command: [curl, wget]
+      args: ["https://*.example.com/*"]
+      reason: allowed package/registry endpoint
+  ask:
+    - command: [bash, sh, pwsh]
+      reason: stateful or unlisted shell — semantic review
