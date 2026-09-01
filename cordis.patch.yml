@@ -1,0 +1,35 @@
+# dsh-perm-gate profile patch.
+#
+# The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
+# does not merge per key), so this file MUST restate every preset that should
+# survive — the built-ins AND the `auto` tier contributed by dsh-auto-mode.
+# Omitting any of them silently disables that tier on the next profile load.
+# 1) Add an independent "Permissive" session approval tier to the DSH permission
+#    picker (same mechanism Auto uses).
+# 2) Insert the plugin itself (host half) into the profile.
+- id: permission
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      permissive:
+        sandbox: workspace-write
+        approval: ask
+        name: Permissive
+        description: Independent approval tier — safe in-scope ops auto-allow, dangerous crossings ask (approval strengths tunable under Settings → Plugins → Permissive approval tier).
+      auto:
+        sandbox: workspace-write
+        approval: ask
+        name: Auto
+        description: Workspace-sandboxed execution with automatic review and one-shot approval for wider access.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+
+- insert:
+    - id: dsh-perm-gate
+      name: dsh-perm-gate
