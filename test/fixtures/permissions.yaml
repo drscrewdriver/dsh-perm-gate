@@ -1,0 +1,11 @@
+permissions:
+  defaultAction: ask
+  deny:
+    - command: [rm#recursive]
+      reason: no recursive rm
+  allow:
+    - command: [pnpm]
+      reason: dev tool
+  ask:
+    - command: [bash]
+      reason: ask shells
