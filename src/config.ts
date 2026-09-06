@@ -19,6 +19,20 @@ export interface PermGateConfig {
   readonly classifierEndpoint?: string
   readonly classifierModel?: string
   readonly classifierApiKey?: string
+  /** Abort the llmAssist risk call after this many milliseconds. Default 20000. */
+  readonly riskTimeoutMs?: number
+  /**
+   * Verdict learning (llmAssist neutral-risk confirmations). When enabled,
+   * neutral-risk asks that the human approves and that actually execute count
+   * toward auto-allowing the exact same operation later. Default false.
+   */
+  readonly riskLearning?: boolean
+  /** Confirmations required before a neutral-risk re-run may auto-allow. Default 3. */
+  readonly riskThreshold?: number
+  /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
+  readonly learningFile?: string
+  /** Persistence path for the decision-event feed; defaults to `<dshHome>/perm-gate/events.jsonl`. */
+  readonly eventsFile?: string
   readonly grantTtlMs?: number
   readonly grantMaxUses?: number
   /**
@@ -72,6 +86,11 @@ export const Config: z<PermGateConfig> = z.object({
   classifierEndpoint: z.string(),
   classifierModel: z.string().default('deepseek-chat'),
   classifierApiKey: z.string(),
+  riskTimeoutMs: z.number().min(1000).default(20_000),
+  riskLearning: z.boolean().default(false),
+  riskThreshold: z.number().min(1).max(10).default(3),
+  learningFile: z.string(),
+  eventsFile: z.string(),
   grantTtlMs: z.number().min(1).default(5 * 60_000),
   grantMaxUses: z.number().min(1).default(1),
   permissive: z.boolean().default(false),
@@ -83,8 +102,8 @@ export const Config: z<PermGateConfig> = z.object({
   allowlist: z.array(z.string()),
 })
 
-export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive'>>
-  & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey'>
+export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
+  & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
   & { readonly permissiveStrategies: PermissiveStrategies }
 
 export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConfig {
@@ -98,6 +117,11 @@ export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConf
     classifierEndpoint: parsed.classifierEndpoint,
     classifierModel: parsed.classifierModel ?? 'deepseek-chat',
     classifierApiKey: parsed.classifierApiKey,
+    riskTimeoutMs: parsed.riskTimeoutMs ?? 20_000,
+    riskLearning: parsed.riskLearning ?? false,
+    riskThreshold: parsed.riskThreshold ?? 3,
+    learningFile: parsed.learningFile,
+    eventsFile: parsed.eventsFile,
     grantTtlMs: parsed.grantTtlMs ?? 5 * 60_000,
     grantMaxUses: parsed.grantMaxUses ?? 1,
     permissive: parsed.permissive ?? false,

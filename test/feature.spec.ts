@@ -103,8 +103,16 @@ describe('runtime approval extensions', () => {
     expect(r.decideExecution(exec)).toBeUndefined()
   })
 
-  it('classifyAsync fails closed to ask when no LLM is configured', async () => {
-    const r = rt()
-    expect(await r.classifyAsync({ tool: 'bash', args: {}, reason: 'x' })).toBe('ask')
+  it('refineAsk fails closed to the human ask when no LLM is configured', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'perm-gate-'))
+    const r = new PermGateRuntime({
+      rulesFile: undefined,
+      permissive: true,
+      permissiveStrategies: { llmAssist: true },
+    })
+    const exec = { name: 'bash', arguments: { command: 'git status' }, cwd: dir }
+    const ask = r.decideExecution(exec) as { kind: 'ask'; reason: string }
+    expect(ask.kind).toBe('ask')
+    expect((await r.refineAsk(exec, ask))?.kind).toBe('ask')
   })
 })

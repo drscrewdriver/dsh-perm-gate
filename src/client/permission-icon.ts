@@ -37,6 +37,11 @@ function iconStyles(): string {
   -webkit-mask-size: contain;
   mask-size: contain;
 }
+[${ICON_ATTRIBUTE}='trigger']::before {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+}
 `
 }
 
@@ -54,16 +59,29 @@ function isPermissiveMenuItem(element: Element): boolean {
   return element.closest('[role="menu"]') !== null
 }
 
-/** Annotate the Permissive permission menuitems with the icon attribute. */
+/** The collapsed permission-picker trigger (opens the presets menu). */
+function isPermissionTrigger(element: Element): boolean {
+  return element.matches('button[aria-haspopup="menu"]')
+    && PERMISSIVE_LABELS.has((element.textContent ?? '').replace(/\s+/g, ' ').trim())
+}
+
+/**
+ * Annotate the Permissive permission menuitems with the icon attribute, plus
+ * the collapsed picker trigger when its label names the Permissive preset.
+ * Unknown DOM shapes simply never match, so decoration stays conservative.
+ */
 function decorate(document: Document): void {
   for (const marked of document.querySelectorAll(`[${ICON_ATTRIBUTE}]`)) {
-    if (!isPermissiveMenuItem(marked)) marked.removeAttribute(ICON_ATTRIBUTE)
+    if (!isPermissiveMenuItem(marked) && !isPermissionTrigger(marked)) marked.removeAttribute(ICON_ATTRIBUTE)
   }
   for (const menu of document.querySelectorAll('[role="menu"]')) {
     if (!isPermissionMenu(menu)) continue
     for (const item of menu.querySelectorAll('button[role="menuitem"]')) {
       if (isPermissiveMenuItem(item)) item.setAttribute(ICON_ATTRIBUTE, 'menu')
     }
+  }
+  for (const trigger of document.querySelectorAll('button[aria-haspopup="menu"]')) {
+    if (isPermissionTrigger(trigger)) trigger.setAttribute(ICON_ATTRIBUTE, 'trigger')
   }
 }
 

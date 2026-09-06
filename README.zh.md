@@ -111,6 +111,19 @@ Full access 之间——与 Auto 档同一机制。因此会话权限下拉里�
 `permissiveStrategies`。host 端 live 读取该命名空间，改动对下一条工具调用即时生效，无需重启。
 这是一个独立审批类，**不是** DSH 的"auto-approval"档。
 
+### 风险分级 llmAssist、裁决学习与事件流
+
+开启 `llmAssist` 后，自定义 LLM（任何 OpenAI 兼容端点——把 `classifierEndpoint` /
+`classifierModel` / `classifierApiKey` 指向你自己的 API）按结构化协议逐条评估 `ask`：
+
+- `safe` → 自动放行（审计来源为 `classifier`）。
+- `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 一律转人工；硬风险永不自动放行、也永不进入学习。
+- `risky:neutral` → 若开启 `riskLearning`（设置卡片内，默认关闭），人工批准且真实执行的 neutral 风险会按 `tool|类别` 计数；计数达到 `riskThreshold`（默认 3）且新调用的操作指纹（命令词 + 目标基名）命中已确认样本时，**同一操作**自动放行。不同目标永不复用该放行。
+- 超时（`riskTimeoutMs`，默认 20s，重试 1 次）、传输失败与协议外输出均维持原 `ask`——门禁绝不猜测。
+
+学习状态持久化在插件自有 JSON（`$DSH_HOME/perm-gate/learning.json` 或 `learningFile`），不写入你的 YAML 规则文件。每次决策都会追加到 `$DSH_HOME/perm-gate/events.jsonl`（或 `eventsFile`），并经 `GET /api/dsh-perm-gate/events?sessionId=&since=` 提供；浏览器端轮询该接口，在输入框上方以提示条展示最新决策（ask 常驻至下一条事件）。Permissive 档在权限选择器中保留盾形图标——菜单项与折叠触发按钮均有图标。
+
+
 ## CLI（独立 dry-run）
 
 ```sh

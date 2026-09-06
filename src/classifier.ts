@@ -6,6 +6,9 @@
  * and asks for a structured verdict on one tool call. Strictly fail-closed: any
  * transport, parsing, or schema error returns `ask` so the human seam stays
  * authoritative — an LLM can widen to `allow`/`deny` but never silence the review.
+ *
+ * The transport layer (`chatCompletion`) is shared with `risk.ts`, which layers
+ * the risk-category protocol on top of the same custom-endpoint setup.
  */
 export type ClassifyVerdict = 'allow' | 'deny' | 'ask'
 
@@ -30,7 +33,114 @@ export interface ClassifyRequest {
   readonly reason: string
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000
+export const DEFAULT_TIMEOUT_MS = 30_000
+
+/**
+ * Normalize a user-entered OpenAI-compatible base URL into the
+ * `/chat/completions` POST URL. Accepts both the bare base
+ * (`https://api.example.com/v1`) and a fully pasted path
+ * (`https://api.example.com/v1/chat/completions`) — pasting the complete URL
+ * is the most common custom-endpoint mistake and must not 404.
+ */
+export function chatCompletionsUrl(endpoint: string): string {
+  const base = endpoint.trim().replace(/\/+$/, '')
+  return /\/chat\/completions$/.test(base) ? base : `${base}/chat/completions`
+}
+
+/** Status codes that mean "the request shape was rejected" (not auth/network) — worth one lenient retry. */
+const SHAPE_REJECT_STATUS = new Set([400, 404, 415, 422])
+
+async function postChat(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  signal: AbortSignal,
+  nowFetch: typeof fetch,
+): Promise<{ ok: true; content: string } | { ok: false; status?: number }> {
+  try {
+    const res = await nowFetch(url, { method: 'POST', headers, signal, body: JSON.stringify(body) })
+    if (!res.ok) return { ok: false, status: res.status }
+    const text = await res.text()
+    if (text.trim() === '') return { ok: false }
+    // Custom models may answer with plain text instead of the JSON envelope;
+    // pass the raw text through — the verdict parser's keyword fallback judges it.
+    let content = text
+    try {
+      const parsed = JSON.parse(text) as { choices?: { message?: { content?: string } }[] }
+      const inner = parsed.choices?.[0]?.message?.content
+      if (typeof inner === 'string') content = inner
+    } catch {
+      // not the OpenAI envelope: keep the raw body as content
+    }
+    return { ok: true, content }
+  } catch {
+    return { ok: false } // network failure / abort
+  }
+}
+
+/**
+ * One OpenAI-compatible `/chat/completions` POST with an abort timeout.
+ * Transport-only: resolves `{ ok: true, content }` with the assistant text, or
+ * `{ ok: false }` on any non-2xx response, network failure, abort, or malformed
+ * payload. Never throws.
+ *
+ * Custom-endpoint hardening: when the gateway rejects the request shape
+ * (400/404/415/422 — typically an unsupported `response_format`), one lenient
+ * retry runs WITHOUT `response_format` so plain OpenAI-compatible gateways
+ * (ollama / llama.cpp / one-api style) still work.
+ */
+export async function chatCompletion(
+  cfg: ClassifierConfig,
+  system: string,
+  user: string,
+  nowFetch: typeof fetch = fetch,
+): Promise<{ ok: true; content: string } | { ok: false }> {
+  const endpoint = cfg.endpoint
+  const model = cfg.model
+  if (!endpoint || !model) return { ok: false }
+  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS
+
+  const url = chatCompletionsUrl(endpoint)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
+  const messages = [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ]
+
+  try {
+    const first = await postChat(url, headers, {
+      model, temperature: 0, response_format: { type: 'json_object' }, messages,
+    }, controller.signal, nowFetch)
+    if (first.ok) return first
+    if (first.status === undefined || !SHAPE_REJECT_STATUS.has(first.status)) return { ok: false }
+    const second = await postChat(url, headers, { model, temperature: 0, messages }, controller.signal, nowFetch)
+    return second.ok ? second : { ok: false }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** A bounded single-shot task result; `undefined` means "try again". */
+type RetryTask<T> = () => Promise<T | undefined>
+
+/**
+ * Run `task` up to `attempts` times (default 2 = one initial try + one retry),
+ * re-running whenever it resolves `undefined` or rejects. Never throws.
+ */
+export async function withLlmRetry<T>(task: RetryTask<T>, attempts = 2): Promise<T | undefined> {
+  for (let i = 0; i < Math.max(1, attempts); i += 1) {
+    try {
+      const result = await task()
+      if (result !== undefined) return result
+    } catch {
+      // fall through to the next attempt
+    }
+  }
+  return undefined
+}
 
 /**
  * Ask the configured LLM whether one tool call should proceed.
@@ -44,55 +154,25 @@ export async function classifyWithLLM(
   req: ClassifyRequest,
   nowFetch: typeof fetch = fetch,
 ): Promise<ClassifyVerdict> {
-  const endpoint = cfg.endpoint
-  const model = cfg.model
-  if (!endpoint || !model) return 'ask'
-  const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS
-
   const system =
     'You are a permission classifier for a coding agent. Judge one tool call and reply with ONLY JSON ' +
     '{"verdict":"allow"|"deny"|"ask","reason":"short"}. allow only for clearly safe, in-scope operations; ' +
     'deny for destructive, credential, or exfiltration-adjacent operations; ask on any doubt. Never reveal secrets.'
 
-  const url = `${endpoint.replace(/\/$/, '')}/chat/completions`
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`
+  const user = JSON.stringify({
+    tool: req.tool,
+    args: req.args ?? {},
+    reason: req.reason,
+    instruction: 'Reply strictly as JSON: {"verdict":"allow"|"deny"|"ask","reason":"..."}',
+  })
 
+  const content = await withLlmRetry(() => chatCompletion(cfg, system, user, nowFetch).then((r) => (r.ok ? r.content : undefined)))
+  if (content === undefined) return 'ask'
   try {
-    const res = await nowFetch(url, {
-      method: 'POST',
-      headers,
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: system },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              tool: req.tool,
-              args: req.args ?? {},
-              reason: req.reason,
-              instruction: 'Reply strictly as JSON: {"verdict":"allow"|"deny"|"ask","reason":"..."}',
-            }),
-          },
-        ],
-      }),
-    })
-    if (!res.ok) return 'ask'
-    const body = await res.json() as { choices?: { message?: { content?: string } }[] }
-    const content = body.choices?.[0]?.message?.content
-    if (typeof content !== 'string') return 'ask'
-    const parsed = JSON.parse(content) as { verdict?: unknown; reason?: unknown }
+    const parsed = JSON.parse(content) as { verdict?: unknown }
     if (parsed.verdict === 'allow' || parsed.verdict === 'deny') return parsed.verdict
     return 'ask'
   } catch {
-    return 'ask' // network failure / abort / malformed JSON — fail closed
-  } finally {
-    clearTimeout(timer)
+    return 'ask' // malformed JSON — fail closed
   }
 }

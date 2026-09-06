@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- Risk-graded `llmAssist`: the configured custom LLM (any OpenAI-compatible endpoint) grades each
+  `ask` as `safe` / `risky:<category>`; hard categories (deletion / credential / remote / system /
+  bulk) always ask, timeouts retry once, and every failure stays fail-closed.
+- Verdict learning (`riskLearning`, off by default; `riskThreshold` 1–10, default 3): neutral-risk
+  asks confirmed by a human and actually executed count toward auto-allowing the exact same
+  operation (fingerprint-matched) — persisted to `$DSH_HOME/perm-gate/learning.json`, never into
+  the user's YAML rules.
+- Decision event feed: every decision appends to `$DSH_HOME/perm-gate/events.jsonl` and is served
+  at `GET /api/dsh-perm-gate/events?sessionId=&since=`; the browser half shows the latest decision
+  as a notice strip above the conversation input.
+- Permission-picker icon now also decorates the collapsed picker trigger.
+
+### Changed
+
+- `llmAssist` now uses the risk-category protocol (superset of the previous allow/deny/ask verdicts);
+  `classifier.ts` shares one OpenAI-compatible transport (`chatCompletion`) with the risk grader.
+
+
+### Added
 - **Permissive tier** — an independent approval mode parallel to read-only / workspace-write /
   full-access / whitelist. A single front switch (`permissive`) plus combinable backend
   strategies (`trustAutoAllow` / `alwaysConfirm` / `llmAssist`); P0 hard-deny stays monotonic.

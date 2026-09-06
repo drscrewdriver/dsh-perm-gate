@@ -15,7 +15,7 @@ export const zh = {
   'card.strategies': '后台审批策略（至少一个生效；可组合）',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — 作用域内安全操作自动放行，危险/未知转 ask（中间档基线）',
   'card.strategy.alwaysConfirm': 'alwaysConfirm — 一律逐次 ask；审批面板「允许控件」含两个扩展按钮：「本会话重复允许该类」（会话语限次 grant）与「允许所有类型」（命令词持久迁入 rulesFile 白名单）',
-  'card.strategy.llmAssist': 'llmAssist — 先由 LLM 分类裁决；ask/无分类器时回退人工',
+  'card.strategy.llmAssist': 'llmAssist — 自定义 LLM 按风险分级裁决：safe 自动放行；deletion/credential/remote/system/bulk 硬风险永远转人工；neutral 进入确认学习；失败/超时回退人工',
   'card.readonly': '只读',
   'card.unavailable': '设置命名空间不可用：请确认 dsh-perm-gate 已装配进 profile。',
   'card.llmReceiver': 'llmAssist 接收 LLM（OpenAI 兼容，可用自定义 API）',
@@ -29,6 +29,10 @@ export const zh = {
   'card.allowlist': '白名单（allow，rulesFile 同步）',
   'card.allowlistHint': '一行一个命令模式，换行即一个元素；保存后写入 rulesFile 的 allow 段并重载（Ctrl/Cmd+Enter 保存）。',
   'card.allowlistSave': '保存白名单',
+  'card.riskLearning': 'riskLearning — 裁决学习：neutral 风险操作经人工确认并执行后计数，满阈值且操作指纹一致时自动放行',
+  'card.riskLearningHint': '学习状态为插件自有数据（$DSH_HOME/perm-gate/learning.json），不写入你的 YAML 规则文件；不同目标永不复用放行。默认关闭。',
+  'card.riskThreshold': '自动放行所需人工确认次数（1–10）',
+  'notice.label': '权限门禁动态',
 } satisfies Record<string, string>
 
 /** English dictionary (keys mirror zh). */
@@ -40,7 +44,7 @@ export const en: Record<keyof typeof zh, string> = {
   'card.strategies': 'Backend approval strategies (at least one effective; combinable)',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — safe in-scope ops auto-allow; dangerous/unknown ask (baseline middle tier)',
   'card.strategy.alwaysConfirm': 'alwaysConfirm — every crossing asks; the approval "allow controls" get two extended buttons: "repeat-allow this type this session" (bounded session grant) and "allow every occurrence" (persist the command word into the rulesFile whitelist)',
-  'card.strategy.llmAssist': 'llmAssist — LLM classifies first; human fallback on ask/no classifier',
+  'card.strategy.llmAssist': 'llmAssist — a custom LLM grades risk: safe auto-allows; deletion/credential/remote/system/bulk hard risks always ask; neutral enters confirm-learning; failure/timeout falls back to the human',
   'card.readonly': 'Read-only',
   'card.unavailable': 'Settings namespace unavailable: make sure dsh-perm-gate is assembled into this profile.',
   'card.llmReceiver': 'llmAssist receiving LLM (OpenAI-compatible; any custom API)',
@@ -54,6 +58,10 @@ export const en: Record<keyof typeof zh, string> = {
   'card.allowlist': 'Whitelist (allow, synced to rulesFile)',
   'card.allowlistHint': 'One command pattern per line (a newline is one element). Saving writes the rulesFile allow section and reloads (Ctrl/Cmd+Enter to save).',
   'card.allowlistSave': 'Save whitelist',
+  'card.riskLearning': 'riskLearning — verdict learning: neutral-risk asks that the human approves and that execute count up; the same operation auto-allows at threshold with a matching fingerprint',
+  'card.riskLearningHint': 'Learning state is plugin-owned ($DSH_HOME/perm-gate/learning.json) and never written into your YAML rules; a different target never reuses authority. Off by default.',
+  'card.riskThreshold': 'Human confirmations required before auto-allow (1–10)',
+  'notice.label': 'Permission gate activity',
 }
 
 /** Japanese dictionary (keys mirror zh). */
@@ -65,7 +73,7 @@ export const ja: Record<keyof typeof zh, string> = {
   'card.strategies': 'バックエンド承認戦略（少なくとも 1 つ有効、組み合わせ可）',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — スコープ内の安全操作は自動許可、危険/不明は ask（中間ティアのベースライン）',
   'card.strategy.alwaysConfirm': 'alwaysConfirm — すべて ask。承認パネルの「許可コントロール」に2つの拡張ボタン：「このセッションで当該種別を繰り返し許可」（セッション限次 grant）と「すべての発生を許可」（コマンド語を rulesFile の許可リストへ永続化）',
-  'card.strategy.llmAssist': 'llmAssist — まず LLM が分類、ask/分類器なしは人手にフォールバック',
+  'card.strategy.llmAssist': 'llmAssist — カスタム LLM がリスクを判定：safe は自動許可、deletion/credential/remote/system/bulk のハードリスクは常に人手、neutral は確認学習へ、失敗/タイムアウトは人手にフォールバック',
   'card.readonly': '読み取り専用',
   'card.unavailable': '設定名前空間が利用できません：dsh-perm-gate がこの profile に組み込まれているか確認してください。',
   'card.llmReceiver': 'llmAssist 受信 LLM（OpenAI 互換、カスタム API 可）',
@@ -79,6 +87,10 @@ export const ja: Record<keyof typeof zh, string> = {
   'card.allowlist': '許可リスト（allow、rulesFile と同期）',
   'card.allowlistHint': '1 行に 1 コマンドパターン（改行 = 1 要素）。保存で rulesFile の allow に書き込み再読込（Ctrl/Cmd+Enter で保存）。',
   'card.allowlistSave': '許可リストを保存',
+  'card.riskLearning': 'riskLearning — 裁決学習：neutral リスク操作が人手で承認され実行されるとカウントし、しきい値到達後は同一操作（指紋一致）のみ自動許可',
+  'card.riskLearningHint': '学習状態はプラグイン所有（$DSH_HOME/perm-gate/learning.json）で、YAML ルールには書き込みません。別の対象は決して権限を再利用しません。既定はオフ。',
+  'card.riskThreshold': '自動許可に必要な人手確認回数（1–10）',
+  'notice.label': '権限ゲートの活動',
 }
 
 /** Korean dictionary (keys mirror zh). */
@@ -90,7 +102,7 @@ export const ko: Record<keyof typeof zh, string> = {
   'card.strategies': '백엔드 승인 전략(하나 이상 유효, 조합 가능)',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — 범위 내 안전 작업은 자동 허용, 위험/미확인은 ask(중간 티어 기준)',
   'card.strategy.alwaysConfirm': 'alwaysConfirm — 모든 경계를 ask. 승인 패널의「허용 컨트롤」에 두 개의 확장 버튼:「이 세션에서 해당 유형 반복 허용」(세션 제한 grant) 과「모든 발생 허용」(명령어를 rulesFile 허용 목록에 영구 추가)',
-  'card.strategy.llmAssist': 'llmAssist — 먼저 LLM이 분류, ask/분류기 없음은 사람에게 폴백',
+  'card.strategy.llmAssist': 'llmAssist — 사용자 지정 LLM이 위험을 판정: safe는 자동 허용, deletion/credential/remote/system/bulk 하드 위험은 항상 사람에게, neutral은 확인 학습으로, 실패/시간 초과는 사람에게 폴백',
   'card.readonly': '읽기 전용',
   'card.unavailable': '설정 네임스페이스를 사용할 수 없습니다: dsh-perm-gate가 이 profile에 조립되었는지 확인하세요.',
   'card.llmReceiver': 'llmAssist 수신 LLM (OpenAI 호환, 사용자 지정 API 가능)',
@@ -104,4 +116,8 @@ export const ko: Record<keyof typeof zh, string> = {
   'card.allowlist': '허용 목록(allow, rulesFile과 동기화)',
   'card.allowlistHint': '한 줄에 명령 패턴 하나(줄바꿈 = 요소 하나). 저장하면 rulesFile의 allow에 기록 후 재로드(Ctrl/Cmd+Enter로 저장).',
   'card.allowlistSave': '허용 목록 저장',
+  'card.riskLearning': 'riskLearning — 판정 학습: neutral 위험 요청이 사람의 승인과 실행까지 완료되면 카운트되며, 임계값 도달 후 동일 작업(지문 일치)만 자동 허용',
+  'card.riskLearningHint': '학습 상태는 플러그인 소유($DSH_HOME/perm-gate/learning.json)이며 YAML 규칙에는 기록하지 않습니다. 다른 대상은 권한을 재사용하지 않습니다. 기본값은 꺼짐.',
+  'card.riskThreshold': '자동 허용 전 필요한 사람 확인 횟수(1–10)',
+  'notice.label': '권한 게이트 활동',
 }

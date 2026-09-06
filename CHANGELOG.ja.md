@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### 追加
+
+- リスク判定 `llmAssist`：設定されたカスタム LLM（OpenAI 互換エンドポイント）が各 `ask` を
+  `safe` / `risky:<カテゴリ>` で判定。ハードカテゴリ（deletion / credential / remote / system /
+  bulk）は常に人手へ、タイムアウトは 1 回リトライ、失敗は常に fail-closed。
+- 裁決学習（`riskLearning`、既定オフ、`riskThreshold` 1–10、既定 3）：人手で承認され実際に実行された
+  neutral リスクをカウントし、指紋一致する同一操作のみ自動許可。`$DSH_HOME/perm-gate/learning.json`
+  に永続化され、ユーザーの YAML ルールには書き込みません。
+- 決定イベントフィード：各決定を `$DSH_HOME/perm-gate/events.jsonl` に追記し、
+  `GET /api/dsh-perm-gate/events?sessionId=&since=` で提供。ブラウザ側は入力欄上の通知バーで表示。
+- 権限ピッカーの盾アイコンが折りたたみトリガーにも表示されます。
+
+### 変更
+
+- `llmAssist` はリスクカテゴリプロトコルを使用（従来の allow/deny/ask 判定のスーパーセット）。
+  `classifier.ts` はリスク判定器と OpenAI 互換トランスポート（`chatCompletion`）を共有します。
+
+
 ### Added
 - **Permissive モード（独立審批枠）** — read-only / workspace-write / full-access / whitelist と並ぶ独立モード。
   単一のフロントスイッチ（`permissive`）+ 組み合わせ可能なバックエンド戦略（`trustAutoAllow` / `alwaysConfirm` / `llmAssist`）。

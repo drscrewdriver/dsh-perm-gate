@@ -162,6 +162,18 @@ Full access の間に `permissive` preset（`sandbox: workspace-write`、`approv
 適用されます。これは独立した承認クラスであり、DSH の「auto-approval」モードでは
 **ありません**。
 
+### リスク判定 llmAssist、裁決学習、イベントフィード
+
+`llmAssist` 有効時、設定された LLM（OpenAI 互換エンドポイントなら任意——`classifierEndpoint` / `classifierModel` / `classifierApiKey` を自分の API に向けてください）が構造化プロトコルで `ask` を 1 件ずつ判定します：
+
+- `safe` → 自動許可（監査ソースは `classifier`）。
+- `risky` + **ハードリスクカテゴリ**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 常に人手へ。ハードリスクは自動許可も学習もされません。
+- `risky:neutral` → `riskLearning` 有効時（設定カード内、既定オフ）、人手で承認され実際に実行された neutral リスクは `tool|カテゴリ` ごとにカウントされ、`riskThreshold`（既定 3）到達かつ新呼び出しの操作指紋（コマンド語＋対象の基底名）が確認済みサンプルに一致した場合、**同一操作のみ**自動許可されます。
+- タイムアウト（`riskTimeoutMs`、既定 20 秒、1 回リトライ）、通信失敗、プロトコル外出力は元の `ask` を維持します。
+
+学習状態はプラグイン所有の JSON（`$DSH_HOME/perm-gate/learning.json` または `learningFile`）に永続化され、YAML ルールには書き込みません。各決定は `$DSH_HOME/perm-gate/events.jsonl`（または `eventsFile`）に追記され、`GET /api/dsh-perm-gate/events?sessionId=&since=` で提供されます。ブラウザ側はこれをポーリングし、入力欄の上に最新の決定を通知バーで表示します。Permissive ティアは権限ピッカーに盾アイコンを保持します（メニュー項目と折りたたみトリガーの両方）。
+
+
 ## CLI（スタンドアロン dry-run）
 
 Harness なしで 1 件の呼び出しをルール ファイルに対して評価できます：

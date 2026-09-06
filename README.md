@@ -57,6 +57,13 @@ cross-plugin version coupling.
   and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end exposes a
   **single switch** (`permissive`); the three backend strategies are **combinable** and driven
   by plugin settings — still fail-closed against P0.
+- **Risk-graded `llmAssist`** — a custom OpenAI-compatible LLM grades each `ask` as
+  `safe` / `risky:<category>`; hard categories (deletion, credential, remote, system, bulk)
+  **always ask**, neutral enters verdict learning, and every failure stays fail-closed.
+- **Verdict learning** — neutral-risk asks that the human approves and that actually execute
+  count up; after the threshold, the *exact same operation* (fingerprint-matched) auto-allows.
+- **Decision event feed** — every decision is appended to a JSONL feed and surfaced by the
+  browser half as a notice strip above the conversation input.
 
 ## Install
 
@@ -139,6 +146,31 @@ the approval panel for every crossing; its "allow controls" add two extended but
 `classifierModel`, any OpenAI-compatible API) to auto-decide an `ask`, and falls back to the
 human seam on `ask`/error — always fail-closed. When `permissive` is off, the gate behaves
 exactly as before.
+
+### Risk-graded llmAssist, verdict learning, and the event feed
+
+When `llmAssist` is on, the configured LLM (any OpenAI-compatible endpoint — point
+`classifierEndpoint` / `classifierModel` / `classifierApiKey` at your own API) grades one
+`ask` at a time with a structured protocol:
+
+- `safe` → the ask is auto-allowed (audited as the `classifier` source).
+- `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) →
+  the ask **always** reaches the human; hard risks are never auto-allowed and never learned.
+- `risky:neutral` → with `riskLearning` enabled (Settings card, off by default), each human
+  approval that actually executes (settled via the host's `tools/result` event) counts toward
+  a `tool|category` key; once the count reaches `riskThreshold` (default 3) **and** the new
+  call's operation fingerprint (command word + target basename) matches a confirmed sample,
+  the exact same operation auto-allows. A different target never reuses that authority.
+- Timeouts (`riskTimeoutMs`, default 20 s, one retry), transport failures, and off-protocol
+  model output leave the ask untouched — the gate never guesses.
+
+Learning state persists to a plugin-owned JSON (`$DSH_HOME/perm-gate/learning.json`, or
+`learningFile`), never into your YAML rules file. Every decision is appended to
+`$DSH_HOME/perm-gate/events.jsonl` (or `eventsFile`) and served at
+`GET /api/dsh-perm-gate/events?sessionId=&since=`; the browser half polls it and shows the
+latest decision as a notice strip above the conversation input (asks stay visible until the
+next event). The Permissive tier keeps its shield icon in the permission picker — on both the
+menu item and the collapsed picker trigger.
 
 ### A selectable session tier
 

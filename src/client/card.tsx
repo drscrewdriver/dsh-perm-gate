@@ -26,6 +26,12 @@ export interface PermissiveCardValue {
   classifierModel?: string
   /** Secret bearer token / API key for the classifier endpoint (masked in the UI). */
   classifierApiKey?: string
+  /** Timeout for one llmAssist risk call (ms). */
+  riskTimeoutMs?: number
+  /** Verdict learning: neutral-risk human confirmations may auto-allow the exact same operation later. */
+  riskLearning?: boolean
+  /** Confirmations required before a learned auto-allow (1–10). */
+  riskThreshold?: number
   /** Editable whitelist (allow-list command patterns), one per entry. */
   allowlist?: string[]
 }
@@ -289,6 +295,37 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                             </div>
                             {hasApiKey && <span style={hintStyle}>{t('card.llmKeyOverwrite')}</span>}
                           </label>
+                          <div style={rowStyle}>
+                            <label htmlFor="plugin-config-perm-gate-risk-learning" style={{ fontSize: '12px' }}>{t('card.riskLearning')}</label>
+                            <input
+                              id="plugin-config-perm-gate-risk-learning"
+                              type="checkbox"
+                              checked={value.riskLearning ?? false}
+                              disabled={readonly || !effective}
+                              onChange={(event) => { void scope.set('riskLearning', event.currentTarget.checked) }}
+                            />
+                          </div>
+                          <p style={hintStyle}>{t('card.riskLearningHint')}</p>
+                          {value.riskLearning === true
+                            ? (
+                              <label style={fieldStyle}>
+                                <span style={fieldLabelStyle}>{t('card.riskThreshold')}</span>
+                                <input
+                                  id="plugin-config-perm-gate-risk-threshold"
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  value={value.riskThreshold ?? 3}
+                                  disabled={readonly || !effective}
+                                  style={{ ...controlStyle, width: '96px' }}
+                                  onChange={(event) => {
+                                    const n = Number.parseInt(event.currentTarget.value, 10)
+                                    if (Number.isFinite(n) && n >= 1 && n <= 10) void scope.set('riskThreshold', n)
+                                  }}
+                                />
+                              </label>
+                            )
+                            : null}
                         </section>
                       )
                       : null}

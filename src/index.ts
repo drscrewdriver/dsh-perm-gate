@@ -6,11 +6,13 @@
  * and a stray default would discard the metadata).
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { join } from 'node:path'
 import { Config, resolvePermissiveStrategies } from './config.js'
-import { PermGateRuntime, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike } from './runtime.js'
+import { registerEventsRoute, type WebServerLike } from './events.js'
+import { PermGateRuntime, type PermissiveState, type ToolExecutionLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
-/** The `tools` service drives `tools/pre-execute`; it is supplied by dsh-tools. */
+/** The `tools` service drives `tools/pre-execute`/`tools/result`; it is supplied by dsh-tools. */
 export const inject = ['tools']
 
 export { Config }
@@ -76,6 +78,11 @@ interface PermissiveSurface {
   classifierEndpoint?: string
   classifierModel?: string
   classifierApiKey?: string
+  /** Timeout for one llmAssist risk call. */
+  riskTimeoutMs?: number
+  /** Verdict learning switch + confirmation threshold (neutral-risk ask auto-allow). */
+  riskLearning?: boolean
+  riskThreshold?: number
   /** Editable whitelist, mirrored to the rules file's `allow`. */
   allowlist?: string[]
 }
@@ -92,6 +99,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // namespace layers on top and `current()` always reads the active section.
   let current: () => PermissiveSurface & Record<string, unknown> = () => config as never
 
+  // Plugin-owned data files live under $DSH_HOME (node_modules may be read-only);
+  // a missing dshHome degrades both stores to in-memory.
+  const dataDir = typeof config.dshHome === 'string' && config.dshHome !== '' ? join(config.dshHome, 'perm-gate') : undefined
+
   const runtime = new PermGateRuntime({
     ...config,
     // Read the Permissive tier live so the UI card's switches take effect on
@@ -103,16 +114,31 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         strategies: resolvePermissiveStrategies(c.permissiveStrategies),
       }
     },
-    // Read the llmAssist receiver (endpoint/model/secret) live from the same
-    // namespace, so editing the settings card applies to the next tool call.
-    readClassifyConfig: (): { endpoint?: string; model?: string; apiKey?: string } => {
+    // Read the llmAssist receiver (endpoint/model/secret/timeout) live from the
+    // same namespace, so editing the settings card applies to the next tool call.
+    readClassifyConfig: () => {
       const c = current()
       return {
         endpoint: c.classifierEndpoint,
         model: c.classifierModel,
         apiKey: c.classifierApiKey,
+        timeoutMs: c.riskTimeoutMs ?? 20_000,
       }
     },
+    // Read the verdict-learning switch and threshold live.
+    readRiskLearning: () => {
+      const c = current()
+      return {
+        enabled: c.riskLearning ?? false,
+        threshold: c.riskThreshold ?? 3,
+      }
+    },
+    learningFile: typeof config.learningFile === 'string' && config.learningFile !== ''
+      ? config.learningFile
+      : (dataDir !== undefined ? join(dataDir, 'learning.json') : undefined),
+    eventsFile: typeof config.eventsFile === 'string' && config.eventsFile !== ''
+      ? config.eventsFile
+      : (dataDir !== undefined ? join(dataDir, 'events.jsonl') : undefined),
   } as never)
 
   installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
@@ -138,24 +164,38 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     },
   })
 
-  const listener: (exec: ToolExecutionLike, next: () => unknown) => unknown = async (exec, next) => {
+  // Event feed HTTP API (best effort): the dsh webServer service exposes the
+  // JSONL decision events to the browser half; without it events stay on disk.
+  try {
+    const webServer = (ctx as unknown as { get(name: string): unknown }).get('webServer') as WebServerLike | undefined
+    if (webServer !== undefined && runtime.eventLog !== undefined) {
+      registerEventsRoute(webServer, runtime.eventLog)
+    }
+  } catch {
+    // webServer unavailable: the feed remains disk-only
+  }
+
+  const listener: (exec: ToolExecutionLike, next: () => unknown) => Promise<unknown> = async (exec, next) => {
     const decision = runtime.decideExecution(exec)
     if (decision === undefined) return next()
-    // llmAssist: refine an `ask` with the configured LLM before falling to the
-    // human seam. allow -> proceed; deny -> veto; ask/missing config -> human.
-    if (decision.kind === 'ask' && runtime.permissiveStrategies.llmAssist) {
-      const verdict = await runtime.classifyAsync({ tool: exec.name, args: exec.arguments ?? {}, reason: decision.reason })
-      if (verdict === 'allow') return next()
-      if (verdict === 'deny') return { kind: 'deny', reason: `[llm-assist] ${decision.reason}` } as PreToolDecisionLike
+    // llmAssist: refine an `ask` with the risk grader before the human seam.
+    // undefined = auto-allowed (risk-safe / learned) → proceed.
+    if (decision.kind === 'ask') {
+      const refined = await runtime.refineAsk(exec, decision)
+      if (refined === undefined) return next()
+      return refined
     }
-    return decision as PreToolDecisionLike
+    return decision
   }
-  // `tools/pre-execute` is a dsh-tools event, not part of cordis core's typed
-  // `Events`, so it is registered through the string overload.
+  // `tools/pre-execute` / `tools/result` are dsh-tools events, not part of
+  // cordis core's typed `Events`, so they are registered through the string overload.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const host = ctx as unknown as { on(name: string, listener: (...args: any[]) => any): unknown }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   host.on('tools/pre-execute', listener as (...args: any[]) => any)
+  // Settle verdict-learning candidates: a result for a registered ask means the
+  // human approved it and it executed — one confirmation recorded.
+  host.on('tools/result', ((exec: ToolExecutionLike) => { runtime.settleExecution(exec) }) as never)
 
   return runtime
 }

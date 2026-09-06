@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.js'
 import { PermGateRuntime } from '../src/runtime.js'
+import type { RiskVerdict } from '../src/risk.js'
 import { resolve } from 'node:path'
 
 const RULES = resolve(__dirname, 'fixtures', 'permissions.yaml')
@@ -10,7 +11,9 @@ function rt(extra: {
   alwaysConfirm?: boolean
   llmAssist?: boolean
   trustAutoAllow?: boolean
-  classify?: (exec: { name: string; arguments: Record<string, unknown> }) => 'allow' | 'deny' | 'ask'
+  risk?: RiskVerdict
+  riskLearning?: boolean
+  riskThreshold?: number
 } = {}): PermGateRuntime {
   return new PermGateRuntime({
     rulesFile: RULES,
@@ -22,7 +25,8 @@ function rt(extra: {
       alwaysConfirm: extra.alwaysConfirm,
       llmAssist: extra.llmAssist,
     },
-    classify: extra.classify,
+    riskHook: extra.risk === undefined ? undefined : async () => extra.risk as RiskVerdict,
+    readRiskLearning: () => ({ enabled: extra.riskLearning ?? false, threshold: extra.riskThreshold ?? 3 }),
   })
 }
 
@@ -68,29 +72,45 @@ describe('Permissive independent tier', () => {
     expect(granted.auditEntries[0].source).toBe('grant')
   })
 
-  it('llmAssist can allow an ask via classifier, recorded as classifier source', () => {
-    const r = rt({ permissive: true, llmAssist: true, classify: () => 'allow' })
-    expect(r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' })).toBeUndefined()
-    expect(r.auditEntries[0].outcome).toBe('allow')
-    expect(r.auditEntries[0].source).toBe('classifier')
+  it('llmAssist risk-safe allows an ask, recorded as classifier source', async () => {
+    const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'safe' } })
+    const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' })
+    expect(ask?.kind).toBe('ask')
+    expect(await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask as never)).toBeUndefined()
+    expect(r.auditEntries.at(-1)?.outcome).toBe('allow')
+    expect(r.auditEntries.at(-1)?.source).toBe('classifier')
   })
 
-  it('llmAssist can deny an ask via classifier', () => {
-    const r = rt({ permissive: true, llmAssist: true, classify: () => 'deny' })
-    expect(r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' })?.kind).toBe('deny')
+  it('llmAssist risky hard category always keeps the human ask', async () => {
+    const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'risky', category: 'deletion' } })
+    const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
+    const refined = await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask)
+    expect(refined?.kind).toBe('ask')
+    expect(refined?.reason).toMatch(/risky:deletion/)
+    expect(r.pendingCount()).toBe(0)
   })
 
-  it('llmAssist without a classifier falls back to the human seam (fail-closed)', () => {
+  it('llmAssist without classifier config falls back to the human seam (fail-closed)', async () => {
     const r = rt({ permissive: true, llmAssist: true })
-    expect(r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' })?.kind).toBe('ask')
-    expect(r.auditEntries[0].source).toBe('default')
+    const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
+    expect((await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask))?.kind).toBe('ask')
+    expect(r.auditEntries.at(-1)?.source).toBe('default')
   })
 
-  it('strategies compose: alwaysConfirm + llmAssist resolve an escalated ask', () => {
-    const r = rt({ permissive: true, alwaysConfirm: true, llmAssist: true, classify: () => 'allow' })
-    // pnpm install is a rule-allow → escalated to ask by alwaysConfirm → allowed by classifier.
-    expect(r.decideExecution({ name: 'bash', arguments: { command: 'pnpm install' }, cwd: '/work' })).toBeUndefined()
-    expect(r.auditEntries[0].source).toBe('classifier')
+  it('llmAssist unresolved verdict keeps the ask and learns nothing', async () => {
+    const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'unresolved' }, riskLearning: true, riskThreshold: 1 })
+    const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
+    expect((await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask))?.kind).toBe('ask')
+    expect(r.pendingCount()).toBe(0)
+  })
+
+  it('strategies compose: alwaysConfirm + llmAssist resolve an escalated ask', async () => {
+    const r = rt({ permissive: true, alwaysConfirm: true, llmAssist: true, risk: { kind: 'safe' } })
+    // pnpm install is a rule-allow → escalated to ask by alwaysConfirm → allowed by the risk grader.
+    const ask = r.decideExecution({ name: 'bash', arguments: { command: 'pnpm install' }, cwd: '/work' })
+    expect(ask?.kind).toBe('ask')
+    expect(await r.refineAsk({ name: 'bash', arguments: { command: 'pnpm install' }, cwd: '/work' }, ask as never)).toBeUndefined()
+    expect(r.auditEntries.at(-1)?.source).toBe('classifier')
   })
 })
 
@@ -103,5 +123,10 @@ describe('resolveConfig permissive', () => {
       alwaysConfirm: true,
       llmAssist: false,
     })
+  })
+
+  it('fills the risk-learning defaults', () => {
+    expect(resolveConfig({})).toMatchObject({ riskLearning: false, riskThreshold: 3, riskTimeoutMs: 20_000 })
+    expect(resolveConfig({ riskLearning: true, riskThreshold: 5 })).toMatchObject({ riskLearning: true, riskThreshold: 5 })
   })
 })

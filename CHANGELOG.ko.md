@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### 추가
+
+- 위험 등급 `llmAssist`: 설정된 사용자 지정 LLM(OpenAI 호환 엔드포인트)이 각 `ask`를
+  `safe` / `risky:<카테고리>`로 판정합니다. 하드 카테고리(deletion / credential / remote / system /
+  bulk)는 항상 사람에게 전달되고, 시간 초과는 1회 재시도하며, 모든 실패는 fail-closed를 유지합니다.
+- 판정 학습(`riskLearning`, 기본 꺼짐, `riskThreshold` 1–10, 기본 3): 사람이 승인하고 실제 실행된
+  neutral 위험은 카운트되어 지문이 일치하는 동일 작업만 자동 허용 — `$DSH_HOME/perm-gate/learning.json`에
+  영속화되며 사용자 YAML 규칙에는 기록되지 않습니다.
+- 결정 이벤트 피드: 모든 결정이 `$DSH_HOME/perm-gate/events.jsonl`에 추가되고
+  `GET /api/dsh-perm-gate/events?sessionId=&since=`로 제공되며, 브라우저 절반이 입력창 위 알림 바로 표시합니다.
+- 권한 선택기 방패 아이콘이 축소된 트리거에도 표시됩니다.
+
+### 변경
+
+- `llmAssist`는 위험 카테고리 프로토콜을 사용합니다(기존 allow/deny/ask 판정의 상위 집합).
+  `classifier.ts`는 위험 판정기와 OpenAI 호환 전송 계층(`chatCompletion`)을 공유합니다.
+
+
 ### Added
 - **Permissive 모드(독립 승인 티어)** — read-only / workspace-write / full-access / whitelist와 나란한 독립 모드.
   단일 프론트 스위치(`permissive`) + 조합 가능한 백엔드 전략(`trustAutoAllow` / `alwaysConfirm` / `llmAssist`).
