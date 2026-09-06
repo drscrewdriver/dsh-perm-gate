@@ -117,11 +117,11 @@ export const EVENTS_ROUTE = '/api/dsh-perm-gate/events'
  * service. Returns whether the route was registered (false when the service is
  * unavailable — the host keeps running, only the HTTP API is missing).
  */
-export function registerEventsRoute(server: unknown, log: EventLog): boolean {
-  if (typeof server !== 'object' || server === null) return false
+export function registerEventsRoute(server: unknown, log: EventLog): (() => void) | undefined {
+  if (typeof server !== 'object' || server === null) return undefined
   const candidate = server as { register?: WebServerLike['register'] }
-  if (typeof candidate.register !== 'function') return false
-  candidate.register({
+  if (typeof candidate.register !== 'function') return undefined
+  const off = candidate.register({
     kind: 'exact',
     path: EVENTS_ROUTE,
     handler: (rawReq, rawRes) => {
@@ -147,7 +147,7 @@ export function registerEventsRoute(server: unknown, log: EventLog): boolean {
       res.end(JSON.stringify({ events }))
     },
   })
-  return true
+  return off
 }
 
 export const LEARNING_ROUTE = '/api/dsh-perm-gate/learning'
@@ -161,11 +161,11 @@ export const RECEIVER_ROUTE = '/api/dsh-perm-gate/receiver'
  * settings card: the effective provider/model plus (host mode) the live
  * provider/model-group catalog from the DSH `llm` service.
  */
-export function registerReceiverRoute(server: unknown, provider: { info(): Promise<unknown> }): boolean {
-  if (typeof server !== 'object' || server === null) return false
+export function registerReceiverRoute(server: unknown, provider: { info(): Promise<unknown> }): (() => void) | undefined {
+  if (typeof server !== 'object' || server === null) return undefined
   const candidate = server as { register?: WebServerLike['register'] }
-  if (typeof candidate.register !== 'function') return false
-  candidate.register({
+  if (typeof candidate.register !== 'function') return undefined
+  const off = candidate.register({
     kind: 'exact',
     path: RECEIVER_ROUTE,
     handler: (rawReq, rawRes) => {
@@ -185,7 +185,7 @@ export function registerReceiverRoute(server: unknown, provider: { info(): Promi
       )
     },
   })
-  return true
+  return off
 }
 
 /**
@@ -193,11 +193,11 @@ export function registerReceiverRoute(server: unknown, provider: { info(): Promi
  * through the currently configured llmAssist receiver and returns
  * `{ ok, ms, detail }` (the settings card's health test).
  */
-export function registerHealthRoute(server: unknown, provider: { check(): Promise<{ ok: boolean; ms: number; detail: string }> }): boolean {
-  if (typeof server !== 'object' || server === null) return false
+export function registerHealthRoute(server: unknown, provider: { check(): Promise<{ ok: boolean; ms: number; detail: string }> }): (() => void) | undefined {
+  if (typeof server !== 'object' || server === null) return undefined
   const candidate = server as { register?: WebServerLike['register'] }
-  if (typeof candidate.register !== 'function') return false
-  candidate.register({
+  if (typeof candidate.register !== 'function') return undefined
+  const off = candidate.register({
     kind: 'exact',
     path: HEALTH_ROUTE,
     handler: (rawReq, rawRes) => {
@@ -217,7 +217,7 @@ export function registerHealthRoute(server: unknown, provider: { check(): Promis
       )
     },
   })
-  return true
+  return off
 }
 
 /** The learning-store face the settings UI's sediment view needs. */
@@ -233,11 +233,11 @@ export interface LearningRouteProvider {
  * `POST /api/dsh-perm-gate/learning` → `{ key, fp? }` terminates one key's
  * learning or drops one sedimented sample. Returns whether registered.
  */
-export function registerLearningRoute(server: unknown, provider: LearningRouteProvider): boolean {
-  if (typeof server !== 'object' || server === null) return false
+export function registerLearningRoute(server: unknown, provider: LearningRouteProvider): (() => void) | undefined {
+  if (typeof server !== 'object' || server === null) return undefined
   const candidate = server as { register?: WebServerLike['register'] }
-  if (typeof candidate.register !== 'function') return false
-  candidate.register({
+  if (typeof candidate.register !== 'function') return undefined
+  const off = candidate.register({
     kind: 'exact',
     path: LEARNING_ROUTE,
     handler: (rawReq, rawRes) => {
@@ -272,5 +272,5 @@ export function registerLearningRoute(server: unknown, provider: LearningRoutePr
       })
     },
   })
-  return true
+  return off
 }

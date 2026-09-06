@@ -87,7 +87,7 @@ describe('registerEventsRoute', () => {
     log.append({ tool: 'bash', kind: 'ask', reason: 'a', sessionId: 's1' })
     log.append({ tool: 'bash', kind: 'auto', reason: 'b', sessionId: 's2' })
     const server = makeServer()
-    expect(registerEventsRoute(server, log)).toBe(true)
+    expect(typeof registerEventsRoute(server, log)).toBe('function')
     const all = server.call('GET', '/api/dsh-perm-gate/events')
     expect(all.code).toBe(200)
     expect((all.body as { events: unknown[] }).events.length).toBe(2)
@@ -102,8 +102,8 @@ describe('registerEventsRoute', () => {
   })
 
   it('returns false when the webServer service is unavailable', () => {
-    expect(registerEventsRoute(undefined, new EventLog(undefined))).toBe(false)
-    expect(registerEventsRoute({}, new EventLog(undefined))).toBe(false)
-    expect(registerEventsRoute({ register: 'not-a-function' }, new EventLog(undefined))).toBe(false)
+    expect(registerEventsRoute(undefined, new EventLog(undefined))).toBeUndefined()
+    expect(registerEventsRoute({}, new EventLog(undefined))).toBeUndefined()
+    expect(registerEventsRoute({ register: 'not-a-function' }, new EventLog(undefined))).toBeUndefined()
   })
 })

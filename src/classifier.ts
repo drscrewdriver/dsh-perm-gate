@@ -61,7 +61,7 @@ async function postChat(
     const res = await nowFetch(url, { method: 'POST', headers, signal, body: JSON.stringify(body) })
     if (!res.ok) return { ok: false, status: res.status }
     const text = await res.text()
-    if (text.trim() === '') return { ok: false }
+    if (text.trim() === '') return { ok: false, status: res.status }
     // Custom models may answer with plain text instead of the JSON envelope;
     // pass the raw text through — the verdict parser's keyword fallback judges it.
     let content = text
@@ -94,7 +94,7 @@ export async function chatCompletion(
   system: string,
   user: string,
   nowFetch: typeof fetch = fetch,
-): Promise<{ ok: true; content: string } | { ok: false }> {
+): Promise<{ ok: true; content: string } | { ok: false; status?: number; error?: string }> {
   const endpoint = cfg.endpoint
   const model = cfg.model
   if (!endpoint || !model) return { ok: false }
@@ -115,9 +115,12 @@ export async function chatCompletion(
       model, temperature: 0, response_format: { type: 'json_object' }, messages,
     }, controller.signal, nowFetch)
     if (first.ok) return first
-    if (first.status === undefined || !SHAPE_REJECT_STATUS.has(first.status)) return { ok: false }
+    if (first.status === undefined || !SHAPE_REJECT_STATUS.has(first.status)) {
+      return controller.signal.aborted ? { ok: false, error: 'timeout' } : first
+    }
     const second = await postChat(url, headers, { model, temperature: 0, messages }, controller.signal, nowFetch)
-    return second.ok ? second : { ok: false }
+    if (second.ok) return second
+    return controller.signal.aborted ? { ok: false, error: 'timeout' } : second
   } finally {
     clearTimeout(timer)
   }

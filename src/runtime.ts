@@ -508,7 +508,18 @@ export class PermGateRuntime {
         return done(false, 'custom endpoint/model not configured')
       }
       const r = await chatCompletion(cfg, 'Reply with exactly: OK', 'ping')
-      return r.ok ? done(true, `${cfg.model} → ${r.content.trim().slice(0, 60) || 'ok'}`) : done(false, 'chat/completions call failed')
+      if (r.ok) return done(true, `${cfg.model} → ${r.content.trim().slice(0, 60) || 'ok'}`)
+      // Name the failing leg of the endpoint/model/key triple when possible.
+      const why = r.error === 'timeout'
+        ? `timeout after ${cfg.timeoutMs ?? 20_000} ms`
+        : r.status === 401 || r.status === 403
+          ? `HTTP ${r.status} — API key rejected`
+          : r.status === 404
+            ? 'HTTP 404 — endpoint path or model id not found'
+            : r.status !== undefined
+              ? `HTTP ${r.status} — request rejected (check model id / endpoint shape)`
+              : 'network error (endpoint unreachable)'
+      return done(false, why)
     } catch (e) {
       return done(false, String((e as Error)?.message ?? e))
     }

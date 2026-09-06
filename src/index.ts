@@ -222,19 +222,22 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   try {
     const webServer = (ctx as unknown as { get(name: string): unknown }).get('webServer') as WebServerLike | undefined
     if (webServer !== undefined && runtime.eventLog !== undefined) {
-      registerEventsRoute(webServer, runtime.eventLog)
+      const offEvents = registerEventsRoute(webServer, runtime.eventLog)
+      if (offEvents !== undefined) ctx.effect(() => () => { offEvents() }, 'dsh-perm-gate: events route')
     }
     if (webServer !== undefined) {
-      registerLearningRoute(webServer, {
+      const offLearning = registerLearningRoute(webServer, {
         snapshot: () => runtime.learningSnapshot(),
         threshold: () => runtime.learningThreshold(),
         reset: (key, fp) => { runtime.learningReset(key, fp) },
       })
-      registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
+      if (offLearning !== undefined) ctx.effect(() => () => { offLearning() }, 'dsh-perm-gate: learning route')
+      const offHealth = registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
+      if (offHealth !== undefined) ctx.effect(() => () => { offHealth() }, 'dsh-perm-gate: health route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null
-      registerReceiverRoute(webServer, {
+      const offReceiver = registerReceiverRoute(webServer, {
         info: async () => {
           const now = Date.now()
           if (receiverCache !== null && now - receiverCache.at < 60_000) return receiverCache.info
@@ -257,6 +260,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           return info
         },
       })
+      if (offReceiver !== undefined) ctx.effect(() => () => { offReceiver() }, 'dsh-perm-gate: receiver route')
     }
   } catch {
     // webServer unavailable: the feed remains disk-only, sediment is view-only in files

@@ -330,7 +330,15 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                     disabled={readonly}
                                     style={controlStyle}
                                     onChange={(event) => {
-                                      const preset = LLM_PRESETS.find((p) => p.id === event.currentTarget.value)
+                                      const v = event.currentTarget.value
+                                      if (v.startsWith('host:')) {
+                                        // A DSH model group: switch to the host receiver
+                                        // and pin the provider (model follows the session).
+                                        void scope.set('classifierSource', 'host')
+                                        void scope.set('classifierProvider', v.slice('host:'.length))
+                                        return
+                                      }
+                                      const preset = LLM_PRESETS.find((p) => p.id === v)
                                       if (preset !== undefined) {
                                         void scope.set('classifierEndpoint', preset.endpoint)
                                         void scope.set('classifierModel', preset.model)
@@ -338,9 +346,22 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                     }}
                                   >
                                     <option value="">{t('card.llmPresetChoose')}</option>
-                                    {LLM_PRESETS.map((preset) => (
-                                      <option key={preset.id} value={preset.id}>{preset.label}</option>
-                                    ))}
+                                    <optgroup label={t('card.llmPresetPublic')}>
+                                      {LLM_PRESETS.map((preset) => (
+                                        <option key={preset.id} value={preset.id}>{preset.label}</option>
+                                      ))}
+                                    </optgroup>
+                                    {(receiverInfo?.providers ?? []).length > 0
+                                      ? (
+                                          <optgroup label={t('card.llmPresetHost')}>
+                                            {(receiverInfo?.providers ?? []).map((p) => (
+                                              <option key={`host:${p.id}`} value={`host:${p.id}`}>
+                                                {`${t('card.llmSourceHost')} · ${p.id}`}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )
+                                        : null}
                                   </select>
                                 </label>
                                 <label style={fieldStyle}>
@@ -457,6 +478,7 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                 })
                                   .then(async (r) => {
                                     const text = await r.text()
+                                    if (r.status === 404) throw new Error(t('card.healthStale'))
                                     try {
                                       return JSON.parse(text) as { ok?: boolean; ms?: number; detail?: string; error?: string }
                                     } catch {
