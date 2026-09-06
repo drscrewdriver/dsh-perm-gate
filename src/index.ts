@@ -14,8 +14,14 @@ import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type PermissiveState, type ToolExecutionLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
-/** The `tools` service drives `tools/pre-execute`/`tools/result`; it is supplied by dsh-tools. */
-export const inject = ['tools']
+/**
+ * The `tools` service drives `tools/pre-execute`/`tools/result` (dsh-tools).
+ * `webServer` hosts the plugin's HTTP routes; `llm` + `agentDefaultModel` back
+ * the `host` llmAssist receiver — all supplied by the dsh runtime through the
+ * loader inject (the same pattern dsh-approval-gate demonstrates; probing via
+ * `ctx.get` does not cross the plugin's isolated context).
+ */
+export const inject = ['tools', 'webServer', 'llm', 'agentDefaultModel']
 
 export { Config }
 
@@ -113,22 +119,23 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // a missing dshHome degrades both stores to in-memory.
   const dataDir = typeof config.dshHome === 'string' && config.dshHome !== '' ? join(config.dshHome, 'perm-gate') : undefined
 
-  // Host model-group services (best effort, typed minimally; provided by the
-  // dsh runtime — dsh-approval-gate demonstrates the same contract). The llm
-  // service backs the `host` receiver; agentDefaultModel supplies the current
-  // model-group selection.
-  const getHostService = (name: string): unknown => {
+  // Host model-group services (typed minimally; supplied by the dsh runtime
+  // through the loader `inject` — dsh-approval-gate demonstrates the same
+  // contract). The llm service backs the `host` receiver; agentDefaultModel
+  // supplies the current model-group selection.
+  const injected = ctx as unknown as { webServer?: unknown; llm?: unknown; agentDefaultModel?: unknown; get(name: string): unknown }
+  const fallbackGet = (name: string): unknown => {
     try {
-      return (ctx as unknown as { get(name: string): unknown }).get(name)
+      return injected.get(name)
     } catch {
       return undefined
     }
   }
-  const llmService = getHostService('llm') as { stream?: unknown } | undefined
+  const llmService = (injected.llm ?? fallbackGet('llm')) as { stream?: unknown } | undefined
   const hostLlm = llmService !== null && typeof llmService === 'object' && typeof llmService.stream === 'function'
     ? (llmService as unknown as HostLlmLike)
     : undefined
-  const hostModelService = getHostService('agentDefaultModel')
+  const hostModelService = injected.agentDefaultModel ?? fallbackGet('agentDefaultModel')
 
   const runtime = new PermGateRuntime({
     ...config,
@@ -220,7 +227,14 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // Event feed HTTP API (best effort): the dsh webServer service exposes the
   // JSONL decision events to the browser half; without it events stay on disk.
   try {
-    const webServer = (ctx as unknown as { get(name: string): unknown }).get('webServer') as WebServerLike | undefined
+    const webServerCandidate = (injected.webServer ?? fallbackGet('webServer')) as { register?: unknown } | undefined
+    const webServer = webServerCandidate !== null && typeof webServerCandidate === 'object' && typeof webServerCandidate.register === 'function'
+      ? webServerCandidate as unknown as WebServerLike
+      : undefined
+    if (webServer === undefined) {
+      // Loud but non-fatal: everything else keeps working without the HTTP routes.
+      console.warn('[dsh-perm-gate] webServer service unavailable — events/learning/health/receiver routes not registered')
+    }
     if (webServer !== undefined && runtime.eventLog !== undefined) {
       const offEvents = registerEventsRoute(webServer, runtime.eventLog)
       if (offEvents !== undefined) ctx.effect(() => () => { offEvents() }, 'dsh-perm-gate: events route')
