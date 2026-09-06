@@ -258,7 +258,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           const c = current()
           const info = await buildReceiverInfo({
             source: c.classifierSource === 'host' ? 'host' : 'custom',
-            llm: llmService as typeof hostLlm & { listProviders?: () => readonly { id: string; name: string }[]; listModels?: (id: string) => Promise<readonly { id: string; name: string }[]> } | undefined,
+            llm: llmService as typeof hostLlm & {
+              listProviders?: () => readonly { id: string; name: string }[]
+              listModels?: (id: string) => Promise<readonly { id: string; name: string }[]>
+              listConfigurableProviders?: () => readonly { provider: string; settingsNs: string }[]
+              discoverModels?: (settingsNs: string, request: { provider?: string }) => Promise<readonly { id: string; name?: string }[]>
+            } | undefined,
             currentSelection: () => {
               try {
                 return (hostModelService as { currentSelection?: () => { provider?: unknown; model?: unknown } } | undefined)?.currentSelection?.()

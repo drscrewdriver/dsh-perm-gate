@@ -148,6 +148,44 @@ describe('receiver projection (buildReceiverInfo)', () => {
     expect(info.providers[1]?.error).toContain('unreachable')
   })
 
+  it('falls back to route discovery when listModels is missing or empty (configured custom groups)', async () => {
+    const calls: string[] = []
+    const llm = {
+      listProviders: () => [{ id: 'local-35b', name: 'local-35b' }, { id: 'deepseek-official', name: 'DeepSeek' }],
+      // a build without listModels (or one answering empty) — discovery must step in
+      listConfigurableProviders: () => [{ provider: 'local-35b', settingsNs: 'models.local' }],
+      discoverModels: async (settingsNs: string, request: { provider?: string }) => {
+        calls.push(`${settingsNs}:${request.provider ?? ''}`)
+        return [{ id: 'local-35b-q4', name: 'Local 35B Q4' }]
+      },
+    }
+    const info = await buildReceiverInfo({
+      source: 'host',
+      llm,
+      currentSelection: () => undefined,
+      overrideProvider: '',
+      overrideModel: '',
+      customModel: '',
+    })
+    expect(calls).toEqual(['models.local:local-35b']) // deepseek-official has no configurable entry
+    expect(info.providers[0]?.models).toEqual([{ id: 'local-35b-q4', name: 'Local 35B Q4' }])
+    expect(info.providers[0]?.error).toBeUndefined()
+    expect(info.providers[1]?.error).toBe('no models advertised')
+  })
+
+  it('marks a provider with neither listModels nor discovery results as empty', async () => {
+    const info = await buildReceiverInfo({
+      source: 'host',
+      llm: { listProviders: () => [{ id: 'local-35b', name: 'local-35b' }] },
+      currentSelection: () => undefined,
+      overrideProvider: '',
+      overrideModel: '',
+      customModel: '',
+    })
+    expect(info.providers[0]?.models).toEqual([])
+    expect(info.providers[0]?.error).toBe('no models advertised')
+  })
+
   it('custom source exposes only the configured model, no providers', async () => {
     const info = await buildReceiverInfo({ source: 'custom', customModel: 'mimo-v2.5' })
     expect(info.providers).toEqual([])

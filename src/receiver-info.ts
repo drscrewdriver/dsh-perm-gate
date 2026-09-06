@@ -39,6 +39,9 @@ export interface ReceiverDeps {
   llm?: {
     listProviders?: () => readonly { id: string; name: string }[]
     listModels?: (providerId: string) => Promise<readonly { id: string; name: string }[]>
+    listConfigurableProviders?: () => readonly { provider: string; settingsNs: string }[]
+    /** Discovery for a configured route answers from the adapter's own knowledge — no network call. */
+    discoverModels?: (settingsNs: string, request: { provider?: string }) => Promise<readonly { id: string; name?: string }[]>
   }
   /** Live session selection (agentDefaultModel.currentSelection). */
   currentSelection?: () => { provider?: unknown; model?: unknown } | undefined
@@ -67,7 +70,7 @@ export function resolveHostSelection(deps: ReceiverDeps): { provider: string; mo
 
 /** Build the receiver projection. Never throws. */
 export async function buildReceiverInfo(deps: ReceiverDeps): Promise<ReceiverInfo> {
-  if (deps.source !== 'host' || deps.llm?.listProviders === undefined || deps.llm.listModels === undefined) {
+  if (deps.source !== 'host' || deps.llm?.listProviders === undefined) {
     return {
       source: deps.source,
       selection: deps.source === 'custom' && str(deps.customModel) !== ''
@@ -79,12 +82,32 @@ export async function buildReceiverInfo(deps: ReceiverDeps): Promise<ReceiverInf
   const selection = resolveHostSelection(deps)
   const raw = deps.llm.listProviders()
   const providers = await Promise.all(raw.map(async (p) => {
+    let models: ReceiverModel[] = []
+    let error: string | undefined
     try {
-      const models = await deps.llm?.listModels?.(p.id) ?? []
-      return { id: p.id, name: p.name, models: models.map((m) => ({ id: m.id, name: m.name })) }
+      models = (await deps.llm?.listModels?.(p.id) ?? []).map((m) => ({ id: m.id, name: m.name }))
     } catch (e) {
-      return { id: p.id, name: p.name, models: [] as ReceiverModel[], error: String((e as Error)?.message ?? e) }
+      error = String((e as Error)?.message ?? e)
     }
+    if (models.length === 0) {
+      // Fallback: route discovery. For an already-configured route the
+      // adapter answers from its own stored knowledge (no network call) —
+      // this also covers builds whose `listModels` is absent or dormant.
+      try {
+        const entry = deps.llm?.listConfigurableProviders?.().find((c) => c.provider === p.id)
+        if (entry !== undefined && deps.llm?.discoverModels !== undefined) {
+          const discovered = await deps.llm.discoverModels(entry.settingsNs, { provider: p.id })
+          if (discovered.length > 0) {
+            models = discovered.map((m) => ({ id: m.id, name: m.name ?? m.id }))
+            error = undefined
+          }
+        }
+      } catch {
+        // keep the primary error / empty state
+      }
+    }
+    if (models.length === 0 && error === undefined) error = 'no models advertised'
+    return { id: p.id, name: p.name, models, ...(error === undefined ? {} : { error }) }
   }))
   return { source: 'host', selection, providers }
 }
