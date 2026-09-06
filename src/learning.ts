@@ -32,6 +32,14 @@ export interface LearningDoc {
   samples: Record<string, LearningSample[]>
 }
 
+/** One sedimented rule view: a threshold-reached key's confirmed sample. */
+export interface SedimentEntry {
+  readonly key: string
+  readonly fp: string
+  readonly ctx: string
+  readonly at: number
+}
+
 export interface RiskLearningOptions {
   /** Confirmations required before an exact-sample re-run may auto-allow. A getter reads the live setting. Default 3. */
   readonly threshold?: number | (() => number)
@@ -198,6 +206,42 @@ export class RiskLearning {
   reset(): void {
     this.doc = emptyDoc()
     this.loaded = true
+    this.persist()
+  }
+
+  /**
+   * The sedimented-rule view: every confirmed sample of a key whose count
+   * reached the threshold. These are the deterministic auto-allow rules —
+   * derived from the store, so no extra persistence is needed.
+   */
+  sedimented(): SedimentEntry[] {
+    const doc = this.load()
+    const out: SedimentEntry[] = []
+    for (const [key, count] of Object.entries(doc.confirmed)) {
+      if (count < this.threshold) continue
+      for (const s of doc.samples[key] ?? []) out.push({ key, fp: s.fp, ctx: s.ctx, at: s.at })
+    }
+    return out
+  }
+
+  /** Remove one sedimented sample (its fingerprint no longer auto-allows). */
+  dropSample(key: string, fp: string): void {
+    const doc = this.load()
+    const list = doc.samples[key]
+    if (list === undefined) return
+    const next = list.filter((s) => s.fp !== fp)
+    if (next.length === list.length) return
+    if (next.length === 0) delete doc.samples[key]
+    else doc.samples[key] = next
+    this.persist()
+  }
+
+  /** Terminate learning for one key: drop its confirmation count and samples. */
+  resetKey(key: string): void {
+    const doc = this.load()
+    if (doc.confirmed[key] === undefined && doc.samples[key] === undefined) return
+    delete doc.confirmed[key]
+    delete doc.samples[key]
     this.persist()
   }
 

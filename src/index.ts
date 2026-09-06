@@ -8,7 +8,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import { Config, resolvePermissiveStrategies } from './config.js'
-import { registerEventsRoute, type WebServerLike } from './events.js'
+import { registerEventsRoute, registerHealthRoute, registerLearningRoute, type WebServerLike } from './events.js'
+import type { HostLlmLike } from './host-llm.js'
 import { PermGateRuntime, type PermissiveState, type ToolExecutionLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
@@ -80,11 +81,19 @@ interface PermissiveSurface {
   classifierApiKey?: string
   /** Timeout for one llmAssist risk call. */
   riskTimeoutMs?: number
+  /** llmAssist receiver source: an OpenAI-compatible endpoint or the DSH host llm service. */
+  classifierSource?: string
+  /** Optional provider override for the host receiver. */
+  classifierProvider?: string
   /** Verdict learning switch + confirmation threshold (neutral-risk ask auto-allow). */
   riskLearning?: boolean
   riskThreshold?: number
+  /** Learning sedimentation switch: threshold-reached samples become deterministic auto-allows. */
+  riskSediment?: boolean
   /** Editable whitelist, mirrored to the rules file's `allow`. */
   allowlist?: string[]
+  /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
+  denyKeywords?: string[]
 }
 
 /** Column a settings-scope value into the typed live face. */
@@ -103,8 +112,26 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // a missing dshHome degrades both stores to in-memory.
   const dataDir = typeof config.dshHome === 'string' && config.dshHome !== '' ? join(config.dshHome, 'perm-gate') : undefined
 
+  // Host model-group services (best effort, typed minimally; provided by the
+  // dsh runtime — dsh-approval-gate demonstrates the same contract). The llm
+  // service backs the `host` receiver; agentDefaultModel supplies the current
+  // model-group selection.
+  const getHostService = (name: string): unknown => {
+    try {
+      return (ctx as unknown as { get(name: string): unknown }).get(name)
+    } catch {
+      return undefined
+    }
+  }
+  const llmService = getHostService('llm') as { stream?: unknown } | undefined
+  const hostLlm = llmService !== null && typeof llmService === 'object' && typeof llmService.stream === 'function'
+    ? (llmService as unknown as HostLlmLike)
+    : undefined
+  const hostModelService = getHostService('agentDefaultModel')
+
   const runtime = new PermGateRuntime({
     ...config,
+    hostLlm,
     // Read the Permissive tier live so the UI card's switches take effect on
     // the next tool call (no reload). Falls back to the composition entry.
     readPermissive: (): PermissiveState => {
@@ -132,6 +159,31 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         enabled: c.riskLearning ?? false,
         threshold: c.riskThreshold ?? 3,
       }
+    },
+    // Read the deny-keyword blacklist live; unset (not an array) applies the preset.
+    readDenyKeywords: () => {
+      const c = current()
+      return Array.isArray(c.denyKeywords) ? c.denyKeywords : undefined
+    },
+    // Learning sedimentation: threshold-reached samples become deterministic allows.
+    readRiskSediment: () => current().riskSediment ?? true,
+    // llmAssist receiver source: custom OpenAI-compatible endpoint or the host llm service.
+    readClassifySource: () => (current().classifierSource === 'host' ? 'host' : 'custom'),
+    readHostModel: () => {
+      const c = current()
+      let selection: { provider?: unknown; model?: unknown } | undefined
+      try {
+        selection = (hostModelService as { currentSelection?: () => { provider?: unknown; model?: unknown } } | undefined)?.currentSelection?.()
+      } catch {
+        selection = undefined
+      }
+      const provider = typeof c.classifierProvider === 'string' && c.classifierProvider !== ''
+        ? c.classifierProvider
+        : (typeof selection?.provider === 'string' && selection.provider !== '' ? selection.provider : 'deepseek-official')
+      const model = typeof c.classifierModel === 'string' && c.classifierModel !== ''
+        ? c.classifierModel
+        : (typeof selection?.model === 'string' && selection.model !== '' ? selection.model : 'deepseek-v4-flash')
+      return { provider, model }
     },
     learningFile: typeof config.learningFile === 'string' && config.learningFile !== ''
       ? config.learningFile
@@ -171,8 +223,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     if (webServer !== undefined && runtime.eventLog !== undefined) {
       registerEventsRoute(webServer, runtime.eventLog)
     }
+    if (webServer !== undefined) {
+      registerLearningRoute(webServer, {
+        snapshot: () => runtime.learningSnapshot(),
+        threshold: () => runtime.learningThreshold(),
+        reset: (key, fp) => { runtime.learningReset(key, fp) },
+      })
+      registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
+    }
   } catch {
-    // webServer unavailable: the feed remains disk-only
+    // webServer unavailable: the feed remains disk-only, sediment is view-only in files
   }
 
   const listener: (exec: ToolExecutionLike, next: () => unknown) => Promise<unknown> = async (exec, next) => {

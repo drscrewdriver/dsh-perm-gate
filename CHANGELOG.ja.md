@@ -18,6 +18,19 @@
 - 決定イベントフィード：各決定を `$DSH_HOME/perm-gate/events.jsonl` に追記し、
   `GET /api/dsh-perm-gate/events?sessionId=&since=` で提供。ブラウザ側は入力欄上の通知バーで表示。
 - 権限ピッカーの盾アイコンが折りたたみトリガーにも表示されます。
+- 承認記録ページ：会話ビューに「承認記録」タブを追加し、セッション内のゲート判定を新しい順に
+  タイムライン表示（種類タグ・リスクカテゴリ・時刻付き）。設定カードの許可リストは行ごとに削除できる
+  編集可能なリスト＋一括編集トグルになりました。
+- dsh-approval-gate から継承したプリセット拒否キーワード（`DEFAULT_DENY_KEYWORDS`）：キーワード一致
+  （大小文字を区別しない部分一致）で許可リスト / 許可 / LLM より先に拒否。設定カードでリスト編集でき
+  プリセットタグとワンクリック復元に対応、未設定・空ならプリセットを適用（黑名単は常に有効）。
+- 学習沈殿（`riskSediment`、既定オン）：しきい値に達したキーの確認サンプルが決定論的な自動許可ルールに——
+  指紋の正確一致は LLM 呼び出しをスキップし、llmAssist オフでも継続。設定カードで一覧表示し、キー終止・
+  サンプル削除が可能（`GET/POST /api/dsh-perm-gate/learning`）。
+- 選択可能な llmAssist 受信先：**カスタム API**（OpenAI 互換、Xiaomi MiMo
+  `https://api.xiaomimimo.com/v1` を含むプリセット付き）または **DSH ホストモデルグループ**
+  （`llm` サービス + `agentDefaultModel.currentSelection`、provider/model 上書き可）に加え、
+  **健全性テスト**ボタン（`POST /api/dsh-perm-gate/health`）で最小 completion の応答とレイテンシを確認。
 
 ### 変更
 

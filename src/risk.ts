@@ -112,15 +112,29 @@ export async function classifyRisk(
   req: RiskRequest,
   nowFetch: typeof fetch = fetch,
 ): Promise<RiskVerdict> {
-  const user = JSON.stringify({
+  return classifyRiskWith((system, user) => chatCompletion(cfg, system, user, nowFetch), req)
+}
+
+/** A transport-agnostic completion: system+user prompt → assistant text. */
+export type RiskSend = (system: string, user: string) => Promise<{ ok: true; content: string } | { ok: false }>
+
+/** The bounded user prompt for one risk grading (shared by every transport). */
+export function riskUserText(req: RiskRequest): string {
+  return JSON.stringify({
     tool: req.tool,
     args: req.args ?? {},
     reason: req.reason,
     instruction: 'Reply strictly as one JSON object: {"risk":"safe"} or {"risk":"risky","category":"..."} plus a short "reason".',
   })
-  const content = await withLlmRetry(() =>
-    chatCompletion(cfg, RISK_SYSTEM_PROMPT, user, nowFetch).then((r) => (r.ok ? r.content : undefined)),
-  )
+}
+
+/**
+ * Grade one tool call through any transport. Up to two attempts (one retry);
+ * any failure, timeout, or protocol violation resolves `unresolved` — never throws.
+ */
+export async function classifyRiskWith(send: RiskSend, req: RiskRequest): Promise<RiskVerdict> {
+  const user = riskUserText(req)
+  const content = await withLlmRetry(() => send(RISK_SYSTEM_PROMPT, user).then((r) => (r.ok ? r.content : undefined)))
   if (content === undefined) return { kind: 'unresolved' }
   return parseRiskVerdict(content) ?? { kind: 'unresolved' }
 }

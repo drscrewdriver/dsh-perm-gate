@@ -141,7 +141,7 @@ Whitelist と並ぶ**独立した承認ティア**です。「自動承認」で
 （`approveRepeat`、有界なセッション許可）と**すべての発生を許可**
 （`approveAllowEverywhere`、コマンド語を `permissions.yaml` の allow ホワイトリストへ
 永続化して再読込）。`llmAssist` は設定済みの実際の LLM
-（`classifierEndpoint` / `classifierModel`。OpenAI 互換 API なら何でも可）に
+（受信先は設定カードで選択：**カスタム API**（`classifierEndpoint` / `classifierModel`。OpenAI 互換 API なら何でも可、Xiaomi MiMo `https://api.xiaomimimo.com/v1` 等のプリセット付き）または**ホストモデルグループ**（DSH の `llm` サービスと現在のモデルグループ、`classifierProvider` / `classifierModel` で上書き可）。**健全性テスト**ボタンで受信 LLM の疎通とレイテンシを確認可能）に
 `ask` の自動判定を委ね、`ask`/エラー時は人手のシームへフォールバックします —
 常に fail-closed です。`permissive` がオフなら、ゲートの挙動は以前と完全に同じです。
 
@@ -168,10 +168,12 @@ Full access の間に `permissive` preset（`sandbox: workspace-write`、`approv
 
 - `safe` → 自動許可（監査ソースは `classifier`）。
 - `risky` + **ハードリスクカテゴリ**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 常に人手へ。ハードリスクは自動許可も学習もされません。
-- `risky:neutral` → `riskLearning` 有効時（設定カード内、既定オフ）、人手で承認され実際に実行された neutral リスクは `tool|カテゴリ` ごとにカウントされ、`riskThreshold`（既定 3）到達かつ新呼び出しの操作指紋（コマンド語＋対象の基底名）が確認済みサンプルに一致した場合、**同一操作のみ**自動許可されます。
+- `risky:neutral` → `riskLearning` 有効時（設定カード内、既定オフ）、人手で承認され実際に実行された neutral リスクは `tool|カテゴリ` ごとにカウントされ、`riskThreshold`（既定 3）到達かつ新呼び出しの操作指紋（コマンド語＋対象の基底名）が確認済みサンプルに一致した場合、**同一操作のみ**自動許可されます。学習沈殿（`riskSediment`、既定オン）を有効にすると、しきい値に達したキーの確認サンプルは**決定論的な許可ルール**になります：指紋の正確一致は LLM を経由せず自動許可——llmAssist オフでも継続し、沈殿ルールは設定カードで確認・管理（終止 / サンプル削除）できます。
 - タイムアウト（`riskTimeoutMs`、既定 20 秒、1 回リトライ）、通信失敗、プロトコル外出力は元の `ask` を維持します。
 
-学習状態はプラグイン所有の JSON（`$DSH_HOME/perm-gate/learning.json` または `learningFile`）に永続化され、YAML ルールには書き込みません。各決定は `$DSH_HOME/perm-gate/events.jsonl`（または `eventsFile`）に追記され、`GET /api/dsh-perm-gate/events?sessionId=&since=` で提供されます。ブラウザ側はこれをポーリングし、入力欄の上に最新の決定を通知バーで表示します。Permissive ティアは権限ピッカーに盾アイコンを保持します（メニュー項目と折りたたみトリガーの両方）。
+学習状態はプラグイン所有の JSON（`$DSH_HOME/perm-gate/learning.json` または `learningFile`）に永続化され、YAML ルールには書き込みません。各決定は `$DSH_HOME/perm-gate/events.jsonl`（または `eventsFile`）に追記され、`GET /api/dsh-perm-gate/events?sessionId=&since=` で提供されます。ブラウザ側はこれをポーリングし、入力欄の上に最新の決定を通知バーで表示するとともに、会話ビューの「承認記録」タブにセッション内の全判定を新しい順に一覧表示します。
+
+さらにプリセットの**拒否キーワード黑名単**（dsh-approval-gate の `DEFAULT_DENY_KEYWORDS` を継承：`rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` など）を備え、テキストがキーワードを含む呼び出し（大小文字を区別しない部分一致）は許可リスト / 許可 / LLM より先に拒否します。設定カードでリストとして編集でき（プリセット項目にはタグ付き、ワンクリック復元対応）、未設定・空ならプリセットを適用します——黑名単が静かに無効化されることはありません。Permissive ティアは権限ピッカーに盾アイコンを保持します（メニュー項目と折りたたみトリガーの両方）。
 
 
 ## CLI（スタンドアロン dry-run）

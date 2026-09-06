@@ -139,8 +139,10 @@ Permissive는 권한 선택기에서 Read Only / Workspace Write / Full access /
 모든 경계에서 승인 패널을 띄우며, 그「허용 컨트롤」에 두 개의 확장 버튼을 추가합니다 —
 **이 세션에서 해당 유형 반복 허용**(`approveRepeat`, 유계 세션 허용)과 **모든 발생
 허용**(`approveAllowEverywhere`, 명령어를 `permissions.yaml`의 allow 허용 목록에
-영속 기록 후 재로드). `llmAssist`는 설정된 실제 LLM(`classifierEndpoint` /
-`classifierModel`, OpenAI 호환 API면 무엇이든 가능)에 `ask` 자동 판정을 맡기고,
+영속 기록 후 재로드). `llmAssist`는 설정된 실제 LLM(수신처는 설정 카드에서 선택: **사용자 지정 API**(`classifierEndpoint` /
+`classifierModel`, OpenAI 호환 API면 무엇이든 가능, Xiaomi MiMo `https://api.xiaomimimo.com/v1` 등
+프리셋 포함) 또는 **호스트 모델 그룹**(DSH의 `llm` 서비스와 현재 모델 그룹, `classifierProvider` /
+`classifierModel`로 재정의 가능). **상태 테스트** 버튼으로 수신 LLM의 연결과 지연 시간을 확인할 수 있음)에 `ask` 자동 판정을 맡기고,
 `ask`/오류 시 사람의 승인 심으로 폴백합니다 — 항상 fail-closed입니다.
 `permissive`가 꺼져 있으면 게이트는 이전과 완전히 동일하게 동작합니다.
 
@@ -166,10 +168,17 @@ host는 네임스페이스를 live로 읽으므로 변경은 재시작 없이 �
 
 - `safe` → 자동 허용(감사 소스 `classifier`).
 - `risky` + **하드 위험 카테고리**(`deletion`, `credential`, `remote`, `system`, `bulk`) → 항상 사람에게 전달. 하드 위험은 자동 허용도 학습도 되지 않습니다.
-- `risky:neutral` → `riskLearning` 활성 시(설정 카드, 기본 꺼짐), 사람이 승인하고 실제 실행된 neutral 위험은 `tool|카테고리` 키로 카운트되며, `riskThreshold`(기본 3) 도달 및 새 호출의 작업 지문(명령어 단어 + 대상 기본 이름)이 확인된 샘플과 일치하면 **동일 작업만** 자동 허용됩니다.
+- `risky:neutral` → `riskLearning` 활성 시(설정 카드, 기본 꺼짐), 사람이 승인하고 실제 실행된 neutral 위험은 `tool|카테고리` 키로 카운트되며, `riskThreshold`(기본 3) 도달 및 새 호출의 작업 지문(명령어 단어 + 대상 기본 이름)이 확인된 샘플과 일치하면 **동일 작업만** 자동 허용됩니다. 학습 침전(`riskSediment`, 기본 켜짐)을 사용하면 임계값에 도달한 키의 확인 샘플이 **결정론적 허용 규칙**이 됩니다: 지문이 정확히 일치하면 LLM 호출 없이 바로 허용——llmAssist가 꺼져도 유지되며, 침전 규칙은 설정 카드에서 확인·관리(종료 / 샘플 삭제)할 수 있습니다.
 - 시간 초과(`riskTimeoutMs`, 기본 20초, 1회 재시도), 전송 실패, 프로토콜 외 출력은 원래 `ask`를 유지합니다.
 
-학습 상태는 플러그인 소유 JSON(`$DSH_HOME/perm-gate/learning.json` 또는 `learningFile`)에 영속화되며 YAML 규칙 파일에는 기록되지 않습니다. 모든 결정은 `$DSH_HOME/perm-gate/events.jsonl`(또는 `eventsFile`)에 추가되고 `GET /api/dsh-perm-gate/events?sessionId=&since=`로 제공됩니다. 브라우저 절반이 이를 폴링하여 입력창 위에 최신 결정을 알림 바로 표시합니다. Permissive 티어는 권한 선택기에서 방패 아이콘을 유지합니다(메뉴 항목과 축소 트리거 모두).
+학습 상태는 플러그인 소유 JSON(`$DSH_HOME/perm-gate/learning.json` 또는 `learningFile`)에 영속화되며 YAML 규칙 파일에는 기록되지 않습니다. 모든 결정은 `$DSH_HOME/perm-gate/events.jsonl`(또는 `eventsFile`)에 추가되고 `GET /api/dsh-perm-gate/events?sessionId=&since=`로 제공됩니다. 브라우저 절반이 이를 폴링하여 입력창 위에 최신 결정을 알림 바로 표시하고, 대화 보기의「승인 기록」탭에 세션의 모든 판정을 최신 순으로 나열합니다.
+
+또한 프리셋 **거부 키워드 블랙리스트**(dsh-approval-gate의 `DEFAULT_DENY_KEYWORDS` 계승: `rm -rf`,
+`push --force`, `drop table`, `mkfs`, `git reset --hard`, `docker system prune` 등)를 갖추어, 텍스트가
+키워드를 포함하는 호출(대소문자 구분 없는 부분 일치)은 허용 목록/권한/LLM보다 먼저 거부됩니다. 설정
+카드에서 목록으로 편집할 수 있고(프리셋 항목에는 태그 표시, 원클릭 복원 지원) 미설정·빈 목록 시 프리셋이
+적용됩니다——블랙리스트가 조용히 꺼지지 않습니다.
+ Permissive 티어는 권한 선택기에서 방패 아이콘을 유지합니다(메뉴 항목과 축소 트리거 모두).
 
 
 ## CLI(독립 실행 dry-run)

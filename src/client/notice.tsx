@@ -13,65 +13,12 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
-
-/** One event as delivered by the host route (see src/events.ts). */
-interface GateEvent {
-  readonly id: number
-  readonly ts: string
-  readonly sessionId: string
-  readonly tool: string
-  readonly kind: 'auto' | 'ask' | 'deny' | 'learned'
-  readonly risk?: string
-  readonly reason: string
-}
-
-/** Slots props carrying the current conversation id (best effort). */
-interface DockSlotsProps {
-  readonly sessionId?: unknown
-  readonly useSessions?: (selector: (state: { current?: unknown }) => { current?: unknown }) => { current?: unknown }
-}
+import { fetchEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent } from './feed.ts'
 
 const POLL_MS = 2_000
 const AUTO_HIDE_MS = 4_000
 
-async function fetchEvents(sessionId: string, since: number): Promise<GateEvent[]> {
-  const query = `/api/dsh-perm-gate/events?sessionId=${encodeURIComponent(sessionId)}${since > 0 ? `&since=${since}` : ''}`
-  const res = await fetch(query, { headers: { 'cache-control': 'no-cache' } })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const body = (await res.json()) as { events?: unknown }
-  return Array.isArray(body.events) ? (body.events as GateEvent[]) : []
-}
-
-/** Resolve the current session id from the slot props; null when unavailable. */
-function resolveSessionId(props: DockSlotsProps | undefined): string | null {
-  const direct = props?.sessionId
-  if (typeof direct === 'string' && direct !== '') return direct
-  try {
-    if (typeof props?.useSessions === 'function') {
-      const state = props.useSessions((s) => s)
-      if (typeof state?.current === 'string' && state.current !== '') return state.current
-    }
-  } catch {
-    // fall through
-  }
-  return null
-}
-
-/** Presentation per event kind: accent color, tag, and whether it auto-dismisses. */
-function presentation(kind: GateEvent['kind']): { color: string; bg: string; tag: string; sticky: boolean } {
-  switch (kind) {
-    case 'deny':
-      return { color: 'var(--dsw-alias-state-error-primary, #c0392b)', bg: 'var(--dsw-alias-interactive-bg-hover-danger, rgba(192,57,43,0.08))', tag: 'DENY', sticky: false }
-    case 'ask':
-      return { color: 'var(--dsw-alias-state-warn-label, #b9770e)', bg: 'var(--dsw-alias-state-warn-tertiary, rgba(185,119,14,0.08))', tag: 'ASK', sticky: true }
-    case 'learned':
-      return { color: 'var(--dsw-alias-state-success-primary, #1e8449)', bg: 'var(--dsw-alias-state-success-tertiary, rgba(30,132,73,0.08))', tag: 'LEARNED', sticky: false }
-    default:
-      return { color: 'var(--dsw-alias-state-success-primary, #1e8449)', bg: 'var(--dsw-alias-state-success-tertiary, rgba(30,132,73,0.08))', tag: 'ALLOW', sticky: false }
-  }
-}
-
-export function NoticeStrip({ slotsProps }: { slotsProps?: DockSlotsProps }): JSX.Element | null {
+export function NoticeStrip({ slotsProps }: { slotsProps?: FeedSlotsProps }): JSX.Element | null {
   const sessionId = resolveSessionId(slotsProps)
   const [notice, setNotice] = useState<GateEvent | null>(null)
   const sinceRef = useRef(0)

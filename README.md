@@ -63,7 +63,15 @@ cross-plugin version coupling.
 - **Verdict learning** — neutral-risk asks that the human approves and that actually execute
   count up; after the threshold, the *exact same operation* (fingerprint-matched) auto-allows.
 - **Decision event feed** — every decision is appended to a JSONL feed and surfaced by the
-  browser half as a notice strip above the conversation input.
+  browser half as a notice strip above the conversation input plus an approval-records tab
+  (newest first) in the conversation view.
+
+A preset **deny-keyword blacklist** (inherited from dsh-approval-gate's `DEFAULT_DENY_KEYWORDS`:
+`rm -rf`, `push --force`, `drop table`, `mkfs`, `git reset --hard`, `docker system prune`, …) vetoes
+any call whose text contains a keyword — case-insensitive substring, applied before whitelist,
+grants and LLM. It is editable as a list in the settings card (preset entries are tagged, and a
+one-click restore brings the preset back); unset or empty applies the preset — the blacklist
+never silently turns off.
 
 ## Install
 
@@ -149,9 +157,13 @@ exactly as before.
 
 ### Risk-graded llmAssist, verdict learning, and the event feed
 
-When `llmAssist` is on, the configured LLM (any OpenAI-compatible endpoint — point
-`classifierEndpoint` / `classifierModel` / `classifierApiKey` at your own API) grades one
-`ask` at a time with a structured protocol:
+When `llmAssist` is on, the configured LLM grades one `ask` at a time with a structured
+protocol. Two receiver sources are selectable in the settings card: a **custom API** (any
+OpenAI-compatible endpoint — `classifierEndpoint` / `classifierModel` / `classifierApiKey`,
+with presets including Xiaomi MiMo `https://api.xiaomimimo.com/v1`), or the **DSH host model
+group** (the session's configured `llm` service, via `agentDefaultModel.currentSelection`,
+optionally overridden with `classifierProvider` / `classifierModel`). A **health test** button
+(`POST /api/dsh-perm-gate/health`) runs one minimal completion and reports latency.
 
 - `safe` → the ask is auto-allowed (audited as the `classifier` source).
 - `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) →
@@ -160,7 +172,10 @@ When `llmAssist` is on, the configured LLM (any OpenAI-compatible endpoint — p
   approval that actually executes (settled via the host's `tools/result` event) counts toward
   a `tool|category` key; once the count reaches `riskThreshold` (default 3) **and** the new
   call's operation fingerprint (command word + target basename) matches a confirmed sample,
-  the exact same operation auto-allows. A different target never reuses that authority.
+  the exact same operation auto-allows. A different target never reuses that authority. With sedimentation (`riskSediment`, on by default) a
+threshold-reached key's confirmed samples become **deterministic allow rules**: an exact hit allows
+outright without another LLM call — even with `llmAssist` off — and the sedimented rules are visible
+and manageable (terminate / remove) in the settings card.
 - Timeouts (`riskTimeoutMs`, default 20 s, one retry), transport failures, and off-protocol
   model output leave the ask untouched — the gate never guesses.
 
@@ -169,7 +184,8 @@ Learning state persists to a plugin-owned JSON (`$DSH_HOME/perm-gate/learning.js
 `$DSH_HOME/perm-gate/events.jsonl` (or `eventsFile`) and served at
 `GET /api/dsh-perm-gate/events?sessionId=&since=`; the browser half polls it and shows the
 latest decision as a notice strip above the conversation input (asks stay visible until the
-next event). The Permissive tier keeps its shield icon in the permission picker — on both the
+next event) and lists the whole session's decisions newest-first in the **Approvals** tab of
+the conversation view. The Permissive tier keeps its shield icon in the permission picker — on both the
 menu item and the collapsed picker trigger.
 
 ### A selectable session tier

@@ -18,6 +18,7 @@ import { NS, en, zh, type PermissiveKey } from './locales.ts'
 import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue } from './card.tsx'
 import { installPermissivePermissionIcon } from './permission-icon.ts'
 import { NoticeStrip } from './notice.tsx'
+import { HistoryView } from './history.tsx'
 
 /** The settings namespace the host half registers (kept in lockstep with src/index.ts). */
 const PERMISSIVE_NS = 'dsh-perm-gate'
@@ -40,6 +41,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         /** Current conversation id (may be absent outside a session). */
         sessionId?: string
         /** Session-store selector hook supplied by the conversation shell. */
+        useSessions?: (selector: (state: unknown) => unknown) => unknown
+      }
+    }
+    // The conversation view slot (tab row next to the conversation timeline) is
+    // declared at runtime by the conversation UI package; mirror its contract
+    // so the typed `slots.register` accepts our approval-history entry.
+    'conversation.view': {
+      kind: 'list'
+      scope: 'session-maybe'
+      owner: {
+        sessionId?: string
         useSessions?: (selector: (state: unknown) => unknown) => unknown
       }
     }
@@ -71,6 +83,20 @@ export function apply(ctx: ClientContext): void {
       label: () => t('notice.label'),
       locale: NS,
     }, NoticeStrip)
+  }) as unknown
+
+  // Approval-history page: a conversation-view tab listing every gate decision
+  // of the session, newest first (the review-page pattern approval-gate
+  // demonstrates; our data is the same events feed the notice strip polls).
+  ctx.slots.inject('conversation.view', function* () {
+    yield ctx.slots.register({
+      name: 'conversation.view',
+      id: 'dsh-perm-gate.history',
+      order: 20,
+      label: () => t('history.label'),
+      locale: NS,
+      inject: (sessionId: string | undefined) => ({ sessionId }),
+    }, HistoryView)
   }) as unknown
 
   // A localized tab label (re-evaluated per read so it follows the active locale).

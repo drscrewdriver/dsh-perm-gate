@@ -20,6 +20,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at `GET /api/dsh-perm-gate/events?sessionId=&since=`; the browser half shows the latest decision
   as a notice strip above the conversation input.
 - Permission-picker icon now also decorates the collapsed picker trigger.
+- Approval-records page: the conversation view gains an **Approvals** tab listing the session's
+  gate decisions newest-first (timeline with kind tags, risk category, and time); the settings
+  card's whitelist is now an editable rule list with per-row delete plus a bulk-edit toggle.
+- Learning sedimentation (`riskSediment`, default on): a threshold-reached key's confirmed samples
+  become deterministic auto-allow rules — exact fingerprint hits skip the LLM call entirely and
+  survive the llmAssist switch; the settings card lists them with per-key terminate and per-sample
+  remove (backed by `GET/POST /api/dsh-perm-gate/learning`).
+- Selectable llmAssist receiver: **custom API** (OpenAI-compatible, with endpoint presets
+  including Xiaomi MiMo `https://api.xiaomimimo.com/v1`) or the **DSH host model group**
+  (`llm` service + `agentDefaultModel.currentSelection`, provider/model overridable) — plus a
+  **health test** button (`POST /api/dsh-perm-gate/health`) that runs one minimal completion
+  and reports latency.
+- Preset deny-keyword blacklist inherited from dsh-approval-gate (`DEFAULT_DENY_KEYWORDS`): a
+  case-insensitive keyword hit vetoes the call before whitelist / grants / LLM; editable as a
+  list in the settings card with preset tags and one-click restore; unset or empty applies the
+  preset (the blacklist never silently turns off).
 
 ### Changed
 

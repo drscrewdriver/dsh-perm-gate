@@ -89,7 +89,7 @@ P0 硬拒绝始终单调且不可协商。
       llmAssist: false           # 先由 LLM 分类裁决；ask/无分类器时回退到人工
 ```
 (llmAssist 的真实接收 LLM 在设置页填 `classifierEndpoint` / `classifierModel`，OpenAI 兼容的自定义 API
-均可。)
+均可。设置页可选择接收来源：**自定义 API**（任何 OpenAI 兼容端点，内置小米 MiMo `https://api.xiaomimimo.com/v1` 等预设）或**宿主模型组**（复用 DSH 会话已配置的 `llm` 服务与当前模型组，可用 `classifierProvider` / `classifierModel` 覆盖）；并提供**健康测试**按钮，一键验证接收 LLM 的连通性与延迟。)
 
 `trustAutoAllow` 是中间档基线（rule-allow 自动放行）。`alwaysConfirm` 让每次越界都走审批面板，其
 「允许控件」含两个扩展按钮：**本会话重复允许该类**（会话限次 grant，`approveRepeat`）与
@@ -113,15 +113,21 @@ Full access 之间——与 Auto 档同一机制。因此会话权限下拉里�
 
 ### 风险分级 llmAssist、裁决学习与事件流
 
-开启 `llmAssist` 后，自定义 LLM（任何 OpenAI 兼容端点——把 `classifierEndpoint` /
-`classifierModel` / `classifierApiKey` 指向你自己的 API）按结构化协议逐条评估 `ask`：
+开启 `llmAssist` 后，接收 LLM（自定义 OpenAI 兼容端点，或 DSH 宿主模型组——见上文）按结构化协议逐条评估 `ask`：
 
 - `safe` → 自动放行（审计来源为 `classifier`）。
 - `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 一律转人工；硬风险永不自动放行、也永不进入学习。
-- `risky:neutral` → 若开启 `riskLearning`（设置卡片内，默认关闭），人工批准且真实执行的 neutral 风险会按 `tool|类别` 计数；计数达到 `riskThreshold`（默认 3）且新调用的操作指纹（命令词 + 目标基名）命中已确认样本时，**同一操作**自动放行。不同目标永不复用该放行。
+- `risky:neutral` → 若开启 `riskLearning`（设置卡片内，默认关闭），人工批准且真实执行的 neutral 风险会按 `tool|类别` 计数；计数达到 `riskThreshold`（默认 3）且新调用的操作指纹（命令词 + 目标基名）命中已确认样本时，**同一操作**自动放行。不同目标永不复用该放行。开启学习沉淀（`riskSediment`，默认开）后，满阈值 key 的确认样本会成为**确定性放行规则**：指纹精确命中即直接放行、无需再过 LLM——即使关闭 llmAssist 也继续生效；沉淀规则在设置卡片中可见、可管理（终止学习 / 删除样本）。
 - 超时（`riskTimeoutMs`，默认 20s，重试 1 次）、传输失败与协议外输出均维持原 `ask`——门禁绝不猜测。
 
-学习状态持久化在插件自有 JSON（`$DSH_HOME/perm-gate/learning.json` 或 `learningFile`），不写入你的 YAML 规则文件。每次决策都会追加到 `$DSH_HOME/perm-gate/events.jsonl`（或 `eventsFile`），并经 `GET /api/dsh-perm-gate/events?sessionId=&since=` 提供；浏览器端轮询该接口，在输入框上方以提示条展示最新决策（ask 常驻至下一条事件）。Permissive 档在权限选择器中保留盾形图标——菜单项与折叠触发按钮均有图标。
+学习状态持久化在插件自有 JSON（`$DSH_HOME/perm-gate/learning.json` 或 `learningFile`），不写入你的 YAML 规则文件。每次决策都会追加到 `$DSH_HOME/perm-gate/events.jsonl`（或 `eventsFile`），并经 `GET /api/dsh-perm-gate/events?sessionId=&since=` 提供；浏览器端轮询该接口，在输入框上方以提示条展示最新决策（ask 常驻至下一条事件），并在对话视图的「审批记录」页签按时间倒序列出本会话的全部判定。
+
+插件还内置一份**预置黑名单关键词**（继承自 dsh-approval-gate 的 `DEFAULT_DENY_KEYWORDS`：
+`rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` 等），
+调用文本命中任一关键词（大小写不敏感子串）即直接拒绝，且先于白名单 / 授权 / LLM。黑名单在设置
+卡片中按列表查看与增删（预置条目带标签，可一键恢复预置）；未设置或为空时应用预置列表——黑名单
+不会静默关闭。
+Permissive 档在权限选择器中保留盾形图标——菜单项与折叠触发按钮均有图标。
 
 
 ## CLI（独立 dry-run）

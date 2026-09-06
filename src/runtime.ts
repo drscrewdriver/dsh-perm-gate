@@ -19,8 +19,11 @@ import { decideRules, type ToolCallContext } from './evaluate.js'
 import { canonicalizeCall, GrantRegistry } from './grant.js'
 import { learnKey, operationFingerprint, RiskLearning } from './learning.js'
 import { ArtifactRegistry } from './path.js'
-import { classifyRisk, type RiskRequest, type RiskVerdict } from './risk.js'
+import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } from './risk.js'
+import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
+import { chatCompletion } from './classifier.js'
 import { compileDocument, documentHash, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
+import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
 
 export interface PreToolDecisionLike {
   kind: 'deny' | 'ask'
@@ -50,10 +53,36 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
   /** Optional live source of the llmAssist classifier setup. */
   readonly readClassifyConfig?: () => ClassifierConfig
   /**
+   * Optional live receiver source: `'custom'` (an OpenAI-compatible endpoint,
+   * default) or `'host'` (the DSH host `llm` service — the model-group setup
+   * the user already configured, via {@link hostLlm}).
+   */
+  readonly readClassifySource?: () => 'custom' | 'host'
+  /** The host `llm` service (typed minimally); `undefined` disables the host receiver. */
+  readonly hostLlm?: HostLlmLike
+  /**
+   * Live model-group selection for the host receiver (e.g. DSH's
+   * agentDefaultModel.currentSelection, possibly overridden from settings).
+   */
+  readonly readHostModel?: () => HostModelSelection | undefined
+  /**
    * Optional live source of the verdict-learning state. When unset, the static
    * `riskLearning` / `riskThreshold` options apply.
    */
   readonly readRiskLearning?: () => RiskLearningState
+  /**
+   * Optional live switch for learning sedimentation (default on while verdict
+   * learning is enabled): a threshold-reached key's confirmed fingerprint
+   * becomes a deterministic auto-allow — no LLM round-trip, and it survives
+   * the llmAssist switch because the human confirmations already happened.
+   */
+  readonly readRiskSediment?: () => boolean
+  /**
+   * Optional live source of the deny-keyword blacklist. `undefined` or an
+   * empty array applies the preset `DEFAULT_DENY_KEYWORDS` (the blacklist is
+   * protective and never silently off); a non-empty array replaces the preset.
+   */
+  readonly readDenyKeywords?: () => readonly string[] | undefined
   /** Persistence path for verdict learning; `undefined` keeps it in memory. */
   readonly learningFile?: string
   /** Persistence path for the decision-event feed; `undefined` disables it. */
@@ -197,10 +226,54 @@ export class PermGateRuntime {
     return { enabled: this.options.riskLearning ?? false, threshold: this.options.riskThreshold ?? 3 }
   }
 
+  private liveRiskSediment(): boolean {
+    const read = this.options.readRiskSediment
+    return read !== undefined ? read() : (this.options.riskSediment ?? true)
+  }
+
+  private liveClassifySource(): 'custom' | 'host' {
+    const read = this.options.readClassifySource
+    return read !== undefined ? read() : 'custom'
+  }
+
+  /** The host model-group selection, or undefined when unusable. */
+  private hostModel(): HostModelSelection | undefined {
+    const sel = this.options.readHostModel?.()
+    return sel !== undefined && sel.provider !== '' && sel.model !== '' ? sel : undefined
+  }
+
   private livePermissive(): PermissiveState {
     return this.options.readPermissive !== undefined
       ? this.options.readPermissive()
       : { enabled: this.permissiveEnabled, strategies: this.strategies }
+  }
+
+  /** Effective deny-keyword blacklist: the live namespace override or the preset.
+   * An empty override is treated as "no meaningful override" (the blacklist is
+   * protective and stays on); schemastery materializes unset arrays as `[]`. */
+  private liveDenyKeywords(): readonly string[] {
+    const read = this.options.readDenyKeywords
+    const override = read !== undefined ? read() : undefined
+    return Array.isArray(override) && override.length > 0 ? override : DEFAULT_DENY_KEYWORDS
+  }
+
+  /**
+   * The preset deny-keyword layer (inherited from dsh-approval-gate): a
+   * case-insensitive substring hit over the command text / serialized arguments
+   * vetoes the call with `deny` before any allow path (deny wins over allow).
+   * Purely additive to P0 — it can only ever deny, never widen.
+   */
+  private denyKeywordHit(exec: ToolExecutionLike): string | undefined {
+    const keywords = this.liveDenyKeywords()
+    if (keywords.length === 0) return undefined
+    const argsText = typeof exec.arguments === 'object' && exec.arguments !== null ? JSON.stringify(exec.arguments) : ''
+    const text = `${exec.commandText ?? ''}\n${argsText}`.toLowerCase()
+    if (text === '\n' || text === '') return undefined
+    for (const keyword of keywords) {
+      const needle = String(keyword).toLowerCase()
+      if (needle !== '' && text.includes(needle)) return keyword
+    }
+    return undefined
   }
 
   private recordEvent(exec: ToolExecutionLike, kind: 'auto' | 'ask' | 'deny' | 'learned', reason: string, risk?: string): void {
@@ -219,6 +292,18 @@ export class PermGateRuntime {
   decideExecution(exec: ToolExecutionLike): PreToolDecisionLike | undefined {
     const ctx = this.ctxFor(exec)
     const callId = randomId()
+
+    // Preset deny-keyword layer (deny wins over allow): a dangerous-keyword hit
+    // vetoes before grants / rules / LLM. Additive deny only — P0 semantics are
+    // untouched and every later stage stays behind this veto.
+    const keyword = this.denyKeywordHit(exec)
+    if (keyword !== undefined) {
+      const reason = `deny-keyword: matches preset blacklist entry "${keyword}"`
+      this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'deny', source: 'deny-keyword', reason, at: Date.now() }))
+      this.recordEvent(exec, 'deny', reason)
+      return { kind: 'deny', reason }
+    }
+
     const grantResolver: GrantResolver = (tool, args) => {
       if (exec.parentAuthorized === false) return 'no-match'
       return this.grants.decide(tool, args)
@@ -289,22 +374,52 @@ export class PermGateRuntime {
    */
   async refineAsk(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined> {
     const permissive = this.livePermissive()
-    if (!permissive.enabled || !permissive.strategies.llmAssist) return decision
+    if (!permissive.enabled) return decision
     if (decision.kind !== 'ask') return decision
 
-    // One live read of the classifier setup. Without a fully configured custom
-    // endpoint the ask goes straight to the human seam (fail-closed) — unless a
-    // risk hook is injected (tests / direct embedding replace the HTTP grader).
+    // Sedimented learning rules (checked before any LLM work): a confirmed
+    // sample of a threshold-reached key auto-allows deterministically. This is
+    // the "沉淀" of verdict learning — it keeps working even with llmAssist
+    // off, because the human confirmations already happened. Deny-first and
+    // P0 are untouched: this only ever converts an `ask` into an allow.
+    const learning = this.liveRiskLearning()
+    if (learning.enabled && this.liveRiskSediment()) {
+      const key = learnKey(exec.name, 'neutral')
+      const fp = operationFingerprint(exec.name, exec.arguments ?? {}, exec.commandText)
+      if (this.learning.shouldAutoAllow(key, fp)) {
+        const reason = `learned sediment allow (${key}, ${fp})`
+        this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
+        this.recordEvent(exec, 'learned', reason, 'neutral')
+        return undefined
+      }
+    }
+
+    if (!permissive.strategies.llmAssist) return decision
+
+    // One live read of the classifier setup. Without a usable receiver (a
+    // configured custom endpoint, or the host llm service in host mode) the
+    // ask goes straight to the human seam (fail-closed) — unless a risk hook
+    // is injected (tests / direct embedding replace the grader entirely).
     const cfg = this.options.readClassifyConfig?.()
-    if (this.options.riskHook === undefined
+    const useHost = this.liveClassifySource() === 'host' && this.options.hostLlm !== undefined
+    if (this.options.riskHook === undefined && !useHost
       && (cfg?.endpoint === undefined || cfg?.endpoint === '' || cfg?.model === undefined || cfg?.model === '')) {
       return decision
     }
 
     const req: RiskRequest = { tool: exec.name, args: exec.arguments ?? {}, reason: decision.reason }
-    const risk = this.options.riskHook !== undefined
-      ? await this.options.riskHook(req)
-      : await classifyRisk(cfg ?? {}, req)
+    let risk: RiskVerdict
+    if (this.options.riskHook !== undefined) {
+      risk = await this.options.riskHook(req)
+    } else if (useHost) {
+      const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
+      risk = await classifyRiskWith(
+        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000),
+        req,
+      )
+    } else {
+      risk = await classifyRisk(cfg ?? {}, req)
+    }
 
     if (risk.kind === 'safe') {
       const reason = `llm-assist risk: safe${risk.reason === undefined ? '' : ` (${risk.reason})`}`
@@ -357,6 +472,46 @@ export class PermGateRuntime {
     if (!this.liveRiskLearning().enabled) return
     this.learning.confirm(candidate.key, candidate.fp, candidate.ctx)
     this.recordEvent(exec, 'learned', `confirmed ${candidate.key} (${candidate.fp})`, 'neutral')
+  }
+
+  // ---- Learning-store management (the settings UI's sediment view) ----
+
+  /** The live confirmation threshold the sediment view compares counts against. */
+  learningThreshold(): number {
+    return this.liveRiskLearning().threshold
+  }
+
+  /** Terminate one key's learning, or drop a single sedimented sample. */
+  learningReset(key: string, fp?: string): void {
+    if (fp !== undefined) this.learning.dropSample(key, fp)
+    else this.learning.resetKey(key)
+  }
+
+  /**
+   * One minimal completion through the currently configured receiver (host
+   * model group or custom endpoint) with latency — the settings card's
+   * "health test". Never throws; failures come back as `ok: false` + detail.
+   */
+  async healthCheck(): Promise<{ ok: boolean; ms: number; detail: string }> {
+    const now = this.options.now ?? Date.now
+    const start = now()
+    const done = (ok: boolean, detail: string): { ok: boolean; ms: number; detail: string } => ({ ok, ms: now() - start, detail })
+    try {
+      const cfg = this.options.readClassifyConfig?.()
+      if (this.liveClassifySource() === 'host') {
+        if (this.options.hostLlm === undefined) return done(false, 'host llm service unavailable')
+        const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
+        const r = await completeViaHost(this.options.hostLlm, selection, 'Reply with exactly: OK', 'ping', cfg?.timeoutMs ?? 20_000)
+        return r.ok ? done(true, `${selection.provider}/${selection.model} → ${r.content.trim().slice(0, 60) || 'ok'}`) : done(false, r.error ?? 'host llm call failed')
+      }
+      if (cfg?.endpoint === undefined || cfg.endpoint === '' || cfg?.model === undefined || cfg.model === '') {
+        return done(false, 'custom endpoint/model not configured')
+      }
+      const r = await chatCompletion(cfg, 'Reply with exactly: OK', 'ping')
+      return r.ok ? done(true, `${cfg.model} → ${r.content.trim().slice(0, 60) || 'ok'}`) : done(false, 'chat/completions call failed')
+    } catch (e) {
+      return done(false, String((e as Error)?.message ?? e))
+    }
   }
 
   /** Mint a precise session grant bound to a canonical call fingerprint. */

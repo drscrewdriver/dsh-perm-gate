@@ -9,7 +9,7 @@
  * in-memory mirror instead of failing.
  */
 export type AuditOutcome = 'allow' | 'deny' | 'ask' | 'delegated'
-export type DecisionSource = 'hard-deny' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier' | 'permissive'
+export type DecisionSource = 'hard-deny' | 'deny-keyword' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier' | 'permissive'
 
 export interface AuditEntry {
   readonly kind: 'permissionGate/decision'

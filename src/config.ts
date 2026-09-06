@@ -27,6 +27,12 @@ export interface PermGateConfig {
    * toward auto-allowing the exact same operation later. Default false.
    */
   readonly riskLearning?: boolean
+  /** Learning sedimentation switch: threshold-reached samples become deterministic auto-allows. Default true (while learning is on). */
+  readonly riskSediment?: boolean
+  /** llmAssist receiver source: an OpenAI-compatible endpoint (`custom`) or the DSH host `llm` service (`host`). Default custom. */
+  readonly classifierSource?: 'custom' | 'host'
+  /** Optional provider override for the host receiver (empty = the session's current model group). */
+  readonly classifierProvider?: string
   /** Confirmations required before a neutral-risk re-run may auto-allow. Default 3. */
   readonly riskThreshold?: number
   /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
@@ -50,6 +56,12 @@ export interface PermGateConfig {
    * file's `allow` section. Optional; edit from the settings card as a list.
    */
   readonly allowlist?: string[]
+  /**
+   * Editable deny-keyword blacklist (preset: dsh-approval-gate's inherited
+   * `DEFAULT_DENY_KEYWORDS`). Unset applies the preset; an explicit array
+   * (possibly empty) replaces it. Editable from the settings card as a list.
+   */
+  readonly denyKeywords?: string[]
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -88,6 +100,9 @@ export const Config: z<PermGateConfig> = z.object({
   classifierApiKey: z.string(),
   riskTimeoutMs: z.number().min(1000).default(20_000),
   riskLearning: z.boolean().default(false),
+  riskSediment: z.boolean().default(true),
+  classifierSource: z.union(['custom', 'host'] as const).default('custom'),
+  classifierProvider: z.string(),
   riskThreshold: z.number().min(1).max(10).default(3),
   learningFile: z.string(),
   eventsFile: z.string(),
@@ -100,6 +115,7 @@ export const Config: z<PermGateConfig> = z.object({
     llmAssist: z.boolean().default(false),
   }),
   allowlist: z.array(z.string()),
+  denyKeywords: z.array(z.string()),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>

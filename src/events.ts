@@ -149,3 +149,94 @@ export function registerEventsRoute(server: unknown, log: EventLog): boolean {
   })
   return true
 }
+
+export const LEARNING_ROUTE = '/api/dsh-perm-gate/learning'
+
+export const HEALTH_ROUTE = '/api/dsh-perm-gate/health'
+
+/**
+ * Register `POST /api/dsh-perm-gate/health` — runs one minimal completion
+ * through the currently configured llmAssist receiver and returns
+ * `{ ok, ms, detail }` (the settings card's health test).
+ */
+export function registerHealthRoute(server: unknown, provider: { check(): Promise<{ ok: boolean; ms: number; detail: string }> }): boolean {
+  if (typeof server !== 'object' || server === null) return false
+  const candidate = server as { register?: WebServerLike['register'] }
+  if (typeof candidate.register !== 'function') return false
+  candidate.register({
+    kind: 'exact',
+    path: HEALTH_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as { method?: string }
+      const res = rawRes as { writeHead: (code: number, headers?: Record<string, string>) => unknown; end: (body?: string) => unknown }
+      const json = (code: number, body: unknown): void => {
+        res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' })
+        res.end(JSON.stringify(body))
+      }
+      if (req.method !== 'POST') {
+        json(405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      provider.check().then(
+        (result) => json(200, { ...result, ok: true }),
+        (e: unknown) => json(500, { ok: false, error: String((e as Error)?.message ?? e) }),
+      )
+    },
+  })
+  return true
+}
+
+/** The learning-store face the settings UI's sediment view needs. */
+export interface LearningRouteProvider {
+  snapshot(): unknown
+  threshold(): number
+  reset(key: string, fp?: string): void
+}
+
+/**
+ * Register the learning-store routes on the webServer service:
+ * `GET  /api/dsh-perm-gate/learning` → the store snapshot + live threshold,
+ * `POST /api/dsh-perm-gate/learning` → `{ key, fp? }` terminates one key's
+ * learning or drops one sedimented sample. Returns whether registered.
+ */
+export function registerLearningRoute(server: unknown, provider: LearningRouteProvider): boolean {
+  if (typeof server !== 'object' || server === null) return false
+  const candidate = server as { register?: WebServerLike['register'] }
+  if (typeof candidate.register !== 'function') return false
+  candidate.register({
+    kind: 'exact',
+    path: LEARNING_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as { method?: string; url?: string; on?: (event: string, cb: (chunk?: unknown) => void) => unknown }
+      const res = rawRes as { writeHead: (code: number, headers?: Record<string, string>) => unknown; end: (body?: string) => unknown }
+      const json = (code: number, body: unknown): void => {
+        res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' })
+        res.end(JSON.stringify(body))
+      }
+      if (req.method === 'GET' || req.method === 'HEAD') {
+        json(200, { ok: true, threshold: provider.threshold(), ...(provider.snapshot() as object) })
+        return
+      }
+      if (req.method !== 'POST') {
+        json(405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      let body = ''
+      req.on?.('data', (chunk) => { body += String(chunk) })
+      req.on?.('end', () => {
+        try {
+          const parsed = JSON.parse(body === '' ? '{}' : body) as { key?: unknown; fp?: unknown }
+          if (typeof parsed.key !== 'string' || parsed.key === '') {
+            json(400, { ok: false, error: 'missing key' })
+            return
+          }
+          provider.reset(parsed.key, typeof parsed.fp === 'string' && parsed.fp !== '' ? parsed.fp : undefined)
+          json(200, { ok: true })
+        } catch (e) {
+          json(400, { ok: false, error: String((e as Error)?.message ?? e) })
+        }
+      })
+    },
+  })
+  return true
+}

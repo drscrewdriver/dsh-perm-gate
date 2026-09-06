@@ -18,6 +18,19 @@
 - 결정 이벤트 피드: 모든 결정이 `$DSH_HOME/perm-gate/events.jsonl`에 추가되고
   `GET /api/dsh-perm-gate/events?sessionId=&since=`로 제공되며, 브라우저 절반이 입력창 위 알림 바로 표시합니다.
 - 권한 선택기 방패 아이콘이 축소된 트리거에도 표시됩니다.
+- 승인 기록 페이지: 대화 보기에「승인 기록」탭이 추가되어 세션의 게이트 판정을 최신 순 타임라인으로
+  표시합니다(종류 태그·위험 카테고리·시간 포함). 설정 카드의 허용 목록은 행별 삭제가 가능한 편집형
+  목록 + 일괄 편집 토글로 바뀌었습니다.
+- dsh-approval-gate에서 계승한 프리셋 거부 키워드(`DEFAULT_DENY_KEYWORDS`): 키워드 일치(대소문자 구분
+  없는 부분 일치) 시 허용 목록/권한/LLM보다 먼저 거부. 설정 카드에서 목록으로 편집 가능하며 프리셋 태그와
+  원클릭 복원을 지원하고, 미설정·빈 목록 시 프리셋이 적용됩니다(블랙리스트는 항상 활성).
+- 학습 침전(`riskSediment`, 기본 켜짐): 임계값에 도달한 키의 확인 샘플이 결정론적 자동 허용 규칙이 됩니다——
+  지문 정확 일치 시 LLM 호출을 건너뛰고 llmAssist가 꺼져도 유지됩니다. 설정 카드에 목록으로 표시되며 키
+  종료·샘플 삭제가 가능합니다(`GET/POST /api/dsh-perm-gate/learning`).
+- 선택 가능한 llmAssist 수신처: **사용자 지정 API**(OpenAI 호환, Xiaomi MiMo
+  `https://api.xiaomimimo.com/v1` 포함 프리셋) 또는 **DSH 호스트 모델 그룹**(`llm` 서비스 +
+  `agentDefaultModel.currentSelection`, provider/model 재정의 가능) — 그리고 **상태 테스트**
+  버튼(`POST /api/dsh-perm-gate/health`)으로 최소 completion 응답과 지연 시간을 확인.
 
 ### 변경
 
