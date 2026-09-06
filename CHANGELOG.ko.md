@@ -30,7 +30,9 @@
 - 선택 가능한 llmAssist 수신처: **사용자 지정 API**(OpenAI 호환, Xiaomi MiMo
   `https://api.xiaomimimo.com/v1` 포함 프리셋) 또는 **DSH 호스트 모델 그룹**(`llm` 서비스 +
   `agentDefaultModel.currentSelection`, provider/model 재정의 가능) — 그리고 **상태 테스트**
-  버튼(`POST /api/dsh-perm-gate/health`)으로 최소 completion 응답과 지연 시간을 확인.
+  버튼(`POST /api/dsh-perm-gate/health`)으로 최소 completion 응답과 지연 시간을 확인. 설정 카드는 `GET /api/dsh-perm-gate/receiver`를 통해
+  라이브 프로바이더/모델 그룹 목록(호스트 `llm.listProviders`/`listModels`, 사용자 지정 그룹 포함)을
+  읽어 현재 적용 선택을 표시합니다.
 
 ### 변경
 

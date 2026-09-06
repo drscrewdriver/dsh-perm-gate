@@ -31,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including Xiaomi MiMo `https://api.xiaomimimo.com/v1`) or the **DSH host model group**
   (`llm` service + `agentDefaultModel.currentSelection`, provider/model overridable) — plus a
   **health test** button (`POST /api/dsh-perm-gate/health`) that runs one minimal completion
-  and reports latency.
+  and reports latency. The card reads the live provider/model-group catalog
+  (host `llm.listProviders`/`listModels` — user-configured custom groups included) via
+  `GET /api/dsh-perm-gate/receiver` and shows the effective provider/model selection.
 - Preset deny-keyword blacklist inherited from dsh-approval-gate (`DEFAULT_DENY_KEYWORDS`): a
   case-insensitive keyword hit vetoes the call before whitelist / grants / LLM; editable as a
   list in the settings card with preset tags and one-click restore; unset or empty applies the

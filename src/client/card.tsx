@@ -11,7 +11,7 @@
  * Kept dependency-free beyond react: the scope is subscribed with
  * `useSyncExternalStore`, and the controls are plain HTML.
  */
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
@@ -54,6 +54,14 @@ export interface PermissiveCardInjected {
 
 /** Full props: locale seat + the injected scope. */
 export type PermissiveCardProps = PropsLocale<'dsh-perm-gate'> & PermissiveCardInjected
+
+/** The receiver projection served by GET /api/dsh-perm-gate/receiver. */
+interface ReceiverInfoBody {
+  readonly ok?: boolean
+  readonly source?: 'custom' | 'host'
+  readonly selection?: { readonly provider: string; readonly model: string } | null
+  readonly providers?: readonly { readonly id: string; readonly name: string; readonly models: readonly { readonly id: string; readonly name: string }[]; readonly error?: string }[]
+}
 
 const rowStyle: CSSProperties = {
   display: 'flex',
@@ -140,6 +148,20 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   // Health-test state for the llmAssist receiver.
   const [healthBusy, setHealthBusy] = useState(false)
   const [healthResult, setHealthResult] = useState<string | null>(null)
+  // Receiver introspection: the live provider/model-group catalog (host mode)
+  // and the provider/model the gate will actually use right now.
+  const receiverSource = (value.classifierSource ?? 'custom') === 'host' ? 'host' : 'custom'
+  const [receiverInfo, setReceiverInfo] = useState<ReceiverInfoBody | null>(null)
+  const [receiverNonce, setReceiverNonce] = useState(0)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/dsh-perm-gate/receiver', { headers: { 'cache-control': 'no-cache' } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data: ReceiverInfoBody) => { if (alive) setReceiverInfo(data) })
+      .catch(() => { if (alive) setReceiverInfo(null) })
+    return () => { alive = false }
+  }, [receiverSource, receiverNonce])
+  const receiverProviderDraft = value.classifierProvider ?? ''
   const patterns = value.allowlist ?? []
   const removePattern = (index: number): void => {
     void scope.set('allowlist', patterns.filter((_, i) => i !== index))
@@ -344,31 +366,53 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                   <span style={fieldLabelStyle}>{t('card.llmProvider')}</span>
                                   <input
                                     type="text"
+                                    list="perm-gate-provider-options"
                                     value={value.classifierProvider ?? ''}
                                     disabled={readonly}
-                                    placeholder="deepseek-official"
+                                    placeholder={t('card.llmProviderPlaceholder')}
                                     style={controlStyle}
                                     onChange={(event) => { void scope.set('classifierProvider', event.currentTarget.value) }}
                                     onBlur={(event) => {
                                       if (event.currentTarget.value.trim() === '') void scope.unset('classifierProvider')
                                     }}
                                   />
+                                  <datalist id="perm-gate-provider-options">
+                                    {(receiverInfo?.providers ?? []).map((p) => (
+                                      <option key={p.id} value={p.id}>{p.name}{p.error !== undefined ? ` (${p.error})` : ''}</option>
+                                    ))}
+                                  </datalist>
                                 </label>
+                                {receiverInfo?.selection !== null && receiverInfo?.selection !== undefined
+                                  ? (
+                                      <span style={hintStyle}>
+                                        {t('card.llmResolved')
+                                          .replace('%p', receiverInfo.selection.provider)
+                                          .replace('%m', receiverInfo.selection.model)}
+                                      </span>
+                                    )
+                                    : null}
                               </>
                             )}
                           <label style={fieldStyle}>
                             <span style={fieldLabelStyle}>{t('card.llmModel')}</span>
                             <input
                               type="text"
+                              list={receiverSource === 'host' ? 'perm-gate-model-options' : undefined}
                               value={value.classifierModel ?? ''}
                               disabled={readonly}
-                              placeholder="deepseek-chat"
+                              placeholder={receiverSource === 'host' ? t('card.llmModelHostPlaceholder') : 'deepseek-chat'}
                               style={controlStyle}
                               onChange={(event) => { void scope.set('classifierModel', event.currentTarget.value) }}
                               onBlur={(event) => {
                                 if (event.currentTarget.value.trim() === '') void scope.unset('classifierModel')
                               }}
                             />
+                            <datalist id="perm-gate-model-options">
+                              {(receiverInfo?.providers ?? [])
+                                .filter((p) => receiverProviderDraft === '' || p.id === receiverProviderDraft)
+                                .flatMap((p) => p.models)
+                                .map((m) => <option key={`${m.id}`} value={m.id}>{m.name}</option>)}
+                            </datalist>
                           </label>
                           <label style={fieldStyle}>
                             <span style={fieldLabelStyle}>{t('card.llmKey')}</span>
@@ -404,12 +448,26 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                               onClick={() => {
                                 setHealthBusy(true)
                                 setHealthResult(null)
-                                fetch('/api/dsh-perm-gate/health', { method: 'POST' })
-                                  .then((r) => r.json())
-                                  .then((res: { ok?: boolean; ms?: number; detail?: string; error?: string }) => {
+                                // The dsh webServer rejects bodyless POSTs, so send a
+                                // JSON envelope; parse defensively either way.
+                                fetch('/api/dsh-perm-gate/health', {
+                                  method: 'POST',
+                                  headers: { 'content-type': 'application/json' },
+                                  body: '{}',
+                                })
+                                  .then(async (r) => {
+                                    const text = await r.text()
+                                    try {
+                                      return JSON.parse(text) as { ok?: boolean; ms?: number; detail?: string; error?: string }
+                                    } catch {
+                                      throw new Error(text.trim().slice(0, 120) !== '' ? text.trim().slice(0, 120) : `HTTP ${r.status}`)
+                                    }
+                                  })
+                                  .then((res) => {
                                     setHealthResult(res.ok === true && typeof res.ms === 'number'
                                       ? t('card.healthOk').replace('%ms', String(res.ms)) + (typeof res.detail === 'string' ? ` · ${res.detail}` : '')
                                       : t('card.healthFail') + (res.detail ?? res.error ?? 'unknown'))
+                                    setReceiverNonce((n) => n + 1)
                                   })
                                   .catch((e: unknown) => { setHealthResult(t('card.healthFail') + String((e as Error)?.message ?? e)) })
                                   .finally(() => { setHealthBusy(false) })

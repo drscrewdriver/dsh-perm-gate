@@ -30,7 +30,9 @@
 - 選択可能な llmAssist 受信先：**カスタム API**（OpenAI 互換、Xiaomi MiMo
   `https://api.xiaomimimo.com/v1` を含むプリセット付き）または **DSH ホストモデルグループ**
   （`llm` サービス + `agentDefaultModel.currentSelection`、provider/model 上書き可）に加え、
-  **健全性テスト**ボタン（`POST /api/dsh-perm-gate/health`）で最小 completion の応答とレイテンシを確認。
+  **健全性テスト**ボタン（`POST /api/dsh-perm-gate/health`）で最小 completion の応答とレイテンシを確認。設定カードは
+  `GET /api/dsh-perm-gate/receiver` 経由でライブのプロバイダー/モデルグループ一覧（ホスト
+  `llm.listProviders`/`listModels`、カスタムグループ含む）を取得し、実効的な選択を表示します。
 
 ### 変更
 

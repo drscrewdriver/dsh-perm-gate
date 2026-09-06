@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmChunk, type HostLlmLike } from '../src/host-llm.js'
 import { LLM_PRESETS } from '../src/llm-presets.js'
+import { buildReceiverInfo, resolveHostSelection } from '../src/receiver-info.js'
 import { PermGateRuntime } from '../src/runtime.js'
 
 const EXEC = { name: 'bash', arguments: { command: 'npm install left-pad' }, cwd: '/work', sessionId: 's1' }
@@ -123,5 +124,43 @@ describe('endpoint presets', () => {
     const mimo = LLM_PRESETS.find((p) => p.id === 'xiaomi-mimo')
     expect(mimo?.endpoint).toBe('https://api.xiaomimimo.com/v1')
     expect(mimo?.model).toContain('mimo')
+  })
+})
+
+describe('receiver projection (buildReceiverInfo)', () => {
+  it('lists live provider groups with their models; one broken group never blanks the rest', async () => {
+    const llm = {
+      listProviders: () => [{ id: 'deepseek-official', name: 'DeepSeek' }, { id: 'local-35b', name: 'local-35b' }],
+      listModels: async (id: string) => (id === 'local-35b'
+        ? Promise.reject(new Error('unreachable'))
+        : [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }]),
+    }
+    const info = await buildReceiverInfo({
+      source: 'host',
+      llm,
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
+      overrideProvider: '',
+      overrideModel: '',
+      customModel: '',
+    })
+    expect(info.selection).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    expect(info.providers[0]?.models[0]?.id).toBe('deepseek-v4-flash')
+    expect(info.providers[1]?.error).toContain('unreachable')
+  })
+
+  it('custom source exposes only the configured model, no providers', async () => {
+    const info = await buildReceiverInfo({ source: 'custom', customModel: 'mimo-v2.5' })
+    expect(info.providers).toEqual([])
+    expect(info.selection).toEqual({ provider: 'custom', model: 'mimo-v2.5' })
+  })
+
+  it('overrides beat the session selection; defaults apply when both are absent', () => {
+    expect(resolveHostSelection({
+      source: 'host',
+      currentSelection: () => ({ provider: 'a', model: 'b' }),
+      overrideProvider: 'c',
+      overrideModel: 'd',
+    })).toEqual({ provider: 'c', model: 'd' })
+    expect(resolveHostSelection({ source: 'host' })).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
   })
 })

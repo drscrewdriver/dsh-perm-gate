@@ -8,8 +8,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
 import { Config, resolvePermissiveStrategies } from './config.js'
-import { registerEventsRoute, registerHealthRoute, registerLearningRoute, type WebServerLike } from './events.js'
+import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
+import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type PermissiveState, type ToolExecutionLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
@@ -230,6 +231,32 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         reset: (key, fp) => { runtime.learningReset(key, fp) },
       })
       registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
+      // Receiver projection for the settings card (provider/model catalog is
+      // potentially slow to enumerate — cached briefly).
+      let receiverCache: { at: number; info: unknown } | null = null
+      registerReceiverRoute(webServer, {
+        info: async () => {
+          const now = Date.now()
+          if (receiverCache !== null && now - receiverCache.at < 60_000) return receiverCache.info
+          const c = current()
+          const info = await buildReceiverInfo({
+            source: c.classifierSource === 'host' ? 'host' : 'custom',
+            llm: llmService as typeof hostLlm & { listProviders?: () => readonly { id: string; name: string }[]; listModels?: (id: string) => Promise<readonly { id: string; name: string }[]> } | undefined,
+            currentSelection: () => {
+              try {
+                return (hostModelService as { currentSelection?: () => { provider?: unknown; model?: unknown } } | undefined)?.currentSelection?.()
+              } catch {
+                return undefined
+              }
+            },
+            overrideProvider: typeof c.classifierProvider === 'string' ? c.classifierProvider : '',
+            overrideModel: typeof c.classifierModel === 'string' ? c.classifierModel : '',
+            customModel: typeof c.classifierModel === 'string' ? c.classifierModel : '',
+          })
+          receiverCache = { at: now, info }
+          return info
+        },
+      })
     }
   } catch {
     // webServer unavailable: the feed remains disk-only, sediment is view-only in files

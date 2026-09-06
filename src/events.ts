@@ -154,6 +154,40 @@ export const LEARNING_ROUTE = '/api/dsh-perm-gate/learning'
 
 export const HEALTH_ROUTE = '/api/dsh-perm-gate/health'
 
+export const RECEIVER_ROUTE = '/api/dsh-perm-gate/receiver'
+
+/**
+ * Register `GET /api/dsh-perm-gate/receiver` — the receiver projection for the
+ * settings card: the effective provider/model plus (host mode) the live
+ * provider/model-group catalog from the DSH `llm` service.
+ */
+export function registerReceiverRoute(server: unknown, provider: { info(): Promise<unknown> }): boolean {
+  if (typeof server !== 'object' || server === null) return false
+  const candidate = server as { register?: WebServerLike['register'] }
+  if (typeof candidate.register !== 'function') return false
+  candidate.register({
+    kind: 'exact',
+    path: RECEIVER_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as { method?: string }
+      const res = rawRes as { writeHead: (code: number, headers?: Record<string, string>) => unknown; end: (body?: string) => unknown }
+      const json = (code: number, body: unknown): void => {
+        res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' })
+        res.end(JSON.stringify(body))
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        json(405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      provider.info().then(
+        (info) => json(200, { ok: true, ...info as object }),
+        (e: unknown) => json(500, { ok: false, error: String((e as Error)?.message ?? e) }),
+      )
+    },
+  })
+  return true
+}
+
 /**
  * Register `POST /api/dsh-perm-gate/health` — runs one minimal completion
  * through the currently configured llmAssist receiver and returns
