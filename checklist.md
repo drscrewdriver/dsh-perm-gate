@@ -26,13 +26,21 @@
 
 ### runtime 集成(test/runtime-risk.spec.ts 5 例 + test/permissive.spec.ts)
 - [x] llmAssist+safe → allow 且审计 source=classifier
-- [x] llmAssist+risky 硬类别(credential/deletion)→ 维持 ask,不产生 pending
+- [x] llmAssist+risky 硬类别(credential/deletion)→ 自动拒绝(auto-deny),不产生 pending
 - [x] llmAssist+risky neutral → ask + pending 登记;settleExecution 后计数 +1
 - [x] 阈值满足 + 同指纹 → 直接 allow(learned);跨运行时实例持久化生效
 - [x] 不同目标(`npm install right-pad`)仍 ask —— 无跨目标复用
 - [x] riskLearning=false → neutral 也只 ask 不学习
 - [x] 协议失败/未配置 → 维持原 ask,永不 deny/allow
 - [x] P0/deny/grant 决策不进 refineAsk(仅 ask 进入精炼;alwaysConfirm 升级的 ask 亦可被精炼)
+
+### pre-execute 水闸(test/pre-execute.spec.ts 7 例)
+- [x] safe → listener 返回 undefined 并调用 next():宿主收不到 ask,面板不出现(pendingAskCount=0,事件 verdict=llm-safe)
+- [x] 硬类别 → 返回 deny 且不调 next(auto-deny 真正到达宿主)
+- [x] risky:neutral → 返回 ask(reason 含 `llm-assist risky:neutral`)且不调 next,pending 登记
+- [x] unresolved / 判定抛错 → 保留原 ask(fail-closed,不调 next)
+- [x] 已取消的调用(exec.signal.aborted)→ 不调 LLM,保留 ask
+- [x] 非 ask 决策(read 只读工具)→ 直接 next(),不调 LLM
 
 ### 事件流(src/events.ts,test/events.spec.ts 8 例)
 - [x] 每次裁决追加 JSONL 一行(id 单调,重启恢复游标);since/sessionId 过滤正确

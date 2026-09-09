@@ -1,6 +1,6 @@
 # dsh-perm-gate — 交接文档（HANDOVER.md）
 
-> 版本线：v0.2.0（`package.json`）
+> 版本线：v0.2.1-beta.3（`package.json`）
 > 仓库：`E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate`
 > 安装：`dsh plugin --profile web add dsh-perm-gate`
 > 目标读者：续接会话 / 新协作者 — 15 分钟理解全貌，30 分钟开始贡献。
@@ -163,7 +163,8 @@ dsh-perm-gate/
 | ~92–121 | `PermissiveSurface` interface + `asSurface()` 转换器 |
 | ~128–156 | `buildSessionSender()` — 撤销消息投递 |
 | ~165–178 | `makeApprovalObserver()` — 被动批准观察者 |
-| ~180–410 | `apply()` 主入口：config → runtime → settings → routes → watergate → approval |
+| ~194–213 | `makePreExecuteListener()` — 水闸：**先 await `refineAsk`** 再返回决策（safe→`next()` 不弹面板 / 硬类别→deny / neutral·unresolved→ask） |
+| ~215–483 | `apply()` 主入口：config → runtime → settings → routes → watergate → approval |
 
 ### `src/runtime.ts`（932 行）
 

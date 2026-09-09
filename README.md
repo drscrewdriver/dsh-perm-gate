@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **Compatibility note:** v0.1.0 ships `ja` / `ko` dictionaries, but official DSH exposes
+> **Compatibility note:** v0.2.1-beta.3 ships `ja` / `ko` dictionaries, but official DSH exposes
 > only `zh` / `en` through `LocaleRuntime` (`LOCALE_IDS = ["zh", "en"]`). On stock DSH,
 > selecting `ja` / `ko` fails with `locale "<id>" is not registered`. Use a DSH fork that
 > updates `LOCALE_IDS` (locale-settings.ts) and `LOCALES` labels (client/index.ts), then
@@ -34,7 +34,7 @@
 > bundle value-imports nothing from `@deepseek-ai/*`, so the 0.1.2
 > `dsh-client-runtime` → `dsh-client-store` rename cannot break it.
 
-Version **0.1.0** — see the [Changelog](./CHANGELOG.md).
+Version **0.2.1-beta.3** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -175,16 +175,19 @@ exactly as before.
 ### Risk-graded llmAssist, verdict learning, and the event feed
 
 When `llmAssist` is on, the configured LLM grades one `ask` at a time with a structured
-protocol. Two receiver sources are selectable in the settings card: a **custom API** (any
+protocol. Grading happens **inside the gate's `tools/pre-execute` waterfall, before the decision
+is returned to the host**: a `safe` verdict delegates the call straight through, so the approval
+panel never appears; only a genuinely uncertain verdict reaches you. Two receiver sources are
+selectable in the settings card: a **custom API** (any
 OpenAI-compatible endpoint — `classifierEndpoint` / `classifierModel` / `classifierApiKey`,
 with presets including Xiaomi MiMo `https://api.xiaomimimo.com/v1`), or the **DSH host model
 group** (the session's configured `llm` service, via `agentDefaultModel.currentSelection`,
 optionally overridden with `classifierProvider` / `classifierModel`). A **health test** button
 (`POST /api/dsh-perm-gate/health`) runs one minimal completion and reports latency.
 
-- `safe` → the ask is auto-allowed (audited as the `classifier` source).
-- `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) →
-  the ask **always** reaches the human; hard risks are never auto-allowed and never learned.
+- `safe` → the call is auto-allowed (audited as the `classifier` source); no panel is shown.
+- `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) → the call
+  is **auto-denied** without a panel; hard risks are never auto-allowed and never learned.
 - `risky:neutral` → with `riskLearning` enabled (Settings card, off by default), each human
   approval that actually executes (settled via the host's `tools/result` event) counts toward
   a `tool|category` key; once the count reaches `riskThreshold` (default 3) **and** the new

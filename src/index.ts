@@ -11,7 +11,7 @@ import { Config, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies
 import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { PermGateRuntime, type PermissiveState, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
+import { PermGateRuntime, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -174,6 +174,41 @@ export function makeApprovalObserver(
       // Recording must never influence the approval outcome.
     }
     return outcome
+  }
+}
+
+/**
+ * Build the `tools/pre-execute` waterfall listener (exported for tests).
+ *
+ * The llmAssist refinement is awaited **before** the decision leaves the
+ * waterfall. An ask that has been returned to the host is already on its way to
+ * the approval answerers, and DSH offers no API to retract it — the request's
+ * own `signal` can only settle it `cancelled` — so a `safe` verdict learned
+ * afterwards could be *recorded* but never acted on: the human still had to
+ * click. Grading here is what turns `safe` into a real auto-allow and keeps the
+ * prompt for the genuinely uncertain verdicts only (`risky:neutral`,
+ * `unresolved`, transport failure). The wait is bounded by the classifier's own
+ * `riskTimeoutMs` (default 20 s), and a grader failure keeps the original ask
+ * (fail-closed).
+ */
+export function makePreExecuteListener(
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk'>,
+): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
+  return async (exec, next) => {
+    const decision = runtime.decideExecution(exec)
+    // Passthrough (allow / stand-down) and a hard-deny need no grading.
+    if (decision === undefined) return next()
+    if (decision.kind !== 'ask') return decision
+    // A cancelled call is never worth a model round-trip; the registry rechecks
+    // cancellation after this gate settles.
+    if (exec.signal?.aborted === true) return decision
+    let refined: PreToolDecisionLike | undefined
+    try {
+      refined = await runtime.refineAsk(exec, decision)
+    } catch {
+      return decision // fail-closed: keep the human ask
+    }
+    return refined ?? next()
   }
 }
 
@@ -411,27 +446,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // webServer unavailable: the feed remains disk-only, sediment is view-only in files
   }
 
-  const listener: (exec: ToolExecutionLike, next: () => unknown) => Promise<unknown> = async (exec, next) => {
-    const decision = runtime.decideExecution(exec)
-    if (decision === undefined) return next()
-    // llmAssist: the panel MUST appear immediately after pre-execute returns.
-    // We NEVER await refineAsk here — return the original ask immediately so
-    // the approval panel pops up. The LLM classifier runs in the background
-    // and may auto-allow later via settleExecution.
-    if (decision.kind === 'ask') {
-      // Fire-and-forget: background LLM grading
-      runtime.refineAsk(exec, decision)
-        .then((refined) => {
-          if (refined === undefined) {
-            // classifier said "safe" → auto-allow
-            runtime.settleExecution(exec, { isError: false })
-          }
-        })
-        .catch(() => { /* background failure — ignore, panel already shown */ })
-      return decision
-    }
-    return decision
-  }
+  const listener = makePreExecuteListener(runtime)
   // `tools/pre-execute` / `tools/result` / `approval/request` are service events,
   // not part of cordis core's typed `Events`, so they are registered through the
   // string overload.

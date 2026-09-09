@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` バージョン **0.1.0**。判定チェーン、ルールファイル形式、Permissive
+`dsh-perm-gate` バージョン **0.2.1-beta.3**。判定チェーン、ルールファイル形式、Permissive
 ティアについては [日本語 README](./README.ja.md) を参照してください。
 
 ## 必要条件

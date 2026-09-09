@@ -12,13 +12,13 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **호환성 안내:** v0.1.0은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
+> **호환성 안내:** v0.2.1-beta.3은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
 > `zh` / `en`만 노출합니다(`LOCALE_IDS = ["zh", "en"]`). 기본 DSH에서 `ja` / `ko`를
 > 선택하면 `locale "<id>" is not registered` 오류가 발생합니다. `LOCALE_IDS`
 > (locale-settings.ts)와 `LOCALES` 라벨(client/index.ts)을 갱신한 DSH fork를 사용해
 > 다시 빌드하세요.
 
-버전 **0.1.0** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+버전 **0.2.1-beta.3** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 
@@ -180,10 +180,10 @@ host는 네임스페이스를 live로 읽으므로 변경은 재시작 없이 �
 
 ### 위험 등급 llmAssist, 판정 학습, 이벤트 피드
 
-`llmAssist`가 켜져 있으면 설정된 LLM(OpenAI 호환 엔드포인트라면 무엇이든 — `classifierEndpoint` / `classifierModel` / `classifierApiKey`을 자신의 API로 지정)이 구조화된 프로토콜로 `ask`를 하나씩 판정합니다:
+`llmAssist`가 켜져 있으면 설정된 LLM(OpenAI 호환 엔드포인트라면 무엇이든 — `classifierEndpoint` / `classifierModel` / `classifierApiKey`을 자신의 API로 지정)이 구조화된 프로토콜로 `ask`를 하나씩 판정합니다. **판정은 게이트의 `tools/pre-execute` 워터폴 안에서, 결정이 호스트로 반환되기 전에 이루어집니다**: `safe`는 곧바로 위임되므로 승인 패널이 아예 표시되지 않고, 정말로 판단할 수 없는 판정만 사람에게 전달됩니다.
 
-- `safe` → 자동 허용(감사 소스 `classifier`).
-- `risky` + **하드 위험 카테고리**(`deletion`, `credential`, `remote`, `system`, `bulk`) → 항상 사람에게 전달. 하드 위험은 자동 허용도 학습도 되지 않습니다.
+- `safe` → 자동 허용(감사 소스 `classifier`), 패널 없음.
+- `risky` + **하드 위험 카테고리**(`deletion`, `credential`, `remote`, `system`, `bulk`) → **자동 거부**, 패널 없음. 하드 위험은 자동 허용도 학습도 되지 않습니다.
 - `risky:neutral` → `riskLearning` 활성 시(설정 카드, 기본 꺼짐), 사람이 승인하고 실제 실행된 neutral 위험은 `tool|카테고리` 키로 카운트되며, `riskThreshold`(기본 3) 도달 및 새 호출의 작업 지문(명령어 단어 + 대상 기본 이름)이 확인된 샘플과 일치하면 **동일 작업만** 자동 허용됩니다. 학습 침전(`riskSediment`, 기본 켜짐)을 사용하면 임계값에 도달한 키의 확인 샘플이 **결정론적 허용 규칙**이 됩니다: 지문이 정확히 일치하면 LLM 호출 없이 바로 허용——llmAssist가 꺼져도 유지되며, 침전 규칙은 설정 카드에서 확인·관리(종료 / 샘플 삭제)할 수 있습니다.
 - 시간 초과(`riskTimeoutMs`, 기본 20초, 1회 재시도), 전송 실패, 프로토콜 외 출력은 원래 `ask`를 유지합니다.
 

@@ -12,13 +12,13 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **互換性に関する注記:** v0.1.0 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
+> **互換性に関する注記:** v0.2.1-beta.3 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
 > `LocaleRuntime` が公開するのは `zh` / `en` のみです（`LOCALE_IDS = ["zh", "en"]`）。
 > 素の DSH で `ja` / `ko` を選択すると `locale "<id>" is not registered` になります。
 > `LOCALE_IDS`（locale-settings.ts）と `LOCALES` ラベル（client/index.ts）を更新した
 > DSH fork を使って再ビルドしてください。
 
-バージョン **0.1.0** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
+バージョン **0.2.1-beta.3** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
 
@@ -181,10 +181,10 @@ Full access / `custom`）では、ゲートの判定フローは**一切実行�
 
 ### リスク判定 llmAssist、裁決学習、イベントフィード
 
-`llmAssist` 有効時、設定された LLM（OpenAI 互換エンドポイントなら任意——`classifierEndpoint` / `classifierModel` / `classifierApiKey` を自分の API に向けてください）が構造化プロトコルで `ask` を 1 件ずつ判定します：
+`llmAssist` 有効時、設定された LLM（OpenAI 互換エンドポイントなら任意——`classifierEndpoint` / `classifierModel` / `classifierApiKey` を自分の API に向けてください）が構造化プロトコルで `ask` を 1 件ずつ判定します。**判定はゲートの `tools/pre-execute` ウォーターフォール内、決定がホストへ返る前に行われます**：`safe` はそのまま委譲されるため承認パネルは一切表示されず、本当に判断できない判定だけが人手に回ります。
 
-- `safe` → 自動許可（監査ソースは `classifier`）。
-- `risky` + **ハードリスクカテゴリ**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 常に人手へ。ハードリスクは自動許可も学習もされません。
+- `safe` → 自動許可（監査ソースは `classifier`）。パネルは表示されません。
+- `risky` + **ハードリスクカテゴリ**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ **自動拒否**、パネルなし。ハードリスクは自動許可も学習もされません。
 - `risky:neutral` → `riskLearning` 有効時（設定カード内、既定オフ）、人手で承認され実際に実行された neutral リスクは `tool|カテゴリ` ごとにカウントされ、`riskThreshold`（既定 3）到達かつ新呼び出しの操作指紋（コマンド語＋対象の基底名）が確認済みサンプルに一致した場合、**同一操作のみ**自動許可されます。学習沈殿（`riskSediment`、既定オン）を有効にすると、しきい値に達したキーの確認サンプルは**決定論的な許可ルール**になります：指紋の正確一致は LLM を経由せず自動許可——llmAssist オフでも継続し、沈殿ルールは設定カードで確認・管理（終止 / サンプル削除）できます。
 - タイムアウト（`riskTimeoutMs`、既定 20 秒、1 回リトライ）、通信失敗、プロトコル外出力は元の `ask` を維持します。
 

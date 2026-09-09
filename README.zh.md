@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **兼容性说明：** v0.1.0 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
+> **兼容性说明：** v0.2.1-beta.3 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
 > 只暴露 `zh` / `en`（`LOCALE_IDS = ["zh", "en"]`）。在原版 DSH 上选择 `ja` / `ko`
 > 会报 `locale "<id>" is not registered`。请使用更新了 `LOCALE_IDS`
 > （locale-settings.ts）与 `LOCALES` 标签（client/index.ts）的 DSH fork 并重新构建。
@@ -31,7 +31,7 @@
 > 客户端 bundle 对 `@deepseek-ai/*` 无任何值导入，因此 0.1.2 的
 > `dsh-client-runtime` → `dsh-client-store` 改名不会影响它。
 
-版本 **0.1.0** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **0.2.1-beta.3** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 
@@ -138,10 +138,10 @@ Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而�
 
 ### 风险分级 llmAssist、裁决学习与事件流
 
-开启 `llmAssist` 后，接收 LLM（自定义 OpenAI 兼容端点，或 DSH 宿主模型组——见上文）按结构化协议逐条评估 `ask`：
+开启 `llmAssist` 后，接收 LLM（自定义 OpenAI 兼容端点，或 DSH 宿主模型组——见上文）按结构化协议逐条评估 `ask`。**判定发生在门禁的 `tools/pre-execute` 瀑布内部、决策返回宿主之前**：`safe` 直接放行，审批面板根本不会出现；只有真正无法确定的判定才会弹到你面前。
 
-- `safe` → 自动放行（审计来源为 `classifier`）。
-- `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ 一律转人工；硬风险永不自动放行、也永不进入学习。
+- `safe` → 自动放行（审计来源为 `classifier`），不弹面板。
+- `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ **自动拒绝**、不弹面板；硬风险永不自动放行、也永不进入学习。
 - `risky:neutral` → 若开启 `riskLearning`（设置卡片内，默认关闭），人工批准且真实执行的 neutral 风险会按 `tool|类别` 计数；计数达到 `riskThreshold`（默认 3）且新调用的操作指纹（命令词 + 目标基名）命中已确认样本时，**同一操作**自动放行。不同目标永不复用该放行。开启学习沉淀（`riskSediment`，默认开）后，满阈值 key 的确认样本会成为**确定性放行规则**：指纹精确命中即直接放行、无需再过 LLM——即使关闭 llmAssist 也继续生效；沉淀规则在设置卡片中可见、可管理（终止学习 / 删除样本）。
 - 超时（`riskTimeoutMs`，默认 20s，重试 1 次）、传输失败与协议外输出均维持原 `ask`——门禁绝不猜测。
 

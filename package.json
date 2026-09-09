@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "0.2.1-beta.2",
+  "version": "0.2.1-beta.3",
   "description": "DSH permission-gate: a single self-sufficient, deterministic-first, fail-closed gate covering P0 hard-deny -> P1 session grant -> P2 static rule (allow/deny) chain -> P3 optional LLM semantic classifier -> P4 ask, with command whitelist/blacklist.",
   "type": "module",
   "files": [

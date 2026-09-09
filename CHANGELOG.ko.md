@@ -7,11 +7,13 @@
 
 ## [Unreleased]
 
+## [0.2.1-beta.3] - 2026-09-10
+
 ### 추가
 
 - 위험 등급 `llmAssist`: 설정된 사용자 지정 LLM(OpenAI 호환 엔드포인트)이 각 `ask`를
   `safe` / `risky:<카테고리>`로 판정합니다. 하드 카테고리(deletion / credential / remote / system /
-  bulk)는 항상 사람에게 전달되고, 시간 초과는 1회 재시도하며, 모든 실패는 fail-closed를 유지합니다.
+  bulk)는 자동 거부되고, 시간 초과는 1회 재시도하며, 모든 실패는 fail-closed를 유지합니다.
 - 판정 학습(`riskLearning`, 기본 꺼짐, `riskThreshold` 1–10, 기본 3): 사람이 승인하고 실제 실행된
   neutral 위험은 카운트되어 지문이 일치하는 동일 작업만 자동 허용 — `$DSH_HOME/perm-gate/learning.json`에
   영속화되며 사용자 YAML 규칙에는 기록되지 않습니다.
@@ -77,6 +79,15 @@
 
 ### 수정
 
+- **`llmAssist`의 `safe`는 기록만 될 뿐 실제로 자동 허용되지 않았습니다.** `tools/pre-execute`
+  리스너가 `ask`를 즉시 반환하고 백그라운드에서 판정했지만, 호스트로 넘어간 ask는 이미 승인
+  answerer로 향하고 있고 DSH에는 이를 되돌릴 API가 없습니다(요청의 `signal`이 할 수 있는 일은
+  `cancelled`로 종결시키는 것뿐입니다). 그래서 패널은 계속 표시되었고, 피드에는 `safe` 자동 허용이
+  찍혔는데도 사람이 직접 클릭해야 했습니다 — 하드 위험의 `auto-deny`는 호스트에 아예 전달되지
+  않았습니다. 이제 리스너는 결정을 반환하기 **전에** `refineAsk`를 await하며
+  (`makePreExecuteListener`), `safe`는 `next()`로 위임되어 패널이 뜨지 않고, 하드 카테고리는 자동
+  거부되며, `risky:neutral` / `unresolved` / 판정 실패만 사람에게 ask로 남습니다(fail-closed).
+  대기 시간은 `riskTimeoutMs`(기본 20초)로 제한되며, 이미 취소된 호출은 판정을 건너뜁니다.
 - **사용자가 선택한 권한 티어를 게이트가 덮어썼습니다.** 게이트는 독립 승인 티어를 가지지만
   *모든* 프리셋에서 동작했고, 모든 경계가 `ask`가 되어 DSH 승인 시임으로 전달되었으며,
   `danger-full-access`(`approval: never`)에서는 그 시임이 **어떤 answerer보다도 먼저**

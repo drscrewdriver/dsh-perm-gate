@@ -7,11 +7,13 @@
 
 ## [Unreleased]
 
+## [0.2.1-beta.3] - 2026-09-10
+
 ### 追加
 
 - リスク判定 `llmAssist`：設定されたカスタム LLM（OpenAI 互換エンドポイント）が各 `ask` を
   `safe` / `risky:<カテゴリ>` で判定。ハードカテゴリ（deletion / credential / remote / system /
-  bulk）は常に人手へ、タイムアウトは 1 回リトライ、失敗は常に fail-closed。
+  bulk）は自動拒否、タイムアウトは 1 回リトライ、失敗は常に fail-closed。
 - 裁決学習（`riskLearning`、既定オフ、`riskThreshold` 1–10、既定 3）：人手で承認され実際に実行された
   neutral リスクをカウントし、指紋一致する同一操作のみ自動許可。`$DSH_HOME/perm-gate/learning.json`
   に永続化され、ユーザーの YAML ルールには書き込みません。
@@ -78,6 +80,16 @@
 
 ### 修正
 
+- **`llmAssist` の `safe` は記録されるだけで、実際には自動許可されていませんでした。**
+  `tools/pre-execute` リスナーは `ask` を即座に返してバックグラウンドで判定していましたが、ホストへ
+  渡した ask はすでに承認 answerer へ向かっており、DSH にはそれを取り消す API がありません
+  （リクエストの `signal` ができるのは `cancelled` での決着だけです）。そのためパネルは表示され続け、
+  フィードには `safe` の自動許可が出ているのに人手でのクリックが必須でした — さらにハードリスクの
+  `auto-deny` はホストにまったく届いていませんでした。リスナーは決定を返す**前に** `refineAsk` を
+  await するようになり（`makePreExecuteListener`）、`safe` は `next()` で委譲されパネルは出ず、
+  ハードカテゴリは自動拒否、`risky:neutral` / `unresolved` / 判定失敗のみが人手の ask を維持します
+  （fail-closed）。待機時間は `riskTimeoutMs`（既定 20 秒）で上限が決まり、すでにキャンセルされた
+  呼び出しは判定をスキップします。
 - **ユーザーが選んだ権限ティアをゲートが上書きしていました。** ゲートは独立した承認ティアを
   持ちますが *すべての* プリセットで動作し、あらゆる越境が `ask` になって DSH 承認シームへ
   転送され、`danger-full-access`（`approval: never`）ではそのシームが **どの answerer よりも

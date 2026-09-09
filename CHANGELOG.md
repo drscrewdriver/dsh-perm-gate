@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1-beta.3] - 2026-09-10
+
 ### Added
 
 - Risk-graded `llmAssist`: the configured custom LLM (any OpenAI-compatible endpoint) grades each
   `ask` as `safe` / `risky:<category>`; hard categories (deletion / credential / remote / system /
-  bulk) always ask, timeouts retry once, and every failure stays fail-closed.
+  bulk) auto-deny, timeouts retry once, and every failure stays fail-closed.
 - Verdict learning (`riskLearning`, off by default; `riskThreshold` 1–10, default 3): neutral-risk
   asks confirmed by a human and actually executed count toward auto-allowing the exact same
   operation (fingerprint-matched) — persisted to `$DSH_HOME/perm-gate/learning.json`, never into
@@ -94,6 +96,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`llmAssist` "safe" now actually auto-allows instead of only being recorded.** The
+  `tools/pre-execute` listener returned the `ask` immediately and graded the call in the
+  background, but an ask handed to the host is already on its way to the approval answerers and
+  DSH offers no API to retract it (the request's own `signal` can only settle it `cancelled`). The
+  panel therefore still appeared and the human still had to click, while the feed showed the
+  `safe` auto-allow — and a hard-risk `auto-deny` never reached the host at all. The listener now
+  awaits `refineAsk` **before** returning the decision (`makePreExecuteListener`): `safe` delegates
+  via `next()` with no panel, a hard-risk category auto-denies, and only `risky:neutral` /
+  `unresolved` / a grader failure keep the human ask (fail-closed). The wait is bounded by
+  `riskTimeoutMs` (default 20 s) and an already-cancelled call skips grading.
 - **The shell write-pattern layer never ran for DSH's primary shell tool.** `SHELL_TOOLS` listed
   `bash` / `pwsh` / `sh` / `cmd` / `powershell` but not **`shell`** (DSH's own tool name) or
   `terminal`, so `git push`, `chmod`, `tee`, redirects and every other write pattern fell through
