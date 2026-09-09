@@ -17,6 +17,20 @@
 > 会报 `locale "<id>" is not registered`。请使用更新了 `LOCALE_IDS`
 > （locale-settings.ts）与 `LOCALES` 标签（client/index.ts）的 DSH fork 并重新构建。
 
+> **▼ DSH 版本适配**
+>
+> | DSH 版本 | 加载 | 设置注册 | 宿主门 | 客户端半 |
+> | --- | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | ✅ | `ctx.settings.register(ns, schema, { base })` | ✅ `tools/pre-execute` 一致 | ✅ 仅类型导入 |
+> | 0.1.2-alpha.2+ / 0.1.2-rc.1 | ✅ | `register` 仍保留（另加 `installSection`） | ✅ `tools/pre-execute` 一致 | ✅ 仅类型导入 |
+>
+> 一份产物同时支持两版本。两处版本敏感点都用**能力探测**而非版本号判断：
+> ① 设置注册走 `register`，它在所有目标版本都存在（`installSection` 是 0.1.2 的
+> **新增**而非替代）；② `effectivePolicy` 在**两版本**中都是 user-approval 服务的
+> **私有**方法，故只在 `typeof` 探测后调用，缺失或抛错时降级为「策略未知」。
+> 客户端 bundle 对 `@deepseek-ai/*` 无任何值导入，因此 0.1.2 的
+> `dsh-client-runtime` → `dsh-client-store` 改名不会影响它。
+
 版本 **0.1.0** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
@@ -61,9 +75,10 @@ dsh plugin --profile web add dsh-perm-gate
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml
+    rulesFile: ./permissions.yaml   # 可选；默认 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME
     defaultAction: ask
+    gatePresets: [permissive]       # 门禁生效的档位（默认值）
 ```
 
 规则示例：见 [examples/permissions.example.yaml](./examples/permissions.example.yaml)。
@@ -99,10 +114,20 @@ P0 硬拒绝始终单调且不可协商。
 
 ### 权限下拉里可选档位
 
-`cordis.patch.yml` 通过扩展 DSH 的 `permission.config.presets` 加入了 `permissive` preset
+`cordis.patch.yml` 在 DSH 的 `permission.config.presets` 里新增了 `permissive` preset
 （`sandbox: workspace-write`、`approval: ask`、名称 **Permissive**），位于 Workspace Write 与
-Full access 之间——与 Auto 档同一机制。因此会话权限下拉里会出现 Permissive 这个**独立可选审批档**，
-而不是"auto-approval"档。
+Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而非逐键合并，所以该文件还必须重述三个内置档
+（`read-only` / `workspace-write` / `danger-full-access`，取自
+`@deepseek-ai/dsh-base/cordis.patch.yml`）；`test/patch-presets.spec.ts` 固定了这份键集合。因此会话权限
+下拉里会出现 Permissive 这个**独立可选审批档**，而不是"auto-approval"档。
+
+门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive']`，即本插件新增的那一档）。在其余任何档位
+（Read Only、Workspace Write、Full access、`custom`）里，门禁的判定流程**完全不运行**：不放行、不弹审批、
+不拒绝、不执行 P0 硬拒绝、不做黑名单关键词拦截，也不写审计事件——该档位自己的策略说了算。这正是重点所在：
+`danger-full-access` 的定义就是"全权限、不弹审批"，用 ask 去覆盖它毫无意义（该档 `approval: never` 会让审批接缝
+**在任何 answerer 运行之前**直接返回 `rejected`，被转发的 ask 只能得到 `the user rejected tool "..."`，面板根本不会
+弹出），用硬拒绝去覆盖它则等于悄悄推翻用户选定的档位。`gatePresets: ['*']` 可让门禁重新全局生效（含硬拒绝层）；
+在生效档位内，若会话生效的审批策略为 `never`，ask 仍会降级为放行。
 
 ### 在 UI 里可配置
 
@@ -121,6 +146,10 @@ Full access 之间——与 Auto 档同一机制。因此会话权限下拉里�
 - 超时（`riskTimeoutMs`，默认 20s，重试 1 次）、传输失败与协议外输出均维持原 `ask`——门禁绝不猜测。
 
 学习状态持久化在插件自有 JSON（`$DSH_HOME/perm-gate/learning.json` 或 `learningFile`），不写入你的 YAML 规则文件。每次决策都会追加到 `$DSH_HOME/perm-gate/events.jsonl`（或 `eventsFile`），并经 `GET /api/dsh-perm-gate/events?sessionId=&since=` 提供；浏览器端轮询该接口，在输入框上方以提示条展示最新决策（ask 常驻至下一条事件），并在对话视图的「审批记录」页签按时间倒序列出本会话的全部判定。
+
+每次决策涉及的文件都会在改动落地前快照（每事件 ≤5 个文件、单文件 ≤256 KB）到 `$DSH_HOME/perm-gate/snapshots/`；「审批记录」页签中每个文件 chip 可点开行级改动对比（`GET /api/dsh-perm-gate/diff`），并可**撤销**该改动——向会话投递恢复指令（`POST /api/dsh-perm-gate/revert`）。快照管理条支持按会话或全量清理（`GET /api/dsh-perm-gate/snapshots-stats` / `POST /api/dsh-perm-gate/snapshots-clear`）。
+
+转人工的 `ask` 会被跟踪到人工给出答复为止：一个**被动** `approval/request` 观察者记录封闭结果（`allowed-once` → **人工通过**、`rejected` → **人工拒绝**、`cancelled` → **人工取消**、`unavailable` → 拒绝，因为不存在审批通道）；当观察者无法关联该 ask 时（缺 `callId`、无 approval 服务、上游监听者短路），由 `tools/result` 兜底结算同一个 ask。人工通过会显示通过后的学习进度（`n`/阈值），通知条也会为三种终态分别打标。
 
 插件还内置一份**预置黑名单关键词**（继承自 dsh-approval-gate 的 `DEFAULT_DENY_KEYWORDS`：
 `rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` 等），

@@ -33,12 +33,94 @@
   **健全性テスト**ボタン（`POST /api/dsh-perm-gate/health`）で最小 completion の応答とレイテンシを確認。設定カードは
   `GET /api/dsh-perm-gate/receiver` 経由でライブのプロバイダー/モデルグループ一覧（ホスト
   `llm.listProviders`/`listModels`、カスタムグループ含む）を取得し、実効的な選択を表示します。
+- **承認記録のレビュー面**：各決定が触れたファイルは変更前にスナップショットされ（≤5 ファイル、
+  各 ≤256 KB、`$DSH_HOME/perm-gate/snapshots/`）、**承認記録**タブでファイルチップから行 diff
+  （`GET /api/dsh-perm-gate/diff`）を開き、**取り消し**（`POST /api/dsh-perm-gate/revert`）で会話に
+  復元指示を送信できます。スナップショット管理バー（`GET /api/dsh-perm-gate/snapshots-stats` /
+  `POST /api/dsh-perm-gate/snapshots-clear`、セッション単位または全件）も追加。イベント行は
+  `files` / `justification` / `verdict` / `category` を持つようになりました。
+- **人手承認の終態記録**：人手に回した `ask` を追跡し、受動的な `approval/request` オブザーバで
+  実際の回答を記録します — `allowed-once` → 承認、`rejected` → 拒否、`cancelled` → キャンセル、
+  `unavailable` → 拒否（承認チャネルなし）。オブザーバが関連付けできない場合（`callId` 欠落、
+  approval サービスなし、上流リスナーの短絡）は `tools/result` がフォールバックとして同じ ask を
+  解決します（「解決時に削除」が唯一の重複排除ルール）。承認時には承認後の学習進捗（`n`/しきい値）を
+  表示し、通知バーは 3 つの終態をラベル表示します。
+
+### 削除
+
+- 廃止された **Auto** 権限ティアを `cordis.patch.yml` に再記載しなくなりました。DSH の bundle
+  patch は `permission.config.presets` マップ全体を**置換**するため、このファイルは残すべき
+  ティアをすべて記載する必要があり、`dsh-auto-mode` が提供していた `auto` も含まれていました。
+  同プラグインはアンインストール済みで、ノブは `workspace-write` と同一、説明文の
+  「自動レビュー / ワンショット承認」は実装ごと失われ、さらにこのゲートはそのティアでは
+  動作しません（`gatePresets` の既定は `['permissive']`）。ピッカーは組み込み 3 ティア
+  （`read-only` / `workspace-write` / `danger-full-access`、`@deepseek-ai/dsh-base/cordis.patch.yml`
+  から再記載）と本プラグインの `permissive` のみを提示します。
+- `test/patch-presets.spec.ts` がこのキー集合を固定し、組み込みティアの脱落や廃止ティアの
+  復活があればテストが失敗します。
 
 ### 変更
 
+- ゲートは **`gatePresets` に列挙したティアでのみ動作**します（既定 `['permissive']`、
+  このプラグインが追加するティア）。それ以外のティア（Read Only / Workspace Write / Auto /
+  Full access / `custom`）では判定フローは一切実行されません——許可・ask・拒否・P0 ハード拒否・
+  拒否キーワード遮断・監査イベントのいずれも行いません。`gatePresets: ['*']` で再び全体
+  （ハード拒否を含む）に適用できます。
 - `llmAssist` はリスクカテゴリプロトコルを使用（従来の allow/deny/ask 判定のスーパーセット）。
   `classifier.ts` はリスク判定器と OpenAI 互換トランスポート（`chatCompletion`）を共有します。
+  ハードリスクカテゴリ（`deletion` / `credential` / `remote` / `system` / `bulk`）は
+  **自動拒否**に変更（人手に渡すのではなく、明らかに危険な操作は確認不要）；`risky:neutral`
+  （不確実）のみ人手に渡ります。
+- `write` / `edit` に**パス感知のデフォルト**が追加され、ワークスペース内の書き込みは
+  `defaultAction`（通常 `allow`）に従い、ワークスペース外への書き込みはコンテンツ審査のため
+  `ask` に昇格。LLM 分類器が安全コンテンツを自動許可、有害コンテンツを自動拒否できるため、
+  不確実な操作のみポップアップが発生します。
 
+### 修正
+
+- **ユーザーが選んだ権限ティアをゲートが上書きしていました。** ゲートは独立した承認ティアを
+  持ちますが *すべての* プリセットで動作し、あらゆる越境が `ask` になって DSH 承認シームへ
+  転送され、`danger-full-access`（`approval: never`）ではそのシームが **どの answerer よりも
+  先に** `rejected` を返しました — パネルは一度も表示されず、read 専用以外のすべての呼び出しが
+  誤解を招く `the user rejected tool "..."` で失敗しました。ハード拒否と拒否キーワード層も同様に
+  ティアを無視していたため、`danger-full-access`（「承認プロンプトなしのフルアクセス」）が
+  黙って狭められていました。ゲート全体が `gatePresets` に限定され、範囲外では何も行わず記録も
+  しません。有効なティア内では、実効承認方針が `never` の場合 ask はパススルーに降格します。
+- **読み取り専用の検索とセッション内ツールが ask になっていました。** `web_search` /
+  `modlens_read_image` は読み取り専用クエリ、`todo_write` / `render_ui` / `validate_dsh_ui` /
+  `ask_user_question` / `exit_plan_mode` / `ralph` / `workflow` はセッション内の状態または
+  委譲でありながら自動許可の分類に含まれておらず、毎回 `ask`（`no rule matched; default action`
+  のポップアップ）になっていました。これらを自動許可に追加し、第三者製の読み取り専用ツール向けに
+  `autoAllowTools` 設定を新設しました。P0 ハード拒否と拒否キーワード層は先に実行されるため、
+  このリストが権限を広げることはありません。
+- **`write`/`edit` がワークスペース外のパスに静かに書き込んでいました。** `~/.bashrc` や
+  別ドライブへの書き込みに `defaultAction`（通常 `allow`）が適用され、審査なしで実行されて
+  いました。ルールが一致しない場合、`write`/`edit` ツールに対してパス感知のオーバーライドが
+  適用され、ワークスペース内の書き込みは `defaultAction` に従い、ワークスペース外の書き込みは
+  コンテンツ審査のために `ask` に昇格します。有害なコンテンツは拒否され、`llmAssist` が有効
+  な場合は正常な追加が自動許可されます。`deny` ルールはパス範囲に関係なく勝ち、`allow` ルール
+  は内部パスを許可できますが、外部パスの審査を回避することはできません。
+- **P0 の資格情報検出が文書本文まで走査していました。** トークン・秘密鍵・`credentials.yaml` を
+  単に *言及* したファイルの書き込み／編集までハード拒否されていました。操作自体を表す引数
+  （`command` / `file_path` など）のみを走査するよう変更し、拒否キーワード層の「ファイルの
+  テキストは操作そのものではない」という規則に揃えました。
+- **`$DSH_HOME/perm-gate/rules.yml` が読み込まれませんでした。** `rulesFile` に既定値がなく、
+  `config` を省略したプロファイルではルールセットが空＋`defaultAction: ask` になり、ユーザーの
+  `defaultAction: allow` と `allow:` ルールは黙って無視されていました。`rulesFile` は
+  `<dataDir>/rules.yml` を既定値とし、設定カードの許可リストもそこへ書き込みます。
+- **`format` が PowerShell の `Format-Table` を拒否していました。** ハイフンはコマンド識別子の
+  単語境界ではないため、キーワードの端を識別子文字（`[A-Za-z0-9_-]`）で判定するようにし、
+  `format C: /q` は引き続き検出しつつ `Format-Table` / `mkfs.ext4` は正しく扱われます。
+- 拒否キーワードのマッチングが、長い識別子の中に単に含まれるだけのキーワードを拒否しなくなり、
+  文書本文の引数（`content` / `new_string` / `old_string` / `text` など）は走査対象外になりました
+  — ファイルのテキストは操作そのものではありません。マッチングは単語境界を意識するようになり、
+  句読点で終わるキーワードや CJK キーワードも引き続き機能し、空白は圧縮されるため余分な空白を含む
+  コマンドも検出されます。
+
+### Fixed
+
+- **すべての読み取りクエリに手動承認が必要でした。** `read` / `read_image` / `grep` / `glob` / `ls` / `lsp`
+  はワークスペース内のみの読み取り操作で、変更を加えることはできません。これらは自動許可されました。
 
 ### Added
 - **Permissive モード（独立審批枠）** — read-only / workspace-write / full-access / whitelist と並ぶ独立モード。

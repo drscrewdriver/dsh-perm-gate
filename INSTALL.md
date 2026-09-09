@@ -53,9 +53,10 @@ Add the plugin to your profile's `cordis.yml`:
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # optional; omit to fall back to defaultAction
+    rulesFile: ./permissions.yaml   # optional; defaults to $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # root pinned for protected-target checks
     defaultAction: ask              # allow | ask | deny
+    gatePresets: [permissive]       # tiers where the gate is active at all (default)
 ```
 
 Start from [examples/permissions.example.yaml](./examples/permissions.example.yaml),
@@ -85,7 +86,7 @@ and `dsh-movein-permissions`.
    entry above.
 3. Delete any preset overrides those plugins contributed — `cordis.patch.yml`
    **replaces** `permission.config.presets` wholesale, so stale per-key patches
-   from other plugins can silently drop the Permissive or Auto tier.
+   from other plugins can silently drop the Permissive tier (or a built-in one).
 4. Reload the profile and verify with `--list` (below).
 
 ## Verify

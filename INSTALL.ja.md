@@ -52,7 +52,7 @@ profile の `cordis.yml` にプラグインを追加します：
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # 省略時は defaultAction にフォールバック
+    rulesFile: ./permissions.yaml   # 任意。既定は $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 保護対象チェックのルート固定
     defaultAction: ask              # allow | ask | deny
 ```
@@ -84,7 +84,7 @@ dsh profile reload --profile web
    追加します。
 3. それらが提供していた preset の上書きを削除します。`cordis.patch.yml` は
    `permission.config.presets` を**丸ごと置換**するため、他プラグインの古い
-   key 単位パッチが Permissive / Auto ティアを黙って消すことがあります。
+   key 単位パッチが Permissive ティア（または組み込みティア）を黙って消すことがあります。
 4. profile を再読込し、後述の `--list` で検証します。
 
 ## 検証

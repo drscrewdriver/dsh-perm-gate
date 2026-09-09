@@ -53,7 +53,7 @@ profile의 `cordis.yml`에 플러그인을 추가합니다:
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # 생략 시 defaultAction으로 폴백
+    rulesFile: ./permissions.yaml   # 선택. 기본값은 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 보호 대상 검사의 고정 루트
     defaultAction: ask              # allow | ask | deny
 ```
@@ -83,7 +83,7 @@ dsh profile reload --profile web
 2. 위 네 플러그인을 `cordis.yml`에서 제거하고 `dsh-perm-gate` 항목만 추가합니다.
 3. 해당 플러그인들이 제공하던 preset 재정의를 삭제합니다. `cordis.patch.yml`은
    `permission.config.presets`를 **전체 교체**하므로, 다른 플러그인의 오래된
-   key 단위 패치가 Permissive / Auto 티어를 조용히 없앨 수 있습니다.
+   key 단위 패치가 Permissive 티어(또는 내장 티어)를 조용히 없앨 수 있습니다.
 4. profile을 다시 불러오고 아래의 `--list`로 검증합니다.
 
 ## 검증

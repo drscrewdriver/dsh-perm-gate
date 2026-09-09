@@ -18,6 +18,22 @@
 > updates `LOCALE_IDS` (locale-settings.ts) and `LOCALES` labels (client/index.ts), then
 > rebuild.
 
+> **▼ DSH version compatibility**
+>
+> | DSH version | Load | Settings registration | Host gate | Client half |
+> | --- | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | ✅ | `ctx.settings.register(ns, schema, { base })` | ✅ `tools/pre-execute` identical | ✅ type-only imports |
+> | 0.1.2-alpha.2+ / 0.1.2-rc.1 | ✅ | `register` still present (`installSection` added) | ✅ `tools/pre-execute` identical | ✅ type-only imports |
+>
+> One artifact covers both. Two version-sensitive seams are handled by capability
+> probes rather than version checks: (1) settings registration uses `register`,
+> which exists in every supported version (`installSection` is a 0.1.2 addition,
+> not a replacement); (2) `effectivePolicy` is a **private** method of the
+> user-approval service in **both** versions, so it is read behind a `typeof`
+> probe and degrades to “policy unknown” when absent or throwing. The client
+> bundle value-imports nothing from `@deepseek-ai/*`, so the 0.1.2
+> `dsh-client-runtime` → `dsh-client-store` rename cannot break it.
+
 Version **0.1.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
@@ -93,9 +109,10 @@ Add the plugin to `cordis.yml`:
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # optional; empty = allow everything per defaultAction
+    rulesFile: ./permissions.yaml   # optional; defaults to $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # root pinned for protected-target checks
     defaultAction: ask              # allow | ask | deny
+    gatePresets: [permissive]       # tiers where the gate is active at all (default)
 ```
 
 ### Rules file
@@ -185,15 +202,44 @@ Learning state persists to a plugin-owned JSON (`$DSH_HOME/perm-gate/learning.js
 `GET /api/dsh-perm-gate/events?sessionId=&since=`; the browser half polls it and shows the
 latest decision as a notice strip above the conversation input (asks stay visible until the
 next event) and lists the whole session's decisions newest-first in the **Approvals** tab of
-the conversation view. The Permissive tier keeps its shield icon in the permission picker — on both the
+the conversation view.
+
+Every decision's affected files are snapshotted before the change lands (≤5 files, ≤256 KB each)
+under `$DSH_HOME/perm-gate/snapshots/`; in the **Approvals** tab each file chip opens a line diff
+(`GET /api/dsh-perm-gate/diff`) with a **revert** action that delivers a restore instruction into
+the conversation (`POST /api/dsh-perm-gate/revert`). A snapshot inventory bar clears them per
+session or entirely (`GET /api/dsh-perm-gate/snapshots-stats` / `POST /api/dsh-perm-gate/snapshots-clear`).
+
+An `ask` the gate routes to a human is tracked until the human answers: a passive
+`approval/request` observer records the closed outcome (`allowed-once` → **approved**,
+`rejected` → **rejected**, `cancelled` → **cancelled**, `unavailable` → a denial, since no approval
+channel existed), with `tools/result` settling the same ask as a fallback when the observer cannot
+correlate it. Approvals report the post-approval learning progress (`n`/threshold), and the notice
+strip labels all three terminal states.
+
+The Permissive tier keeps its shield icon in the permission picker — on both the
 menu item and the collapsed picker trigger.
 
 ### A selectable session tier
 
-`cordis.patch.yml` extends the DSH `permission.config.presets` with a `permissive` preset
-(`sandbox: workspace-write`, `approval: ask`, name **Permissive**) between Workspace Write and
-Full access — the same mechanism the Auto mode uses. So the session permission picker offers
-Permissive as an independent selectable approval tier, not an "auto-approval" mode.
+`cordis.patch.yml` adds a `permissive` preset (`sandbox: workspace-write`, `approval: ask`, name
+**Permissive**) between Workspace Write and Full access. The DSH bundle patch replaces the whole
+`permission.config.presets` map rather than merging per key, so the file also restates the three
+built-ins (`read-only` / `workspace-write` / `danger-full-access`, from
+`@deepseek-ai/dsh-base/cordis.patch.yml`); `test/patch-presets.spec.ts` pins that key set. So the
+session permission picker offers Permissive as an independent selectable approval tier, not an
+"auto-approval" mode.
+
+The gate is active **only in the tiers listed in `gatePresets`** (default `['permissive']`, the
+tier this plugin adds). In every other tier — Read Only, Workspace Write, Full access,
+`custom` — the gate's decision flow does not run at all: no allow, no ask, no deny, no P0
+hard-deny, no deny-keyword veto, and no audit event. The selected tier's own policy governs the
+call, which is the point: `danger-full-access` is defined as "full access without approval
+prompts", so overruling it with an ask (unanswerable there — the approval seam rejects before any
+answerer runs, producing `the user rejected tool "..."` with no panel) or with a hard-deny would
+silently contradict the tier the user chose. `gatePresets: ['*']` makes the gate global again
+(hard-deny included); inside an active tier an `ask` is still degraded to passthrough when the
+session's effective approval policy is `never`.
 
 ### Configurable in the UI
 

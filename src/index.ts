@@ -7,11 +7,11 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { join } from 'node:path'
-import { Config, resolvePermissiveStrategies } from './config.js'
-import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, type WebServerLike } from './events.js'
+import { Config, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { PermGateRuntime, type PermissiveState, type ToolExecutionLike } from './runtime.js'
+import { PermGateRuntime, type PermissiveState, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -46,6 +46,16 @@ interface SettingsAwareCtx {
     settings: SettingsServiceLike
     effect(cleanup: () => (() => void) | void, label?: string): void
   }) => void): void
+}
+
+/**
+ * Minimal face of a cordis context that can observe a service event and own the
+ * disposer (the shape the settings section already uses for `sctx.effect`).
+ */
+interface EventContextLike {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(name: string, listener: (...args: any[]) => any): () => void
+  effect(cleanup: () => (() => void) | void, label?: string): void
 }
 
 /**
@@ -110,14 +120,72 @@ function asSurface(value: unknown): PermissiveSurface | undefined {
     : undefined
 }
 
+/**
+ * Deliver a revert instruction into a conversation (the review page's "撤销此改动").
+ * A DSH user message content must be a block array — a bare string is rendered
+ * per character by the GUI — and two channels are tried in order: the typert
+ * gateway, then the live agent's followup.
+ */
+function buildSessionSender(get: (name: string) => unknown): SessionSender {
+  return async (sessionId, content) => {
+    const textBlock = [{ type: 'text', text: content }]
+    const gateway = get('typertGateway') as { invoke?: (req: unknown) => Promise<unknown> } | undefined
+    if (gateway !== undefined && typeof gateway.invoke === 'function') {
+      try {
+        await gateway.invoke({ namespace: 'session', method: 'prompt', args: { sessionId, mode: 'queue', content: textBlock } })
+        return { ok: true, via: 'gateway' }
+      } catch {
+        // fall through to the agent channel
+      }
+    }
+    const agents = get('agents') as { get?: (id: string) => { followup?: (msg: unknown) => unknown } | undefined } | undefined
+    if (agents !== undefined && typeof agents.get === 'function') {
+      const agent = agents.get(sessionId)
+      if (agent !== undefined && typeof agent.followup === 'function') {
+        agent.followup({
+          id: 'pg-revert-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e9).toString(36),
+          role: 'user',
+          content: textBlock,
+          source: { kind: 'user' },
+        })
+        return { ok: true, via: 'followup' }
+      }
+    }
+    return { ok: false, error: '没有可用的消息投递通道' }
+  }
+}
+
+/**
+ * Build the passive `approval/request` observer (exported for tests).
+ *
+ * It forwards the waterfall untouched and records the closed outcome for a
+ * tracked ask. Recording is best-effort: a throw here would be normalized by
+ * the approval service to `unavailable` — a rejection on the human's behalf.
+ */
+export function makeApprovalObserver(
+  runtime: Pick<PermGateRuntime, 'settleAskOutcome'>,
+): (req: unknown, next: () => Promise<unknown>) => Promise<unknown> {
+  return async (req, next) => {
+    const outcome = await next()
+    try {
+      const callId = (req as { callId?: unknown } | null | undefined)?.callId
+      runtime.settleAskOutcome(typeof callId === 'string' ? callId : '', String(outcome ?? ''))
+    } catch {
+      // Recording must never influence the approval outcome.
+    }
+    return outcome
+  }
+}
+
 export function apply(ctx: Context, config: Record<string, unknown> = {}): PermGateRuntime {
   // Runtime-adjustable config: the composition entry is the base; the settings
   // namespace layers on top and `current()` always reads the active section.
   let current: () => PermissiveSurface & Record<string, unknown> = () => config as never
 
-  // Plugin-owned data files live under $DSH_HOME (node_modules may be read-only);
-  // a missing dshHome degrades both stores to in-memory.
-  const dataDir = typeof config.dshHome === 'string' && config.dshHome !== '' ? join(config.dshHome, 'perm-gate') : undefined
+  // Plugin-owned data files live under $DSH_HOME (node_modules may be
+  // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
+  // entry that omits `config` still records events, snapshots and learning.
+  const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
 
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same
@@ -136,6 +204,19 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     ? (llmService as unknown as HostLlmLike)
     : undefined
   const hostModelService = injected.agentDefaultModel ?? fallbackGet('agentDefaultModel')
+
+  // The live approval service, captured by the optional inject below. Its
+  // `effectivePolicy` tells the gate whether an ask can reach a human at all.
+  //
+  // DUAL-VERSION NOTE (DSH 0.1.1-rc.2 and 0.1.2-rc.1): `effectivePolicy` is a
+  // **private** method of the user-approval service in BOTH versions
+  // (packages/interaction/user-approval/src/index.ts, `private effectivePolicy`).
+  // It is therefore a duck-typed, non-contract dependency: read it only through
+  // a `typeof` probe, never assume it exists, and never let a failure escape
+  // (a throw would be normalized by the approval seam into a rejection on the
+  // human's behalf). The public fallback is the `agents.get(id).followup(...)`
+  // channel in buildSessionSender.
+  let approvalService: { effectivePolicy?: (session: unknown) => unknown } | undefined
 
   const runtime = new PermGateRuntime({
     ...config,
@@ -195,10 +276,43 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     },
     learningFile: typeof config.learningFile === 'string' && config.learningFile !== ''
       ? config.learningFile
-      : (dataDir !== undefined ? join(dataDir, 'learning.json') : undefined),
+      : join(dataDir, 'learning.json'),
+    // The rules document lives in the plugin's data dir by default, so a
+    // `$DSH_HOME/perm-gate/rules.yml` the user writes is actually loaded without
+    // also having to declare `rulesFile` in the composition entry.
+    rulesFile: resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir),
+    // The whole gate is scoped to the presets that opt into it (default: the
+    // `permissive` tier this plugin adds); elsewhere it stands down entirely.
+    gatePresets: resolveGatePresets(
+      Array.isArray(config.gatePresets) ? config.gatePresets as string[] : undefined,
+    ),
+    // Third-party read-only tools the user classified as safe; the built-in
+    // read-only/internal sets already cover DSH's own tools.
+    autoAllowTools: Array.isArray(config.autoAllowTools) ? config.autoAllowTools as string[] : undefined,
+    // `approval: never` rejects every request before any answerer runs, so an
+    // ask the gate cannot answer must pass through instead of denying.
+    //
+    // Capability probe, not a version check: `effectivePolicy` is private in
+    // both DSH 0.1.1-rc.2 and 0.1.2-rc.1, so an absent or throwing reader means
+    // "unknown policy" — return undefined and let the ask stand (the approval
+    // seam then decides). Never surface the failure to the decision path.
+    readApprovalPolicy: (exec: ToolExecutionLike): string | undefined => {
+      const read = approvalService?.effectivePolicy
+      if (typeof read !== 'function') return undefined
+      try {
+        const policy = read.call(approvalService, exec.agent?.session)
+        return typeof policy === 'string' ? policy : undefined
+      } catch {
+        return undefined
+      }
+    },
     eventsFile: typeof config.eventsFile === 'string' && config.eventsFile !== ''
       ? config.eventsFile
-      : (dataDir !== undefined ? join(dataDir, 'events.jsonl') : undefined),
+      : join(dataDir, 'events.jsonl'),
+    // Per-event pre-change snapshots back the review page's diff/revert plane.
+    snapshotsDir: typeof config.snapshotsDir === 'string' && config.snapshotsDir !== ''
+      ? config.snapshotsDir
+      : join(dataDir, 'snapshots'),
   } as never)
 
   installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
@@ -238,6 +352,18 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     if (webServer !== undefined && runtime.eventLog !== undefined) {
       const offEvents = registerEventsRoute(webServer, runtime.eventLog)
       if (offEvents !== undefined) ctx.effect(() => () => { offEvents() }, 'dsh-perm-gate: events route')
+    }
+    // Review-page plane (diff / revert / snapshot stats / snapshot clear): the
+    // approval-history view's file chips and snapshot bar drive these.
+    if (webServer !== undefined && runtime.eventLog !== undefined && runtime.snapshotDir !== undefined) {
+      const offs = registerReviewRoutes(webServer, {
+        log: runtime.eventLog,
+        snapshotsDir: runtime.snapshotDir,
+        send: buildSessionSender(fallbackGet),
+      })
+      for (const off of offs) {
+        ctx.effect(() => () => { off() }, 'dsh-perm-gate: review route')
+      }
     }
     if (webServer !== undefined) {
       const offLearning = registerLearningRoute(webServer, {
@@ -288,24 +414,55 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   const listener: (exec: ToolExecutionLike, next: () => unknown) => Promise<unknown> = async (exec, next) => {
     const decision = runtime.decideExecution(exec)
     if (decision === undefined) return next()
-    // llmAssist: refine an `ask` with the risk grader before the human seam.
-    // undefined = auto-allowed (risk-safe / learned) → proceed.
+    // llmAssist: the panel MUST appear immediately after pre-execute returns.
+    // We NEVER await refineAsk here — return the original ask immediately so
+    // the approval panel pops up. The LLM classifier runs in the background
+    // and may auto-allow later via settleExecution.
     if (decision.kind === 'ask') {
-      const refined = await runtime.refineAsk(exec, decision)
-      if (refined === undefined) return next()
-      return refined
+      // Fire-and-forget: background LLM grading
+      runtime.refineAsk(exec, decision)
+        .then((refined) => {
+          if (refined === undefined) {
+            // classifier said "safe" → auto-allow
+            runtime.settleExecution(exec, { isError: false })
+          }
+        })
+        .catch(() => { /* background failure — ignore, panel already shown */ })
+      return decision
     }
     return decision
   }
-  // `tools/pre-execute` / `tools/result` are dsh-tools events, not part of
-  // cordis core's typed `Events`, so they are registered through the string overload.
+  // `tools/pre-execute` / `tools/result` / `approval/request` are service events,
+  // not part of cordis core's typed `Events`, so they are registered through the
+  // string overload.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const host = ctx as unknown as { on(name: string, listener: (...args: any[]) => any): unknown }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   host.on('tools/pre-execute', listener as (...args: any[]) => any)
-  // Settle verdict-learning candidates: a result for a registered ask means the
-  // human approved it and it executed — one confirmation recorded.
-  host.on('tools/result', ((exec: ToolExecutionLike) => { runtime.settleExecution(exec) }) as never)
+  // Fallback terminal-answer channel: settle the ask from the call's result,
+  // and settle a pending learning candidate (a result for one means the human
+  // approved it and it executed — one confirmation).
+  host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => { runtime.settleExecution(exec, result) }) as never)
+
+  // Primary terminal-answer channel: passively observe the approval waterfall.
+  // The ask we vetoed is forwarded by dsh-tools to `approval.request(...)`, so
+  // the closed outcome is observable here. This listener MUST return `next()`'s
+  // value unchanged — a throw is normalized to `unavailable`, i.e. a rejection
+  // on the human's behalf. Requests we never tracked (other agents, other
+  // sources) are ignored.
+  const approvalAware = ctx as unknown as {
+    inject(deps: readonly string[], fn: (actx: EventContextLike) => void): void
+  }
+  approvalAware.inject(['approval'], (actx) => {
+    // Capture the live service: the gate reads `effectivePolicy` per call to
+    // learn whether an ask can reach a human (`approval: never` cannot).
+    approvalService = (actx as { approval?: typeof approvalService }).approval
+    const off = actx.on('approval/request', makeApprovalObserver(runtime))
+    actx.effect(() => () => {
+      off()
+      approvalService = undefined
+    }, 'dsh-perm-gate: approval observer')
+  })
 
   return runtime
 }

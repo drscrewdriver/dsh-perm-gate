@@ -52,7 +52,7 @@ dsh plugin --profile web add .
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # 可选；留空则按 defaultAction 兜底
+    rulesFile: ./permissions.yaml   # 可选；默认 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 受保护目标检查的钉死根目录
     defaultAction: ask              # allow | ask | deny
 ```
@@ -82,7 +82,7 @@ dsh profile reload --profile web
 2. 从 `cordis.yml` 删除上述四个插件，只加入唯一的 `dsh-perm-gate` 条目。
 3. 删除这些插件贡献的 preset 覆盖 —— `cordis.patch.yml` 是**整体替换**
    `permission.config.presets`，其他插件遗留的逐 key 补丁可能静默抹掉
-   Permissive 或 Auto 档。
+   Permissive 档（或某个内置档）。
 4. 重载 profile，并用下面的 `--list` 验证。
 
 ## 验证

@@ -76,7 +76,7 @@ describe('sediment auto-allow in the gate (llmAssist-independent)', () => {
       expect((await r.refineAsk(EXEC, ask as never))?.kind).toBe('ask')
       r.settleExecution(EXEC)
     }
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBe(2)
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBe(2)
 
     // Turn llmAssist off: the sedimented rule still auto-allows (no hook call,
     // the throwing riskHook above proves it is never reached).
@@ -119,12 +119,13 @@ describe('sediment auto-allow in the gate (llmAssist-independent)', () => {
       readRiskSediment: () => true,
       learningFile,
     })
-    // Seed the store directly: bash|neutral confirmed with a different target.
+    // Seed the store directly: same tool, different fingerprint. The sedimented
+    // authority for `npm|left-pad` must NOT transfer to `npm|right-pad`.
     mkdirSync(dirname(learningFile), { recursive: true })
     writeFileSync(learningFile, JSON.stringify({
       version: 1,
-      confirmed: { 'bash|neutral': 3 },
-      samples: { 'bash|neutral': [{ fp: 'npm|left-pad', ctx: 'x', at: 1 }] },
+      confirmed: { 'bash|npm|left-pad': 3 },
+      samples: { 'bash|npm|left-pad': [{ fp: 'npm|left-pad', ctx: 'x', at: 1 }] },
     }), 'utf8')
     const other = { name: 'bash', arguments: { command: 'npm install right-pad' }, cwd: '/work', sessionId: 's1' }
     const ask = r.decideExecution(other)
@@ -146,14 +147,14 @@ describe('sediment auto-allow in the gate (llmAssist-independent)', () => {
     const ask = r.decideExecution(EXEC)
     await r.refineAsk(EXEC, ask as never)
     r.settleExecution(EXEC)
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBe(1)
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBe(1)
 
-    r.learningReset('bash|neutral', 'npm|left-pad')
-    expect(r.learningSnapshot().samples['bash|neutral']).toBeUndefined()
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBe(1)
+    r.learningReset('bash|npm|left-pad', 'npm|left-pad')
+    expect(r.learningSnapshot().samples['bash|npm|left-pad']).toBeUndefined()
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBe(1)
 
-    r.learningReset('bash|neutral')
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBeUndefined()
+    r.learningReset('bash|npm|left-pad')
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBeUndefined()
     expect(readFileSync(learningFile, 'utf8')).toContain('"version": 1')
   })
 })

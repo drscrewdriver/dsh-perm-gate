@@ -13,13 +13,25 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { fetchEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent } from './feed.ts'
 
 const POLL_MS = 2_000
 const AUTO_HIDE_MS = 4_000
 
-export function NoticeStrip({ slotsProps }: { slotsProps?: FeedSlotsProps }): JSX.Element | null {
-  const sessionId = resolveSessionId(slotsProps)
+/** Full props: the locale seat + the session-id carriers the slot delivers. */
+export type NoticeStripProps = PropsLocale<'dsh-perm-gate'> & FeedSlotsProps
+
+/** Localized tag for a manual terminal state; other kinds keep their short tag. */
+function manualTagKey(kind: GateEvent['kind']): 'history.tag.manualApproved' | 'history.tag.manualRejected' | 'history.tag.manualCancelled' | null {
+  if (kind === 'manual-approved') return 'history.tag.manualApproved'
+  if (kind === 'manual-rejected') return 'history.tag.manualRejected'
+  if (kind === 'manual-cancelled') return 'history.tag.manualCancelled'
+  return null
+}
+
+export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | null {
+  const sessionId = resolveSessionId(props)
   const [notice, setNotice] = useState<GateEvent | null>(null)
   const sinceRef = useRef(0)
   const shownIdRef = useRef(0)
@@ -75,6 +87,7 @@ export function NoticeStrip({ slotsProps }: { slotsProps?: FeedSlotsProps }): JS
 
   if (notice === null) return null
   const style = presentation(notice.kind)
+  const manualKey = manualTagKey(notice.kind)
   return (
     <div
       role="status"
@@ -102,7 +115,7 @@ export function NoticeStrip({ slotsProps }: { slotsProps?: FeedSlotsProps }): JS
           fontWeight: 600,
         }}
       >
-        {style.tag}
+        {manualKey === null ? style.tag : t(manualKey)}
       </span>
       <span
         style={{

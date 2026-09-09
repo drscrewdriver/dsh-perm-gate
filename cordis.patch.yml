@@ -1,12 +1,24 @@
 # dsh-perm-gate profile patch.
 #
-# The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
-# does not merge per key), so this file MUST restate every preset that should
-# survive — the built-ins AND the `auto` tier contributed by dsh-auto-mode.
-# Omitting any of them silently disables that tier on the next profile load.
-# 1) Add an independent "Permissive" session approval tier to the DSH permission
-#    picker (same mechanism Auto uses).
+# Two jobs:
+# 1) Add the plugin's own "Permissive" session approval tier to the DSH
+#    permission picker, and restate the built-in tiers it must not drop.
 # 2) Insert the plugin itself (host half) into the profile.
+#
+# The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
+# does not merge per key), so this file MUST restate every tier that should
+# survive. The authoritative built-in set is
+# `@deepseek-ai/dsh-base/cordis.patch.yml` (`id: permission`):
+#   read-only / workspace-write / danger-full-access
+# Omitting any of them silently drops that tier on the next profile load.
+# `test/patch-presets.spec.ts` pins the exact key set so the two cannot drift.
+#
+# The `auto` tier is deliberately NOT restated. It was contributed by
+# dsh-auto-mode, which is no longer installed: its knobs were identical to
+# `workspace-write`, its "automatic review / one-shot approval" description
+# lost its implementation with that plugin, and this gate is inactive in it
+# (`gatePresets` defaults to `['permissive']`) — so it only offered a duplicate
+# tier that looked protected while nothing was.
 - id: permission
   config:
     presets:
@@ -21,11 +33,6 @@
         approval: ask
         name: Permissive
         description: Independent approval tier — safe in-scope ops auto-allow, dangerous crossings ask (approval strengths tunable under Settings → Plugins → Permissive approval tier).
-      auto:
-        sandbox: workspace-write
-        approval: ask
-        name: Auto
-        description: Workspace-sandboxed execution with automatic review and one-shot approval for wider access.
       danger-full-access:
         sandbox: danger-full-access
         approval: never

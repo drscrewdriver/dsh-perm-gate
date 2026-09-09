@@ -81,9 +81,10 @@ dsh plugin --profile web add dsh-perm-gate
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # 선택. 비우면 defaultAction을 따름
+    rulesFile: ./permissions.yaml   # 선택. 기본값은 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 보호 대상 검사의 고정 루트
     defaultAction: ask              # allow | ask | deny
+    gatePresets: [permissive]       # 게이트가 활성화되는 티어(기본)
 ```
 
 ### 규칙 파일
@@ -148,11 +149,26 @@ Permissive는 권한 선택기에서 Read Only / Workspace Write / Full access /
 
 ### 선택 가능한 세션 티어
 
-`cordis.patch.yml`은 DSH의 `permission.config.presets`를 확장해 Workspace Write와
-Full access 사이에 `permissive` preset(`sandbox: workspace-write`, `approval: ask`,
-이름 **Permissive**)을 추가합니다. Auto 모드와 같은 메커니즘입니다. 따라서 세션 권한
+`cordis.patch.yml`은 DSH의 `permission.config.presets`에 Workspace Write와
+Full access 사이의 `permissive` preset(`sandbox: workspace-write`, `approval: ask`,
+이름 **Permissive**)을 추가합니다. DSH의 bundle patch는 이 map을 **전체 교체**하므로
+(키 단위 병합이 아닙니다) 내장 3개 티어
+(`read-only` / `workspace-write` / `danger-full-access`,
+`@deepseek-ai/dsh-base/cordis.patch.yml` 기준)도 다시 기재해야 하며,
+`test/patch-presets.spec.ts`가 그 키 집합을 고정합니다. 따라서 세션 권한
 선택기에는 "auto-approval"이 아니라 **독립적으로 선택 가능한 승인 티어**인 Permissive가
 놓입니다.
+
+게이트가 동작하는 범위는 **`gatePresets`에 나열한 티어 안뿐**입니다(기본 `['permissive']`,
+이 플러그인이 추가하는 티어). 그 밖의 티어(Read Only / Workspace Write / Full access /
+`custom`)에서는 게이트의 판정 흐름이 **전혀 실행되지 않습니다** — 허용도, ask도, 거부도,
+P0 하드 거부도, 거부 키워드 차단도, 감사 이벤트 기록도 하지 않습니다. 선택한 티어의 자체 정책이
+호출을 결정합니다. `danger-full-access`의 정의는 "승인 프롬프트 없는 전체 접근"이며, 이를 ask로
+덮어써도 의미가 없습니다(그 정책에서는 DSH 승인 시임이 **어떤 answerer보다도 먼저** `rejected`를
+반환해 전달된 ask는 패널을 한 번도 띄우지 못하고 `the user rejected tool "..."`만 남습니다).
+하드 거부로 덮어쓰는 것 역시 사용자가 고른 티어를 조용히 뒤집는 일입니다.
+`gatePresets: ['*']`는 게이트를 다시 전역(하드 거부 포함)으로 적용합니다. 유효한 티어 안에서는
+세션의 유효 승인 정책이 `never`이면 ask가 패스스루로 강등됩니다.
 
 ### UI에서 설정 가능
 
@@ -172,6 +188,10 @@ host는 네임스페이스를 live로 읽으므로 변경은 재시작 없이 �
 - 시간 초과(`riskTimeoutMs`, 기본 20초, 1회 재시도), 전송 실패, 프로토콜 외 출력은 원래 `ask`를 유지합니다.
 
 학습 상태는 플러그인 소유 JSON(`$DSH_HOME/perm-gate/learning.json` 또는 `learningFile`)에 영속화되며 YAML 규칙 파일에는 기록되지 않습니다. 모든 결정은 `$DSH_HOME/perm-gate/events.jsonl`(또는 `eventsFile`)에 추가되고 `GET /api/dsh-perm-gate/events?sessionId=&since=`로 제공됩니다. 브라우저 절반이 이를 폴링하여 입력창 위에 최신 결정을 알림 바로 표시하고, 대화 보기의「승인 기록」탭에 세션의 모든 판정을 최신 순으로 나열합니다.
+
+각 결정이 건드린 파일은 변경 전에(이벤트당 ≤5개 파일, 각 ≤256KB) `$DSH_HOME/perm-gate/snapshots/`에 스냅샷됩니다. 「승인 기록」탭에서는 각 파일 칩을 눌러 줄 단위 diff(`GET /api/dsh-perm-gate/diff`)를 열고, **되돌리기**(`POST /api/dsh-perm-gate/revert`)로 대화에 복원 지시를 보낼 수 있습니다. 스냅샷 관리 바는 세션 단위 또는 전체로 삭제할 수 있습니다(`GET /api/dsh-perm-gate/snapshots-stats` / `POST /api/dsh-perm-gate/snapshots-clear`).
+
+사람에게 넘긴 `ask`는 응답이 올 때까지 추적됩니다. 수동적 `approval/request` 옵서버가 닫힌 결과를 기록하며(`allowed-once` → **승인**, `rejected` → **거부**, `cancelled` → **취소**, `unavailable` → 거부=승인 채널 없음), 옵서버가 연관시키지 못하는 경우(`callId` 누락, approval 서비스 없음, 상류 리스너의 단락) `tools/result`가 같은 ask를 폴백으로 정산합니다. 승인 시 승인 후 학습 진행률(`n`/임계값)을 표시하고, 알림 바도 세 가지 종결 상태에 라벨을 붙입니다.
 
 또한 프리셋 **거부 키워드 블랙리스트**(dsh-approval-gate의 `DEFAULT_DENY_KEYWORDS` 계승: `rm -rf`,
 `push --force`, `drop table`, `mkfs`, `git reset --hard`, `docker system prune` 등)를 갖추어, 텍스트가

@@ -15,6 +15,10 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+// Single source of truth for the shell-tool roster: `evaluate.ts` owns it, so a
+// newly supported tool name cannot drift between the decision path and the
+// learning fingerprint (which is what hid the missing `shell` entry).
+import { SHELL_TOOLS } from './evaluate.js'
 
 /** One confirmed operation sample: fingerprint plus a short human-readable context. */
 export interface LearningSample {
@@ -50,9 +54,6 @@ export interface RiskLearningOptions {
 
 const DEFAULT_THRESHOLD = 3
 const DEFAULT_MAX_SAMPLES = 10
-
-/** Shell tool names whose first argument word is the operation handle. */
-const SHELL_TOOLS = new Set(['bash', 'pwsh', 'sh', 'cmd', 'powershell'])
 
 /** Structured arg keys carrying the operation target. */
 const TARGET_KEYS = ['file_path', 'filePath', 'path', 'file', 'filename', 'target', 'url']
@@ -97,9 +98,9 @@ export function operationFingerprint(tool: string, args: Record<string, unknown>
   return tool
 }
 
-/** The learning key for one call: `tool|category` (only neutral learns today). */
-export function learnKey(tool: string, category: string): string {
-  return `${tool}|${category}`
+/** The learning key for one call: `tool|fingerprint` (fingerprint-level learning). */
+export function learnKey(tool: string, _category: string, fp?: string): string {
+  return fp !== undefined ? `${tool}|${fp}` : `${tool}|${_category}`
 }
 
 function emptyDoc(): LearningDoc {

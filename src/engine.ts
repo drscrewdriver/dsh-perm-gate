@@ -15,19 +15,87 @@ import { isForceDeletion, isRecursiveDeletion, decomposeShellCommand } from './s
 export type EngineStage = 'hard-deny' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier'
 
 const DESTRUCTIVE_TOOL = /(?:^|[_-])(?:delete|remove|rm|destroy|erase|purge|wipe|unlink|rmdir|reset)(?:$|[_-]|recursive)/i
-const READ_TOOLS = new Set(['read', 'read_image', 'grep', 'glob', 'ls', 'lsp'])
+/**
+ * Read-only tools that can never modify the workspace or execute anything. P0
+ * still protects sensitive path reads outside the workspace root, and the
+ * deny-keyword layer still runs first, so a search whose query contains a
+ * blacklisted phrase is still vetoed.
+ */
+const READ_TOOLS = new Set([
+  'read', 'read_image', 'grep', 'glob', 'ls', 'lsp',
+  // Read-only network / media queries: no write, no exec.
+  'web_search', 'modlens_read_image',
+])
+/** DSH internal coordination / management tools — not workspace-modifying. */
+const INTERNAL_TOOLS = new Set([
+  // AgentTeams coordination
+  'agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member',
+  'agent_teams_delete', 'agent_teams_edit_plan', 'agent_teams_reassign_task',
+  'agent_teams_claim_task', 'agent_teams_create_task', 'agent_teams_send_message',
+  'agent_teams_approve', 'agent_teams_resume',
+  // AgentTeams status reads
+  'agent_teams_status', 'agent_teams_update_task',
+  // DSH session/memory/goal/taskboard management
+  'conversation_search',
+  'memory_add', 'memory_delete', 'memory_read_scene', 'memory_search',
+  'get_goal', 'update_goal', 'create_goal',
+  'taskboard_get', 'taskboard_list', 'taskboard_claim', 'taskboard_block',
+  'taskboard_comment', 'taskboard_release_claim', 'taskboard_submit_review',
+  'taskboard_relate',
+  // Job/agent management
+  'job_list', 'job_output', 'job_kill',
+  'list_agents', 'interrupt_agent', 'send_message',
+  // Session-local UI / plan / todo state (no workspace write, no execution)
+  'todo_write', 'render_ui', 'validate_dsh_ui', 'ask_user_question', 'exit_plan_mode',
+  // Background / planning delegation (the delegated work is gated separately)
+  'subagent', 'subagent_fork', 'ralph', 'workflow', 'skill',
+])
 
-function serialized(args: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(args)
-  } catch {
-    return ''
+/** No user-configured extra auto-allow names. */
+const NO_EXTRA_AUTO_ALLOW: ReadonlySet<string> = new Set()
+
+/** The built-in read-only / internal classification, for diagnostics and docs. */
+export const AUTO_ALLOW_TOOLS: ReadonlySet<string> = new Set([...READ_TOOLS, ...INTERNAL_TOOLS])
+
+/**
+ * Argument keys that carry a document body rather than the operation itself.
+ * A file's text is not the operation: writing a document that *mentions* a
+ * token, a private key, or `credentials.yaml` must not hard-deny the write, and
+ * the deny-keyword layer already skips these keys. The path/command arguments
+ * that actually describe the operation are still scanned.
+ */
+export const CONTENT_ARG_KEYS: ReadonlySet<string> = new Set([
+  'content', 'contents', 'text', 'body', 'message', 'prompt',
+  'new_string', 'old_string', 'newText', 'oldText', 'file_text', 'fileText',
+  'diff', 'patch', 'replacement', 'snippet',
+])
+
+/** The call's non-body text: the operation, not any document it carries. */
+function operationText(args: Record<string, unknown>, depth = 0): string {
+  if (depth > 6) return ''
+  const parts: string[] = []
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value === 'string') {
+      if (!CONTENT_ARG_KEYS.has(key)) parts.push(value)
+      continue
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') parts.push(item)
+        else if (item !== null && typeof item === 'object') parts.push(operationText(item as Record<string, unknown>, depth + 1))
+      }
+      continue
+    }
+    if (value !== null && typeof value === 'object') {
+      parts.push(operationText(value as Record<string, unknown>, depth + 1))
+    }
   }
+  return parts.join(' ')
 }
 
 function containsCredentialMaterial(args: Record<string, unknown>): boolean {
   return /(?:BEGIN (?:RSA |OPENSSH )?PRIVATE KEY|\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b|Bearer\s+[A-Za-z0-9._~+\/-]{8,}|\.ssh[\\/](?:id_|config)|credentials\.yaml)/i
-    .test(serialized(args))
+    .test(operationText(args))
 }
 
 function pathArgument(args: Record<string, unknown>): string | undefined {
@@ -88,9 +156,18 @@ export function decide(
   ctx: ToolCallContext,
   ruleset: { decide: (c: ToolCallContext) => Decision },
   grants: GrantResolver,
+  /** Extra tool names the user classified as safe (`autoAllowTools`). */
+  autoAllowExtra: ReadonlySet<string> = NO_EXTRA_AUTO_ALLOW,
 ): FinalDecision {
   const hard = hardDenyReason(ctx)
   if (hard !== undefined) return { action: 'deny', reason: `[hard-deny] ${hard}`, stage: 'hard-deny', ruleIndex: undefined }
+  // Auto-allow read-only tools and DSH internal coordination/management tools:
+  // they cannot modify the workspace or execute a command, so asking a human
+  // about each one is pure noise. P0 hard-deny already protects sensitive-path
+  // reads and credential material, and the deny-keyword layer runs even earlier.
+  if (READ_TOOLS.has(ctx.tool) || INTERNAL_TOOLS.has(ctx.tool) || autoAllowExtra.has(ctx.tool)) {
+    return { action: 'allow', reason: 'read-only internal tool', stage: 'grant', ruleIndex: undefined }
+  }
   if (grants(ctx.tool, ctx.args) === 'allow') {
     return { action: 'allow', reason: 'covered by session grant', stage: 'grant', ruleIndex: undefined }
   }

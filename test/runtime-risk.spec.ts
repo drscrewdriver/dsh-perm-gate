@@ -40,13 +40,13 @@ describe('verdict learning end-to-end (refineAsk + settleExecution)', () => {
     // The human approved and the call executed → one confirmation settled.
     r.settleExecution(EXEC)
     expect(r.pendingCount()).toBe(0)
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBe(1)
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBe(1)
 
     // Round 2: threshold is 2 → still asks and learns.
     const ask2 = r.decideExecution(EXEC)
     expect((await r.refineAsk(EXEC, ask2 as never))?.kind).toBe('ask')
     r.settleExecution(EXEC)
-    expect(r.learningSnapshot().confirmed['bash|neutral']).toBe(2)
+    expect(r.learningSnapshot().confirmed['bash|npm|left-pad']).toBe(2)
 
     // Round 3: threshold reached + exact fingerprint sample → auto-allow.
     const ask3 = r.decideExecution(EXEC)
@@ -98,7 +98,7 @@ describe('verdict learning end-to-end (refineAsk + settleExecution)', () => {
     })
     const ask = r.decideExecution(EXEC)
     const refined = await r.refineAsk(EXEC, ask as never)
-    expect(refined?.kind).toBe('ask')
+    expect(refined?.kind).toBe('deny')
     expect(r.pendingCount()).toBe(0)
   })
 

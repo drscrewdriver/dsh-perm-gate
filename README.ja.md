@@ -81,9 +81,10 @@ dsh plugin --profile web add dsh-perm-gate
 - id: dsh-perm-gate
   name: dsh-perm-gate
   config:
-    rulesFile: ./permissions.yaml   # 任意。空なら defaultAction に従う
+    rulesFile: ./permissions.yaml   # 任意。既定は $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 保護対象チェックのルート固定
     defaultAction: ask              # allow | ask | deny
+    gatePresets: [permissive]       # ゲートが有効なティア（既定）
 ```
 
 ### ルール ファイル
@@ -147,11 +148,27 @@ Whitelist と並ぶ**独立した承認ティア**です。「自動承認」で
 
 ### 選択可能なセッション ティア
 
-`cordis.patch.yml` は DSH の `permission.config.presets` を拡張し、Workspace Write と
+`cordis.patch.yml` は DSH の `permission.config.presets` に、Workspace Write と
 Full access の間に `permissive` preset（`sandbox: workspace-write`、`approval: ask`、
-名称 **Permissive**）を追加します。Auto モードと同じ仕組みです。したがって
+名称 **Permissive**）を追加します。DSH の bundle patch はこの map を**全体置換**するため
+（キー単位のマージではありません）、組み込み 3 ティア
+（`read-only` / `workspace-write` / `danger-full-access`、
+`@deepseek-ai/dsh-base/cordis.patch.yml` 由来）も再記載する必要があり、
+`test/patch-presets.spec.ts` がそのキー集合を固定しています。したがって
 セッションの権限ピッカーには「auto-approval」ではなく、**独立して選択できる承認
 ティア**として Permissive が並びます。
+
+ゲートが動作するのは **`gatePresets` に列挙したティアの中だけ**です（既定 `['permissive']`、
+このプラグインが追加するティア）。それ以外のティア（Read Only / Workspace Write /
+Full access / `custom`）では、ゲートの判定フローは**一切実行されません**——許可も、ask も、
+拒否も、P0 ハード拒否も、拒否キーワードの遮断も、監査イベントの記録も行いません。選択された
+ティア自身の方針が呼び出しを決めます。`danger-full-access` の定義は「承認プロンプトなしの
+フルアクセス」であり、そこを ask で上書きしても意味がありません（その方針では DSH の承認シームが
+**どの answerer よりも先に** `rejected` を返し、転送された ask はパネルを一度も表示せず
+`the user rejected tool "..."` にしかなりません）。ハード拒否で上書きするのも、ユーザーが選んだ
+ティアを黙って覆すことになります。`gatePresets: ['*']` でゲートを再び全体（ハード拒否を含む）に
+適用できます。有効なティア内では、セッションの実効承認方針が `never` の場合 ask はパススルーに
+降格します。
 
 ### UI から設定可能
 
@@ -172,6 +189,10 @@ Full access の間に `permissive` preset（`sandbox: workspace-write`、`approv
 - タイムアウト（`riskTimeoutMs`、既定 20 秒、1 回リトライ）、通信失敗、プロトコル外出力は元の `ask` を維持します。
 
 学習状態はプラグイン所有の JSON（`$DSH_HOME/perm-gate/learning.json` または `learningFile`）に永続化され、YAML ルールには書き込みません。各決定は `$DSH_HOME/perm-gate/events.jsonl`（または `eventsFile`）に追記され、`GET /api/dsh-perm-gate/events?sessionId=&since=` で提供されます。ブラウザ側はこれをポーリングし、入力欄の上に最新の決定を通知バーで表示するとともに、会話ビューの「承認記録」タブにセッション内の全判定を新しい順に一覧表示します。
+
+各決定が触れたファイルは変更前に（1 イベントあたり ≤5 ファイル、各 ≤256 KB）`$DSH_HOME/perm-gate/snapshots/` へスナップショットされます。「承認記録」タブでは各ファイルチップから行単位の diff（`GET /api/dsh-perm-gate/diff`）を開き、**取り消し**（`POST /api/dsh-perm-gate/revert`）で会話に復元指示を送信できます。スナップショット管理バーはセッション単位または全件で削除できます（`GET /api/dsh-perm-gate/snapshots-stats` / `POST /api/dsh-perm-gate/snapshots-clear`）。
+
+人手に回した `ask` は回答が返るまで追跡されます。受動的な `approval/request` オブザーバが閉じた結果を記録し（`allowed-once` → **承認**、`rejected` → **拒否**、`cancelled` → **キャンセル**、`unavailable` → 拒否＝承認チャネルなし）、オブザーバが関連付けできない場合（`callId` 欠落・approval サービスなし・上流リスナーの短絡）は `tools/result` が同じ ask をフォールバックとして解決します。承認時には承認後の学習進捗（`n`/しきい値）を表示し、通知バーも 3 つの終態にラベルを付けます。
 
 さらにプリセットの**拒否キーワード黑名単**（dsh-approval-gate の `DEFAULT_DENY_KEYWORDS` を継承：`rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` など）を備え、テキストがキーワードを含む呼び出し（大小文字を区別しない部分一致）は許可リスト / 許可 / LLM より先に拒否します。設定カードでリストとして編集でき（プリセット項目にはタグ付き、ワンクリック復元対応）、未設定・空ならプリセットを適用します——黑名単が静かに無効化されることはありません。Permissive ティアは権限ピッカーに盾アイコンを保持します（メニュー項目と折りたたみトリガーの両方）。
 

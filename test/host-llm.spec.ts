@@ -91,7 +91,7 @@ describe('host receiver in refineAsk + healthCheck', () => {
     })
     const ask = r.decideExecution(EXEC)
     const refined = await r.refineAsk(EXEC, ask as never)
-    expect(refined?.kind).toBe('ask')
+    expect(refined?.kind).toBe('deny')
     expect(refined?.reason).toContain('deletion')
     const req = calls[0] as { provider: string; model: string }
     expect(req.provider).toBe('deepseek-official')

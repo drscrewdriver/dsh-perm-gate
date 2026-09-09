@@ -57,7 +57,8 @@ describe('Permissive independent tier', () => {
     const d = r.decideExecution({ name: 'bash', arguments: { command: 'pnpm install' }, cwd: '/work' })
     expect(d?.kind).toBe('ask')
     expect(d?.reason).toMatch(/permissive always-confirm/)
-    expect(r.auditEntries[0].source).toBe('permissive')
+    // ask is tracked in pending asks (not in audit anymore)
+    expect(r.pendingAskCount()).toBe(1)
   })
 
   it('never escalates a hard-deny or a minted grant under alwaysConfirm', () => {
@@ -81,20 +82,21 @@ describe('Permissive independent tier', () => {
     expect(r.auditEntries.at(-1)?.source).toBe('classifier')
   })
 
-  it('llmAssist risky hard category always keeps the human ask', async () => {
+  it('llmAssist risky hard category auto-denies without popup', async () => {
     const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'risky', category: 'deletion' } })
     const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
     const refined = await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask)
-    expect(refined?.kind).toBe('ask')
+    expect(refined?.kind).toBe('deny')
     expect(refined?.reason).toMatch(/risky:deletion/)
-    expect(r.pendingCount()).toBe(0)
+    expect(r.pendingCount()).toBe(0) // untracked: no human answer needed
   })
 
   it('llmAssist without classifier config falls back to the human seam (fail-closed)', async () => {
     const r = rt({ permissive: true, llmAssist: true })
     const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
     expect((await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask))?.kind).toBe('ask')
-    expect(r.auditEntries.at(-1)?.source).toBe('default')
+    // ask is tracked in pending asks (not in audit anymore)
+    expect(r.pendingAskCount()).toBe(1)
   })
 
   it('llmAssist unresolved verdict keeps the ask and learns nothing', async () => {
@@ -126,7 +128,7 @@ describe('resolveConfig permissive', () => {
   })
 
   it('fills the risk-learning defaults', () => {
-    expect(resolveConfig({})).toMatchObject({ riskLearning: false, riskThreshold: 3, riskTimeoutMs: 20_000 })
+    expect(resolveConfig({})).toMatchObject({ riskLearning: true, riskThreshold: 1, riskTimeoutMs: 20_000 })
     expect(resolveConfig({ riskLearning: true, riskThreshold: 5 })).toMatchObject({ riskLearning: true, riskThreshold: 5 })
   })
 })

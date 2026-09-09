@@ -6,7 +6,8 @@
  *
  *   safe                      → the gate may auto-allow the ask
  *   risky:<hard category>     → deletion / credential / remote / system / bulk —
- *                               ALWAYS routed to the human, never auto-allowed
+ *                               auto-deny: the operation is clearly dangerous,
+ *                               no popup or human review needed
  *   risky:neutral             → no hard-risk signal but not clearly safe; the
  *                               verdict-learning path may auto-allow after
  *                               enough human confirmations

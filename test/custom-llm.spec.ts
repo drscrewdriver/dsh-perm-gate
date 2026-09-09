@@ -77,13 +77,13 @@ describe('custom LLM review path (real HTTP, no injected hook)', () => {
     }
   })
 
-  it('hard-risk verdict from the custom API keeps the human ask', async () => {
+  it('hard-risk verdict from the custom API auto-denies without popup', async () => {
     const { server, base } = await startLlmApi(() => ({ status: 200, content: '{"risk":"risky","category":"system"}' }))
     try {
       const r = runtimeWith(base)
       const ask = r.decideExecution(EXEC)
       const refined = await r.refineAsk(EXEC, ask as never)
-      expect(refined?.kind).toBe('ask')
+      expect(refined?.kind).toBe('deny')
       expect(refined?.reason).toMatch(/risky:system/)
     } finally {
       server.close()
@@ -122,7 +122,8 @@ describe('custom LLM review path (real HTTP, no injected hook)', () => {
     const r = runtimeWith('http://127.0.0.1:9/v1') // nothing listens there
     const ask = r.decideExecution(EXEC)
     expect((await r.refineAsk(EXEC, ask as never))?.kind).toBe('ask')
-    expect(r.auditEntries.at(-1)?.source).toBe('default')
+    // ask is tracked in pending asks (not in audit anymore)
+    expect(r.pendingAskCount()).toBe(1)
   })
 
   it('parses a plain-text "safe" from non-conforming custom models', async () => {

@@ -2,8 +2,39 @@
  * Plugin configuration for dsh-perm-gate, defined with Schemastery so the DSH
  * loader validates and fills defaults before `apply`. Invalid values fail loud.
  */
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
+
+/**
+ * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
+ * `~/.dsh`. A profile entry that omits `config` must still get a writable data
+ * home — otherwise the event feed, snapshots and learning store silently stay
+ * disabled (no log, no review page).
+ */
+export function resolveDshHome(configured?: string): string {
+  if (typeof configured === 'string' && configured !== '') return configured
+  const env = process.env.DSH_HOME
+  if (typeof env === 'string' && env !== '') return env
+  return join(homedir(), '.dsh')
+}
+
+/** This plugin's data directory (`<dshHome>/perm-gate`), always defined. */
+export function resolveDataDir(configured?: string): string {
+  return join(resolveDshHome(configured), 'perm-gate')
+}
+
+/**
+ * The permissions document the gate loads. An explicit `rulesFile` wins; unset
+ * falls back to `<dataDir>/rules.yml`, so a rules file the user drops in the
+ * plugin's own data directory is loaded without also declaring the path in the
+ * composition entry. A missing file still yields an empty ruleset (the gate then
+ * applies `defaultAction`), so the fallback never fails the plugin load.
+ */
+export function resolveRulesFile(configured: string | undefined, dataDir: string): string {
+  return typeof configured === 'string' && configured !== '' ? configured : join(dataDir, 'rules.yml')
+}
 
 export interface PermGateConfig {
   /** Absolute or `./`-relative path to the YAML permissions document. */
@@ -52,6 +83,22 @@ export interface PermGateConfig {
   /** Backend approval strategies; combinable. Front-end exposes only `permissive` itself. */
   readonly permissiveStrategies?: Partial<PermissiveStrategies>
   /**
+   * Session permission presets in which this gate is active at all.
+   *
+   * The gate owns an independent tier, so it must not overrule a tier the user
+   * selected instead. Outside this scope the gate stands down completely — no
+   * allow, no ask, no deny, no P0 hard-deny, no deny-keyword veto — and the
+   * selected tier's own policy governs the call. That matters because
+   * `danger-full-access` is defined as "full access without approval prompts":
+   * there the DSH approval seam rejects every request before any answerer runs,
+   * so a forwarded ask could only ever fail with `the user rejected tool ...`,
+   * and a hard-deny would silently contradict the tier the user chose.
+   *
+   * Default `['permissive']` (the tier this plugin adds). `['*']` makes the gate
+   * global again, including its hard-deny layer.
+   */
+  readonly gatePresets?: string[]
+  /**
    * Editable whitelist (allow-list command patterns), mirrored to the rules
    * file's `allow` section. Optional; edit from the settings card as a list.
    */
@@ -62,6 +109,16 @@ export interface PermGateConfig {
    * (possibly empty) replaces it. Editable from the settings card as a list.
    */
   readonly denyKeywords?: string[]
+  /**
+   * Extra tool names classified as read-only/internal and therefore auto-allowed.
+   *
+   * The gate already auto-allows DSH's own read-only and session-local tools
+   * (reads, searches, memory/goal/taskboard/job management, UI and todo state);
+   * this list extends that classification for third-party read-only tools.
+   * P0 hard-deny and the deny-keyword layer still run before it, so the list can
+   * never widen authority for a destructive or credential-bearing call.
+   */
+  readonly autoAllowTools?: string[]
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -78,6 +135,18 @@ export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
   trustAutoAllow: true,
   alwaysConfirm: false,
   llmAssist: false,
+}
+
+/**
+ * Presets in which the gate is active. It owns the `permissive` tier; `'*'`
+ * makes it global (every preset, including the hard-deny layer).
+ */
+export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive']
+
+/** Normalize the gate scope: an unset/empty list means the default. */
+export function resolveGatePresets(configured?: readonly string[]): readonly string[] {
+  if (configured === undefined || configured.length === 0) return DEFAULT_GATE_PRESETS
+  return configured.filter((name) => typeof name === 'string' && name !== '')
 }
 
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
@@ -99,16 +168,17 @@ export const Config: z<PermGateConfig> = z.object({
   classifierModel: z.string().default('deepseek-chat'),
   classifierApiKey: z.string(),
   riskTimeoutMs: z.number().min(1000).default(20_000),
-  riskLearning: z.boolean().default(false),
+  riskLearning: z.boolean().default(true),
   riskSediment: z.boolean().default(true),
   classifierSource: z.union(['custom', 'host'] as const).default('custom'),
   classifierProvider: z.string(),
-  riskThreshold: z.number().min(1).max(10).default(3),
+  riskThreshold: z.number().min(1).max(10).default(1),
   learningFile: z.string(),
   eventsFile: z.string(),
   grantTtlMs: z.number().min(1).default(5 * 60_000),
   grantMaxUses: z.number().min(1).default(1),
   permissive: z.boolean().default(false),
+  gatePresets: z.array(z.string()),
   permissiveStrategies: z.object({
     trustAutoAllow: z.boolean().default(true),
     alwaysConfirm: z.boolean().default(false),
@@ -116,11 +186,12 @@ export const Config: z<PermGateConfig> = z.object({
   }),
   allowlist: z.array(z.string()),
   denyKeywords: z.array(z.string()),
+  autoAllowTools: z.array(z.string()),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
   & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
-  & { readonly permissiveStrategies: PermissiveStrategies }
+  & { readonly permissiveStrategies: PermissiveStrategies; readonly gatePresets: readonly string[] }
 
 export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConfig {
   const parsed = Config(config)
@@ -141,6 +212,7 @@ export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConf
     grantTtlMs: parsed.grantTtlMs ?? 5 * 60_000,
     grantMaxUses: parsed.grantMaxUses ?? 1,
     permissive: parsed.permissive ?? false,
+    gatePresets: resolveGatePresets(parsed.gatePresets),
     permissiveStrategies: resolvePermissiveStrategies(parsed.permissiveStrategies),
   }
 }
