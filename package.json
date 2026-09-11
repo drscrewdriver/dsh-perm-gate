@@ -95,6 +95,11 @@
     "release:legacy": "npm publish --tag legacy"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drscrewdriver/dsh-perm-gate.git"
+  },
+  "homepage": "https://github.com/drscrewdriver/dsh-perm-gate#readme",
   "keywords": [
     "dsh",
     "dsh-plugin",
