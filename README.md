@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **Compatibility note:** v0.2.1-beta.3 ships `ja` / `ko` dictionaries, but official DSH exposes
+> **Compatibility note:** v1.0.0 ships `ja` / `ko` dictionaries, but official DSH exposes
 > only `zh` / `en` through `LocaleRuntime` (`LOCALE_IDS = ["zh", "en"]`). On stock DSH,
 > selecting `ja` / `ko` fails with `locale "<id>" is not registered`. Use a DSH fork that
 > updates `LOCALE_IDS` (locale-settings.ts) and `LOCALES` labels (client/index.ts), then
@@ -20,21 +20,24 @@
 
 > **▼ DSH version compatibility**
 >
-> | DSH version | Load | Settings registration | Host gate | Client half |
-> | --- | --- | --- | --- | --- |
-> | 0.1.0-rc.7 ~ 0.1.1-rc.x | ✅ | `ctx.settings.register(ns, schema, { base })` | ✅ `tools/pre-execute` identical | ✅ type-only imports |
-> | 0.1.2-alpha.2+ / 0.1.2-rc.1 | ✅ | `register` still present (`installSection` added) | ✅ `tools/pre-execute` identical | ✅ type-only imports |
+> Two DSH lines are served from two long-lived branches, each with its own version
+> series, `engines.dsh`, and npm dist-tag ([release layout](./RELEASING.md)):
 >
-> One artifact covers both. Two version-sensitive seams are handled by capability
-> probes rather than version checks: (1) settings registration uses `register`,
-> which exists in every supported version (`installSection` is a 0.1.2 addition,
-> not a replacement); (2) `effectivePolicy` is a **private** method of the
-> user-approval service in **both** versions, so it is read behind a `typeof`
-> probe and degrades to “policy unknown” when absent or throwing. The client
-> bundle value-imports nothing from `@deepseek-ai/*`, so the 0.1.2
-> `dsh-client-runtime` → `dsh-client-store` rename cannot break it.
+> | DSH version | Branch | Version | npm tag |
+> | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
+> | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `0.2.x` | `@latest` |
+>
+> `@deepseek-ai/dsh-client-runtime` was **removed** at `0.1.2-alpha.1` — it did not
+> merely move. The `legacy` line still reaches `ctx.slots` through it; `main` gets
+> the same declaration from `@deepseek-ai/dsh-client-ui-renderer/client`. Two
+> version-sensitive seams are handled by capability probes rather than version
+> checks: (1) settings registration uses `register`, which exists on both lines
+> (`installSection` is an addition, not a replacement); (2) `effectivePolicy` is a
+> **private** method of the user-approval service on both, so it is read behind a
+> `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **0.2.1-beta.3** — see the [Changelog](./CHANGELOG.md).
+Version **1.0.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 

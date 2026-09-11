@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 버전 **0.2.1-beta.3**. 결정 체인, 규칙 파일 형식, Permissive 티어는
+`dsh-perm-gate` 버전 **1.0.0**. 결정 체인, 규칙 파일 형식, Permissive 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
 
 ## 요구 사항

@@ -41,13 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - DSH compatibility now ships as **two long-lived branches**, each with its own version series,
   `engines.dsh`, and npm dist-tag: `main` / `0.2.x` / `>=0.1.2-alpha.1 <0.2.0-0` / `latest`, and
-  `legacy` / `1.x` / `>=0.1.0-rc.7 <0.1.2-alpha.1` / `legacy`. This branch is `main`. See
-  `RELEASING.md` for the branch layout and the cherry-pick flow.
-- On this line `ctx.slots` is declared by `@deepseek-ai/dsh-client-ui-renderer/client` — from
-  `0.1.2-alpha.1` on, `@deepseek-ai/dsh-client-runtime` is gone — so the client entry imports it.
-- Client devDependency floors raised from `^0.1.0-rc.7` to `^0.1.5-rc.2`, and
-  `@deepseek-ai/dsh-client-ui-renderer` added. The old floor meant the build could only ever
-  resolve the 0.1.0-rc.8 package set, so this line was never compiled against.
+  `legacy` / `1.x` / `>=0.1.0-rc.7 <0.1.2-alpha.1` / `legacy`. **This branch is `legacy`**; the
+  `1.x` series starts here. See `RELEASING.md` for the branch layout and the cherry-pick flow.
+- On this line `@deepseek-ai/dsh-client-runtime` still ships and carries `ctx.slots` onto
+  `Context`, so the client entry's `@deepseek-ai/dsh-client-ui-renderer/client` import declares
+  nothing new here — it exists so one source serves both lines.
+- Client devDependencies floor at `^0.1.1-rc.2`, the newest release of this line.
 - `npm run verify:line` (`scripts/verify-line.mjs`) installs this branch's line packages with
   `npm install --no-save` and runs typecheck + tests + build against them, so a build always
   compiles against the packages the branch ships for. `npm run verify:lines` is an opt-in drift

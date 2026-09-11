@@ -12,13 +12,33 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **호환성 안내:** v0.2.1-beta.3은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
+> **호환성 안내:** v1.0.0은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
 > `zh` / `en`만 노출합니다(`LOCALE_IDS = ["zh", "en"]`). 기본 DSH에서 `ja` / `ko`를
 > 선택하면 `locale "<id>" is not registered` 오류가 발생합니다. `LOCALE_IDS`
 > (locale-settings.ts)와 `LOCALES` 라벨(client/index.ts)을 갱신한 DSH fork를 사용해
 > 다시 빌드하세요.
 
-버전 **0.2.1-beta.3** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+> **▼ DSH 버전 호환성**
+>
+> 두 DSH 라인 각각이 장기 유지되는 두 브랜치를 통해 제공되며, 각자 고유한
+> 버전 시리즈, `engines.dsh`, npm dist-tag 을 가집니다
+> ([릴아웃](./RELEASING.md)):
+>
+> | DSH 버전 | 브랜치 | 버전 | npm 태그 |
+> | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
+> | 0.1.2-alpha.1+ (0.1.5-rc.2 포함) | `main` | `0.2.x` | `@latest` |
+>
+> `@deepseek-ai/dsh-client-runtime`은 `0.1.2-alpha.1`에서 **제거**되었습니다 —
+> 단순히 이동한 것이 아닙니다. `legacy` 라인은 여전히 이를 통해 `ctx.slots`에
+> 접근합니다. `main`은 `@deepseek-ai/dsh-client-ui-renderer/client`에서 같은
+> 선언을 가져옵니다. 두 버전 민감 시ーム은 버전 체크 대신 기능 프로브로 처리합니다:
+> (1) 설정 등록은 `register`를 사용하며, 두 라인 모두에 존재합니다
+> (`installSection`은 대체가 아닌 추가 사항); (2) `effectivePolicy`는 두 라인
+> 모두에서 user-approval 서비스의 **개인** 메소드이므로 `typeof` 프로브를 통해
+> 읽으며, 누락되거나 예외 발생 시 "정책_unknown"으로 후퇴합니다.
+
+버전 **1.0.0** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 
