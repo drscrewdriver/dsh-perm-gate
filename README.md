@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **Compatibility note:** v0.2.1-beta.5 ships `ja` / `ko` dictionaries, but official DSH exposes
+> **Compatibility note:** v2.0.0 ships `ja` / `ko` dictionaries, but official DSH exposes
 > only `zh` / `en` through `LocaleRuntime` (`LOCALE_IDS = ["zh", "en"]`). On stock DSH,
 > selecting `ja` / `ko` fails with `locale "<id>" is not registered`. Use a DSH fork that
 > updates `LOCALE_IDS` (locale-settings.ts) and `LOCALES` labels (client/index.ts), then
@@ -25,8 +25,13 @@
 >
 > | DSH version | Branch | Version | npm tag |
 > | --- | --- | --- | --- |
-> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `0.2.x` | `@latest` |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` / `@dsh-0.1.1` |
+> | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `2.x` | `@latest` / `@2.x` / `@dsh-0.1.2` |
+>
+> The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+),
+> and the majors fence each other: a `^1.x` install never resolves a `2.x` release and
+> vice versa. `engines.dsh` states the same split but DSH never reads it — the ranges
+> and dist-tags are what hold an old DSH on `1.x`.
 >
 > `@deepseek-ai/dsh-client-runtime` was **removed** at `0.1.2-alpha.1` — it did not
 > merely move. The `legacy` line still reaches `ctx.slots` through it; `main` gets
@@ -37,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **0.2.1-beta.5** — see the [Changelog](./CHANGELOG.md).
+Version **2.0.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 

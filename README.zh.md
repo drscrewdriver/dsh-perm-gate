@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **兼容性说明：** v0.2.1-beta.5 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
+> **兼容性说明：** v2.0.0 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
 > 只暴露 `zh` / `en`（`LOCALE_IDS = ["zh", "en"]`）。在原版 DSH 上选择 `ja` / `ko`
 > 会报 `locale "<id>" is not registered`。请使用更新了 `LOCALE_IDS`
 > （locale-settings.ts）与 `LOCALES` 标签（client/index.ts）的 DSH fork 并重新构建。
@@ -24,8 +24,12 @@
 >
 > | DSH 版本 | 分支 | 版本号 | npm 标签 |
 > | --- | --- | --- | --- |
-> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+（含 0.1.5-rc.2） | `main` | `0.2.x` | `@latest` |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` / `@dsh-0.1.1` |
+> | 0.1.2-alpha.1+（含 0.1.5-rc.2） | `main` | `2.x` | `@latest` / `@2.x` / `@dsh-0.1.2` |
+>
+> 版本序列号跟的是 **DSH 线**（`1.x` = DSH ≤ 0.1.1，`2.x` = DSH 0.1.2+），两条大版本互
+> 相隔离：锁在 `^1.x` 的安装绝不会解析到 `2.x`，反之亦然。`engines.dsh` 表达同样的
+> 分界，但 DSH 从不读取它——真正把旧 DSH 钉在 `1.x` 上的是版本范围与 dist-tag。
 >
 > `@deepseek-ai/dsh-client-runtime` 在 `0.1.2-alpha.1` 中已被**移除**——不仅仅是更名。
 > `legacy` 线仍通过它访问 `ctx.slots`；`main` 从
@@ -35,7 +39,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **0.2.1-beta.5** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.0.0** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 

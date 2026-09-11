@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1-beta.5] - 2026-09-11
+## [2.0.0] - 2026-09-11
 
 ### Fixed
 
@@ -25,6 +25,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The `main` line's version series is now `2.x`, tracking the DSH line it serves.** `1.x`
+  is the DSH `<= 0.1.1` line and `2.x` is the DSH `0.1.2+` line, so a plugin version says
+  which DSH it was built for; `2.0.0` is the first release of the new series and the
+  `0.2.x` releases (`0.2.0`, `0.2.1-beta.2`…`beta.5`) are superseded by it. The majors
+  fence each other — `^1.0.0` does not resolve `2.0.0` and `^2.0.0` does not resolve
+  `1.0.0` — so an existing `^0.2.1-beta.4` install (which also does not resolve `2.0.0`)
+  must be bumped deliberately. `engines.dsh` states the same split
+  (`>=0.1.2-alpha.1 <0.2.0-0` here, `>=0.1.0-rc.7 <0.1.2-alpha.1` on `legacy`), but DSH
+  never reads it: the version ranges and dist-tags are what keep an old DSH on `1.x`.
 - **The permission tier is labelled 自动审查 on every surface, with no icon.** The preset's
   `name:` in `cordis.patch.yml` is now the Chinese product string, and the General-settings default
   row, the composer picker, and the plugin's settings tab all show it. DSH 0.1.2 renders a

@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **互換性に関する注記:** v0.2.1-beta.5 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
+> **互換性に関する注記:** v2.0.0 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
 > `LocaleRuntime` が公開するのは `zh` / `en` のみです（`LOCALE_IDS = ["zh", "en"]`）。
 > 素の DSH で `ja` / `ko` を選択すると `locale "<id>" is not registered` になります。
 > `LOCALE_IDS`（locale-settings.ts）と `LOCALES` ラベル（client/index.ts）を更新した
@@ -26,8 +26,13 @@
 >
 > | DSH バージョン | ブランチ | バージョン | npm タグ |
 > | --- | --- | --- | --- |
-> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+（0.1.5-rc.2を含む） | `main` | `0.2.x` | `@latest` |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` / `@dsh-0.1.1` |
+> | 0.1.2-alpha.1+（0.1.5-rc.2を含む） | `main` | `2.x` | `@latest` / `@2.x` / `@dsh-0.1.2` |
+>
+> バージョン系列は **DSH ライン**を追います（`1.x` = DSH ≤ 0.1.1、`2.x` = DSH 0.1.2+）。
+> メジャー同士が互いを遮断するため、`^1.x` のインストールが `2.x` を解決することは
+> なく、その逆もありません。`engines.dsh` も同じ境界を述べていますが DSH は決して
+> 読まないため、古い DSH を `1.x` に留めるのはバージョン範囲と dist-tag です。
 >
 > `@deepseek-ai/dsh-client-runtime` は `0.1.2-alpha.1` で**削除**されました ——
 > 単なる移動ではありません。`legacy` ラインは引き続きこれを通じて
@@ -40,7 +45,7 @@
 > メソッドであるため、`typeof` プロブで読み取り、欠落時やエラー時には「ポリシー
 > 不明」にフォールバックします。
 
-バージョン **0.2.1-beta.5** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
+バージョン **2.0.0** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
 

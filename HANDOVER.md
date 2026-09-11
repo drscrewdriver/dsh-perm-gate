@@ -1,6 +1,6 @@
 # dsh-perm-gate — 交接文档（HANDOVER.md）
 
-> 版本线：v0.2.1-beta.5（`package.json`）· 分支 `main`（DSH ≥ 0.1.2）
+> 版本线：v2.0.0（`package.json`）· 分支 `main`（DSH ≥ 0.1.2）
 > 仓库：`E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate`
 > 安装：`dsh plugin --profile web add dsh-perm-gate`
 > 目标读者：续接会话 / 新协作者 — 15 分钟理解全貌，30 分钟开始贡献。
