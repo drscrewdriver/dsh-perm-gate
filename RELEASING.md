@@ -138,16 +138,18 @@ branch — never assume a fix built for one line is still correct on the other.
 | `latest` | newest stable, current DSH line (`main`, `2.x`) | `dsh plugin add dsh-perm-gate` |
 | `beta` | pre-release of the latest line | `dsh plugin add dsh-perm-gate@beta` |
 | `legacy` | the DSH `<= 0.1.1` line (`legacy`, `1.x`) | `dsh plugin add dsh-perm-gate@legacy` |
-| `2.x` | the DSH `0.1.2+` line by series (`main`) | `dsh plugin add dsh-perm-gate@2.x` |
-| `dsh-0.1.2` | the same artifact named by the **DSH** version it targets | `dsh plugin add dsh-perm-gate@dsh-0.1.2` |
-| `dsh-0.1.1` | the `legacy` artifact named by its DSH version | `dsh plugin add dsh-perm-gate@dsh-0.1.1` |
+| `next` | extra pointer at the current release | `dsh plugin add dsh-perm-gate@next` |
+| `dsh-0.1.2` | the current `main` release named by the **DSH** version it targets | `dsh plugin add dsh-perm-gate@dsh-0.1.2` |
 
 `dsh-0.1.2` answers "which artifact do I install for DSH 0.1.2?" in the DSH's own
-version vocabulary, while `2.x` is the same pointer in the plugin's series vocabulary;
-both move only when a new `2.x` release is published. `next` pointed at the retired
-`0.2.x` placeholder (`0.2.1-beta.5`) and is removed so it cannot keep resolving to a
-pre-`2.0.0` build:
+version vocabulary. There is deliberately **no** `2.x` dist-tag: npm rejects a tag that
+is itself a valid semver range (`Tag name must not be a valid SemVer range`), and it
+does not need one — `@2.x` is a range npm resolves against the published versions, which
+is the stronger guarantee anyway. The retired `0.2.x` placeholder (`0.2.1-beta.5`,
+formerly `next`) stays on the registry for exact installs but is superseded.
+
+Manage the extra pointers after a `main` release:
 
 ```sh
-npm dist-tag rm dsh-perm-gate next
+npm dist-tag add dsh-perm-gate@<version> dsh-0.1.2
 ```
