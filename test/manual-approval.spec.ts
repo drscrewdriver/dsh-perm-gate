@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadEventSnapshots } from '../src/events.js'
-import { makeApprovalObserver } from '../src/index.js'
+import { makeApprovalAnswerer } from '../src/index.js'
 import { PermGateRuntime, type PermGateRuntimeOptions, type ToolExecutionLike } from '../src/runtime.js'
 
 const dirs: string[] = []
@@ -137,33 +137,181 @@ describe('manual approval terminal records', () => {
   })
 })
 
-describe('approval observer', () => {
+describe('approval answerer', () => {
   it('forwards the waterfall outcome unchanged and records it', async () => {
     const { runtime, dir } = setup()
     runtime.decideExecution(execOf(dir, 'c1'))
-    const observer = makeApprovalObserver(runtime)
+    const answerer = makeApprovalAnswerer(runtime)
 
-    await expect(observer({ callId: 'c1' }, async () => 'allowed-once')).resolves.toBe('allowed-once')
+    await expect(answerer({ callId: 'c1' }, async () => 'allowed-once')).resolves.toBe('allowed-once')
     expect(terminalOf(runtime)?.kind).toBe('manual-approved')
   })
 
   it('never changes the outcome when recording throws', async () => {
-    const observer = makeApprovalObserver({
+    const answerer = makeApprovalAnswerer({
+      answerEscalation: () => undefined,
       settleAskOutcome: () => { throw new Error('recording blew up') },
     })
-    await expect(observer({ callId: 'c1' }, async () => 'rejected')).resolves.toBe('rejected')
-    await expect(observer(undefined, async () => 'cancelled')).resolves.toBe('cancelled')
+    await expect(answerer({ callId: 'c1' }, async () => 'rejected')).resolves.toBe('rejected')
+    await expect(answerer(undefined, async () => 'cancelled')).resolves.toBe('cancelled')
+  })
+
+  it('never changes the outcome when the answering gate throws', async () => {
+    const answerer = makeApprovalAnswerer({
+      answerEscalation: () => { throw new Error('gate blew up') },
+      settleAskOutcome: () => false,
+    })
+    await expect(answerer({ callId: 'c1' }, async () => 'rejected')).resolves.toBe('rejected')
   })
 
   it('does not consume an ask it cannot correlate', async () => {
     const { runtime, dir } = setup()
     const exec = execOf(dir)
     runtime.decideExecution(exec)
-    const observer = makeApprovalObserver(runtime)
-    await observer({ callId: 'unknown' }, async () => 'allowed-once')
+    const answerer = makeApprovalAnswerer(runtime)
+    await answerer({ callId: 'unknown' }, async () => 'allowed-once')
     expect(runtime.pendingAskCount()).toBe(1)
     runtime.settleExecution(exec, { isError: false })
     expect(terminalOf(runtime)?.kind).toBe('manual-approved')
+  })
+})
+
+describe('sandbox-escalation auto-answer', () => {
+  const permissive = (strategies: Record<string, boolean>): Partial<PermGateRuntimeOptions> => ({
+    // A rules file that allows the call outright: the allow must be recorded as a
+    // clearance before the in-call escalation can be answered from it.
+    permissive: true,
+    permissiveStrategies: strategies,
+  })
+
+  const ESCALATION = 'escalate sandbox to danger-full-access: need git history'
+
+  /** A runtime whose inline rules allow `shell` unconditionally. */
+  function allowedSetup(extra: Partial<PermGateRuntimeOptions> = {}) {
+    const dir = tmpDir()
+    const rulesFile = join(dir, 'rules.yml')
+    writeFileSync(rulesFile, 'permissions:\n  allow:\n    - tools:\n        - shell\n      reason: test allow\n', 'utf8')
+    const runtime = new PermGateRuntime({
+      rulesFile,
+      eventsFile: join(dir, 'events.jsonl'),
+      ...extra,
+    })
+    return { runtime, dir }
+  }
+
+  function shellExec(dir: string, callId = 'c1'): ToolExecutionLike {
+    return { name: 'shell', arguments: { command: 'git log' }, sessionId: 's1', cwd: dir, callId }
+  }
+
+  it('answers an escalation for a call the gate allowed', () => {
+    const { runtime, dir } = allowedSetup(permissive({ trustEscalation: true }))
+    const exec = shellExec(dir)
+    expect(runtime.decideExecution(exec)).toBeUndefined()
+    expect(runtime.clearedCallCount()).toBe(1)
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBe('allowed-once')
+  })
+
+  it('records the auto-answer on the event feed with the target mode', () => {
+    const { runtime, dir } = allowedSetup(permissive({ trustEscalation: true }))
+    runtime.decideExecution(shellExec(dir))
+    runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })
+    const terminal = terminalOf(runtime)
+    expect(terminal?.kind).toBe('auto')
+    expect(terminal?.verdict).toBe('escalation-auto')
+    expect(terminal?.mode).toBe('danger-full-access')
+    expect(terminal?.tool).toBe('shell')
+    expect(terminal?.sessionId).toBe('s1')
+  })
+
+  it('stays off when the strategy is off, and when the tier is off', () => {
+    const off = allowedSetup(permissive({ trustEscalation: false }))
+    off.runtime.decideExecution(shellExec(off.dir))
+    expect(off.runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+
+    const tierOff = allowedSetup({ permissive: false })
+    tierOff.runtime.decideExecution(shellExec(tierOff.dir))
+    expect(tierOff.runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+  })
+
+  it('never answers for a call the gate did not allow', () => {
+    const { runtime } = allowedSetup(permissive({ trustEscalation: true }))
+    // No decideExecution for this call: nothing cleared it.
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c9', reason: ESCALATION })).toBeUndefined()
+  })
+
+  it('never answers for a different tool, a missing id, or a foreign reason', () => {
+    const { runtime, dir } = allowedSetup(permissive({ trustEscalation: true }))
+    runtime.decideExecution(shellExec(dir))
+    expect(runtime.answerEscalation({ toolName: 'pwsh', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: '', reason: ESCALATION })).toBeUndefined()
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: 'the user asked something else' })).toBeUndefined()
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: 'escalate sandbox to danger-full-access' })).toBeUndefined()
+    expect(runtime.answerEscalation(null)).toBeUndefined()
+  })
+
+  it('never answers for a call the gate denied or asked', () => {
+    const asked = setup(permissive({ trustEscalation: true }))
+    const exec = execOf(asked.dir, 'c1')
+    expect(asked.runtime.decideExecution(exec)?.kind).toBe('ask')
+    expect(asked.runtime.clearedCallCount()).toBe(0)
+    expect(asked.runtime.answerEscalation({ toolName: 'write', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+  })
+
+  it('never answers for a preset passthrough (approval policy "never")', () => {
+    // No rule matches, so the decision is an `ask` the seam cannot deliver: it
+    // degrades to passthrough, which is not an approval — no clearance.
+    const dir = tmpDir()
+    const runtime = new PermGateRuntime({
+      rulesFile: undefined,
+      eventsFile: join(dir, 'events.jsonl'),
+      ...permissive({ trustEscalation: true }),
+      readApprovalPolicy: () => 'never',
+    })
+    const exec = shellExec(dir)
+    expect(runtime.decideExecution(exec)).toBeUndefined()
+    expect(runtime.clearedCallCount()).toBe(0)
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+  })
+
+  it('drops the clearance once the call settles', () => {
+    const { runtime, dir } = allowedSetup(permissive({ trustEscalation: true }))
+    const exec = shellExec(dir)
+    runtime.decideExecution(exec)
+    runtime.settleExecution(exec, { isError: false })
+    expect(runtime.clearedCallCount()).toBe(0)
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+  })
+
+  it('expires a clearance older than its TTL', () => {
+    let now = 1_000
+    const { runtime, dir } = allowedSetup({ ...permissive({ trustEscalation: true }), now: () => now })
+    runtime.decideExecution(shellExec(dir))
+    now += 6 * 60_000
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: ESCALATION })).toBeUndefined()
+    expect(runtime.clearedCallCount()).toBe(0)
+  })
+
+  it('answers the escalation that follows an llmAssist safe verdict', async () => {
+    const dir = tmpDir()
+    const runtime = new PermGateRuntime({
+      rulesFile: undefined,
+      eventsFile: join(dir, 'events.jsonl'),
+      permissive: true,
+      permissiveStrategies: { llmAssist: true, trustEscalation: true },
+      riskHook: async () => ({ kind: 'safe' }),
+    })
+    const exec: ToolExecutionLike = {
+      name: 'shell',
+      arguments: { command: 'git log --oneline' },
+      callId: 'c7',
+      sessionId: 's1',
+      cwd: dir,
+    }
+    const decision = runtime.decideExecution(exec)
+    expect(decision?.kind).toBe('ask')
+    await expect(runtime.refineAsk(exec, decision as { kind: 'ask'; reason: string })).resolves.toBeUndefined()
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c7', reason: ESCALATION })).toBe('allowed-once')
+    expect(terminalOf(runtime)?.verdict).toBe('escalation-auto')
   })
 })
 

@@ -57,8 +57,12 @@ DSH 안전 생태계에서는 이 역할이 `dsh-permission-rules` / `dsh-auto-m
   모델에 보이는 이유와 기록된 결과는 항상 일치합니다.
 - **Permissive 티어** — read-only / full-access / whitelist와 구별되는 **독립 승인
   모드**. "자동 승인"도 아니고 포괄적 권한 부여도 아닙니다. 프론트는 **단일 스위치**
-  (`permissive`)만 노출하고, 백엔드의 세 가지 전략은 **조합 가능**하며 플러그인
+  (`permissive`)만 노출하고, 백엔드의 네 가지 전략은 **조합 가능**하며 플러그인
   설정으로 제어됩니다. P0에 대해서는 여전히 fail-closed입니다.
+- **샌드박스 승격 자동 응답** (`trustEscalation`) — 샌드박스 승격은 shell / pwsh /
+   edit 도구의 **내부**(`tools/pre-execute` 이후)에서 발생하므로 게이트가 이를 볼 수
+   없고, 게이트가 자동 허용한 호출에도 확인 프롬프트가 나타납니다. 이 전략을 켜면 게이트가
+   `callId`로 이미 허용한 호출을 정확히 매칭하여 여기서 직접 응답합니다.
 
 ## 설치
 
@@ -133,10 +137,11 @@ Permissive는 권한 선택기에서 Read Only / Workspace Write / Full access /
     permissiveStrategies:        # 백엔드 전략, 조합 가능
       trustAutoAllow: true       # 범위 내 안전 작업 자동 허용, 위험/미확인은 ask
       alwaysConfirm: false       # 매번 ask. 허용 컨트롤에 확장 버튼 2개
+      trustEscalation: true      # 게이트가 허용한 호출 자체의 샌드박스 승격은 확인 불필요
       llmAssist: false           # 먼저 LLM이 분류, ask/실패 시 사람에게
 ```
 
-`trustAutoAllow`는 중간 티어의 기준선입니다(rule-allow는 자동 통과). `alwaysConfirm`은
+`trustAutoAllow`은 중간 티어의 기준선입니다(rule-allow는 자동 통과). `alwaysConfirm`은
 모든 경계에서 승인 패널을 띄우며, 그「허용 컨트롤」에 두 개의 확장 버튼을 추가합니다 —
 **이 세션에서 해당 유형 반복 허용**(`approveRepeat`, 유계 세션 허용)과 **모든 발생
 허용**(`approveAllowEverywhere`, 명령어를 `permissions.yaml`의 allow 허용 목록에
@@ -145,7 +150,32 @@ Permissive는 권한 선택기에서 Read Only / Workspace Write / Full access /
 프리셋 포함) 또는 **호스트 모델 그룹**(DSH의 `llm` 서비스와 현재 모델 그룹, `classifierProvider` /
 `classifierModel`로 재정의 가능). **상태 테스트** 버튼으로 수신 LLM의 연결과 지연 시간을 확인할 수 있음)에 `ask` 자동 판정을 맡기고,
 `ask`/오류 시 사람의 승인 심으로 폴백합니다 — 항상 fail-closed입니다.
+`trustEscalation`（티어 켜짐时 기본 켬）은 게이트가 이미 허용한 호출 내부에서
+`sandbox_permissions` 승격이 발생할 때 여기서 응답합니다. 아래 참조.
 `permissive`가 꺼져 있으면 게이트는 이전과 완전히 동일하게 동작합니다.
+
+### 샌드박스 승격: 왜 `safe` 판정에도 프롬프트가 떴나
+
+툴 호출은 **두 개의 독립된 승인**을 일으킬 수 있습니다. 게이트가 맡는 것이 첫 번째 —
+`tools/pre-execute` 워터폴의 `ask`입니다. 두 번째는 툴 내부의 `approveEscalation`,
+`tools/execute` 시점, 모델이 `sandbox_permissions` + `justification`을 건넸을 때
+발생 — 이미 `tools/pre-execute`는 끝났으므로 게이트의 allow는 여기에 닿지 않습니다.
+LLM이 `safe`로 판정하고 게이트가 자동 허용한 호출조차 샌드박스 확장을 승인하라는
+프롬프트가 떴습니다.
+
+`trustEscalation`은 이 간극을 메웁니다. 게이트가 정面向上 허용한 호출(호스트의
+`callId`로 키화, 승격 요청이 이를 반복)을 기억하고 승격을 여기서 `allowed-once`로
+자응답합니다. **모든 조건이 충족될 때만** 적용됩니다:
+
+- Permissive 티어가 켜져 있고 `trustEscalation`이 켜져 있음;
+- 호출에 게이트가 허용한 `callId`가 있고, 툴 이름이 일치;
+- 원인이 알려진 승격이며 `workspace-write` 또는 `danger-full-access`를 명시.
+
+그 외의 모든 경우 — 알려지지 않은 원인, 다른 호출, 게이트가 ask/deny한 호출, `approval:
+never` 패스스루 — 는 사람에 그대로 위임되므로 향후 DSH 변경이 open이 아닌 closed로
+실패합니다. 자동 응답은 이벤트 피드에 기록됩니다
+(`verdict: "escalation-auto"`, `mode: <대상>`). 스위치를 끄면 샌드박스 확장은
+사람 게이트로 유지되고 다른 허용은 자동 상태를 유지합니다.
 
 ### 선택 가능한 세션 티어
 
@@ -174,7 +204,7 @@ P0 하드 거부도, 거부 키워드 차단도, 감사 이벤트 기록도 하�
 
 이 티어는 실행 중에도 **설정 → 플러그인 → Permissive 승인 티어**에서 조정할 수 있습니다
 (플러그인 브라우저 절반이 렌더링하는 `settings.plugins.tab` 페이지). 스위치 하나가
-`permissive`를 토글하고, 토글 세 개가 백엔드 `permissiveStrategies`를 편집합니다.
+`permissive`를 토글하고, 네 개가 백엔드 `permissiveStrategies`를 편집합니다.
 host는 네임스페이스를 live로 읽으므로 변경은 재시작 없이 다음 도구 호출부터 적용됩니다.
 이것은 독립적인 승인 클래스이며 DSH의 "auto-approval" 모드가 **아닙니다**.
 

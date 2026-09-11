@@ -42,8 +42,8 @@ describe('Permissive independent tier', () => {
   it('exposes a single switch + combinable backend strategies', () => {
     const r = rt({ permissive: true })
     expect(r.permissive).toBe(true)
-    // backend default: trustAutoAllow on, others off (resolved via resolveConfig).
-    expect(r.permissiveStrategies).toEqual({ trustAutoAllow: true, alwaysConfirm: false, llmAssist: false })
+    // backend default: trustAutoAllow and trustEscalation on, the two confirm paths off.
+    expect(r.permissiveStrategies).toEqual({ trustAutoAllow: true, alwaysConfirm: false, llmAssist: false, trustEscalation: true })
   })
 
   it('trustAutoAllow (baseline middle tier) still auto-allows in-scope safe ops', () => {

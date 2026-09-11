@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `trustEscalation` strategy in the Permissive tier (on by default while the tier is on): a
+  sandbox-escalation approval for a call this gate already allowed is answered `allowed-once`
+  here instead of prompting you. The escalation is raised by `approveEscalation` from *inside*
+  the shell / pwsh / edit tool body — after `tools/pre-execute` settled — so the gate's own
+  allow never reached it and a call the LLM graded `safe` still asked you to approve the
+  widening. Only the exact call the gate cleared (matched by `callId` and tool name) skips the
+  prompt, and only for a recognized escalation reason naming `workspace-write` /
+  `danger-full-access`; everything else delegates to the human unchanged. The auto-answer is
+  recorded on the event feed (`verdict:"escalation-auto"`, `mode:<target>`). Turn the switch
+  off to keep sandbox widening human-gated.
+
+### Fixed
+
+- The settings card now seeds the editable whitelist from the rules file. `installSettingsSection`
+  called `scope.set('allowlist', …)` on the **host** settings scope, which exposes only
+  `get` / `watch` / `update` / `replace` — `set(field, value)` is the *client* convenience wrapper
+  over `mutate()`, a different object — so the call threw and the namespace stayed unseeded.
+  It now uses `scope.update({ allowlist: … })`.
+- The `approval/request` listener is registered `prepend` and is now an answering gate rather than
+  a passive observer, so it sits ahead of the remote bridge that renders the browser prompt. A
+  listener behind that bridge could only ever record a prompt that had already been shown.
+- The browser half no longer imports `@deepseek-ai/dsh-client-runtime`, which DSH removed in
+  `0.1.2-alpha.1`. `ClientContext` now comes from `@deepseek-ai/cordis` — the alias DSH 0.1.1
+  defined as `export type ClientContext = Context`, so it names the same type on both lines — and
+  the settings card declares the four scope members it uses locally (`SettingsScopeLike`), the
+  same local-face pattern the host half already uses for the host `settings` service. The client
+  contract is byte-identical on both lines; only its exporting package moved.
+
+### Changed
+
+- DSH compatibility now ships as **two long-lived branches**, each with its own version series,
+  `engines.dsh`, and npm dist-tag: `main` / `0.2.x` / `>=0.1.2-alpha.1 <0.2.0-0` / `latest`, and
+  `legacy` / `1.x` / `>=0.1.0-rc.7 <0.1.2-alpha.1` / `legacy`. This branch is `main`. See
+  `RELEASING.md` for the branch layout and the cherry-pick flow.
+- On this line `ctx.slots` is declared by `@deepseek-ai/dsh-client-ui-renderer/client` — from
+  `0.1.2-alpha.1` on, `@deepseek-ai/dsh-client-runtime` is gone — so the client entry imports it.
+- Client devDependency floors raised from `^0.1.0-rc.7` to `^0.1.5-rc.2`, and
+  `@deepseek-ai/dsh-client-ui-renderer` added. The old floor meant the build could only ever
+  resolve the 0.1.0-rc.8 package set, so this line was never compiled against.
+- `npm run verify:line` (`scripts/verify-line.mjs`) installs this branch's line packages with
+  `npm install --no-save` and runs typecheck + tests + build against them, so a build always
+  compiles against the packages the branch ships for. `npm run verify:lines` is an opt-in drift
+  check that builds on both lines and compares the bundles.
+
 ## [0.2.1-beta.3] - 2026-09-10
 
 ### Added

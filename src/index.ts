@@ -11,7 +11,7 @@ import { Config, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies
 import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { PermGateRuntime, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
+import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -35,7 +35,13 @@ export const PERMISSIVE_NAMESPACE = 'dsh-perm-gate'
  */
 interface SettingsScopeLike {
   get(): unknown
-  set(field: string, value: unknown): Promise<unknown> | unknown
+  /**
+   * Merge a partial patch into the namespace's user layer and persist it. This is
+   * the HOST scope's only write verb: it exposes `update(patch)` / `replace(section)`
+   * and has never had a `set(field, value)` (that is the client-side convenience
+   * wrapper over `mutate()`, a different object).
+   */
+  update(patch: object): Promise<unknown> | unknown
   watch(callback: () => void): () => void
 }
 interface SettingsServiceLike {
@@ -54,7 +60,7 @@ interface SettingsAwareCtx {
  */
 interface EventContextLike {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(name: string, listener: (...args: any[]) => any): () => void
+  on(name: string, listener: (...args: any[]) => any, options?: { prepend?: boolean }): () => void
   effect(cleanup: () => (() => void) | void, label?: string): void
 }
 
@@ -156,16 +162,36 @@ function buildSessionSender(get: (name: string) => unknown): SessionSender {
 }
 
 /**
- * Build the passive `approval/request` observer (exported for tests).
+ * Build the `approval/request` listener (exported for tests).
  *
- * It forwards the waterfall untouched and records the closed outcome for a
- * tracked ask. Recording is best-effort: a throw here would be normalized by
- * the approval service to `unavailable` — a rejection on the human's behalf.
+ * Two jobs, in this order:
+ *
+ * 1. **Answer an escalation the gate already decided.** A sandbox escalation is
+ *    raised by `approveEscalation` from *inside* a shell/filesystem tool body —
+ *    after `tools/pre-execute` settled — so the gate's own allow never reaches it
+ *    and a call it auto-allowed would still prompt the human for the privilege
+ *    widening. {@link PermGateRuntime.answerEscalation} returns `allowed-once` for
+ *    exactly that case (the Permissive tier on, `trustEscalation` on, a positively
+ *    cleared `callId` with a matching tool, a recognized escalation reason and
+ *    target mode) and `undefined` for every other request, which then delegates
+ *    unchanged.
+ * 2. **Record the terminal outcome** of an ask the gate did raise. This is
+ *    best-effort: a throw here would be normalized by the approval service to
+ *    `unavailable` — a rejection on the human's behalf.
  */
-export function makeApprovalObserver(
-  runtime: Pick<PermGateRuntime, 'settleAskOutcome'>,
+export function makeApprovalAnswerer(
+  runtime: Pick<PermGateRuntime, 'settleAskOutcome' | 'answerEscalation'>,
 ): (req: unknown, next: () => Promise<unknown>) => Promise<unknown> {
   return async (req, next) => {
+    let answered: string | undefined
+    try {
+      answered = runtime.answerEscalation(req as ApprovalRequestLike)
+    } catch {
+      // A gate failure must never reject on the human's behalf: fall through to
+      // the ordinary answerers.
+      answered = undefined
+    }
+    if (answered !== undefined) return answered
     const outcome = await next()
     try {
       const callId = (req as { callId?: unknown } | null | undefined)?.callId
@@ -361,7 +387,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       const surface = asSurface(scope.get())
       if (surface !== undefined && !Array.isArray(surface.allowlist)) {
         const patterns = runtime.allowlist()
-        if (patterns.length > 0) void scope.set('allowlist', patterns.slice())
+        if (patterns.length > 0) void scope.update({ allowlist: patterns.slice() })
       }
       // Card edits -> namespace -> rulesFile (mirror + reload).
       scope.watch(() => {
@@ -459,12 +485,18 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // approved it and it executed — one confirmation).
   host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => { runtime.settleExecution(exec, result) }) as never)
 
-  // Primary terminal-answer channel: passively observe the approval waterfall.
-  // The ask we vetoed is forwarded by dsh-tools to `approval.request(...)`, so
-  // the closed outcome is observable here. This listener MUST return `next()`'s
-  // value unchanged — a throw is normalized to `unavailable`, i.e. a rejection
-  // on the human's behalf. Requests we never tracked (other agents, other
-  // sources) are ignored.
+  // Approval channel: answer an escalation the gate already cleared, and settle
+  // the outcome of an ask the gate did raise. Registered `prepend` so it sits at
+  // the head of the `approval/request` waterfall, ahead of the remote bridge that
+  // renders the browser prompt (`packages/api/remotes` registers a plain `ctx.on`).
+  // A listener behind that bridge could only ever record a prompt that was already
+  // shown. The `'never'` policy is unaffected: `ApprovalService.decide` resolves it
+  // before dispatching, so this gate is never consulted, and a rogue return value is
+  // normalized to `'unavailable'` by the service.
+  //
+  // This listener MUST return `next()`'s value unchanged when it does not answer —
+  // a throw is normalized to `unavailable`, i.e. a rejection on the human's behalf.
+  // Requests we never tracked (other agents, other sources) are ignored.
   const approvalAware = ctx as unknown as {
     inject(deps: readonly string[], fn: (actx: EventContextLike) => void): void
   }
@@ -472,11 +504,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // Capture the live service: the gate reads `effectivePolicy` per call to
     // learn whether an ask can reach a human (`approval: never` cannot).
     approvalService = (actx as { approval?: typeof approvalService }).approval
-    const off = actx.on('approval/request', makeApprovalObserver(runtime))
+    const off = actx.on('approval/request', makeApprovalAnswerer(runtime), { prepend: true })
     actx.effect(() => () => {
       off()
       approvalService = undefined
-    }, 'dsh-perm-gate: approval observer')
+    }, 'dsh-perm-gate: approval answerer')
   })
 
   return runtime

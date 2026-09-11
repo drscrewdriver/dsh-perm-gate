@@ -14,15 +14,38 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
 import { SedimentSection } from './sediment.tsx'
 
+/**
+ * Minimal face of the browser settings scope this card consumes.
+ *
+ * Typed locally on purpose (the same pattern the host half uses for the host
+ * `settings` service): the official contract moved packages between DSH lines.
+ * DSH 0.1.1 declares `SettingsScope` in `@deepseek-ai/dsh-client-runtime/client`;
+ * that package is gone from 0.1.2-alpha.1 on, where the byte-identical interface
+ * is exported from `@deepseek-ai/dsh-client-ui-settings/client`. Declaring the
+ * four members the card uses binds against `ctx.settingsScope.bind()` on every
+ * line, instead of pinning a package that exists on only one of them.
+ */
+export interface SettingsScopeSnapshotLike<T> {
+  readonly status: 'loading' | 'ready' | 'unavailable'
+  readonly value: T | undefined
+  readonly writable: boolean
+}
+
+export interface SettingsScopeLike<T> {
+  getSnapshot(): SettingsScopeSnapshotLike<T>
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<void>
+  unset(field: string): Promise<void>
+}
+
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
   permissive?: boolean
-  permissiveStrategies?: { trustAutoAllow?: boolean; alwaysConfirm?: boolean; llmAssist?: boolean }
+  permissiveStrategies?: { trustAutoAllow?: boolean; alwaysConfirm?: boolean; llmAssist?: boolean; trustEscalation?: boolean }
   /** OpenAI-compatible endpoint the llmAssist classifier calls (custom API allowed). */
   classifierEndpoint?: string
   /** llmAssist receiver source: custom endpoint or the DSH host model group. */
@@ -49,7 +72,7 @@ export interface PermissiveCardValue {
 
 /** One injected face: the plugin's own settings scope. */
 export interface PermissiveCardInjected {
-  scope: SettingsScope<PermissiveCardValue>
+  scope: SettingsScopeLike<PermissiveCardValue>
 }
 
 /** Full props: locale seat + the injected scope. */
@@ -304,6 +327,22 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         }}
                       />
                     </div>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-escalation" style={{ fontSize: '12px' }}>{t('card.strategy.trustEscalation')}</label>
+                      <input
+                        id="plugin-config-perm-gate-escalation"
+                        type="checkbox"
+                        checked={strategies.trustEscalation ?? true}
+                        disabled={readonly || !effective}
+                        onChange={(event) => {
+                          void scope.set('permissiveStrategies', {
+                            ...strategies,
+                            trustEscalation: event.currentTarget.checked,
+                          })
+                        }}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.strategy.trustEscalationHint')}</p>
                     {strategies.llmAssist === true
                       ? (
                         <section style={sectionStyle}>

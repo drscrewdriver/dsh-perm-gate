@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 追加
+
+- Permissive ティアに `trustEscalation` 戦略を追加（ティア有効時に既定オン）：ゲートがすでに許可した呼び出しの
+  サンドボックス昇格承認をここで `allowed-once` と回答し、プロンプトを出さなくする。昇格は shell / pwsh / edit
+  ツールの内部 — `tools/pre-execute` の決着後 — から発生するため、ゲート自身の allow はそこに届かず、
+  LLM が `safe` と判定した呼び出しでも広げの確認を求めていた。ゲートが許可した呼び出しのみ
+  （`callId` とツール名で一致）がプロンプトをスキップし、`workspace-write` / `danger-full-access` を
+  命名する認識された昇格原因のみ適用。それ以外は変更なく人手へ委譲。自動回答はイベントフィードに記録
+  （`verdict: "escalation-auto"`、`mode: <ターゲット>`）。スイッチをオフにすると広げは人手ゲート化。
+
+### 修正
+
+- 設定カードがルール ファイルから編集可能なホワイトリストをシードするようになりました。
+  `installSettingsSection` はホスト設定スコープで `scope.set('allowlist', …)` を呼んでいましたが、
+  ホスト スコープは `get` / `watch` / `update` / `replace` だけ expose —
+  `set(field, value)` は *クライアント* の `mutate()` 用 convenience ラッパーで異なるオブジェクトなので、
+  呼び出しが投げて名前空間がシードされませんでした。
+  今度は `scope.update({ allowlist: … })` を使います。
+- `approval/request` リスナーが `prepend` で登録され、パッシブ オブザーバから回答ゲートになり、
+  ブラウザ プロンプトを描画するリモート ブリッジの前に位置するようになりました。
+  そのブリッジの後ろにリスナーがあれば、すでに示されたプロンプトしか記録できませんでした。
+
 ## [0.2.1-beta.3] - 2026-09-10
 
 ### 追加

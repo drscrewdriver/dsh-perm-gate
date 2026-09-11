@@ -57,8 +57,13 @@ DSH の安全まわりのエコシステムでは、この役割が `dsh-permiss
   モデルに見える理由と記録される結果は常に一致します。
 - **Permissive ティア** — read-only / full-access / whitelist とは別の**独立した承認
   モード**。「自動承認」でもなく、包括的な権限付与でもありません。フロントが露出する
-  のは**単一スイッチ**（`permissive`）だけで、バックエンドの 3 つの戦略は**組み合わせ
+  のは**単一スイッチ**（`permissive`）だけで、バックエンドの 4 つの戦略は**組み合わせ
   可能**でプラグイン設定から制御されます。P0 に対しては依然 fail-closed です。
+- **サンドボックス昇格の自動回答**（`trustEscalation`）— サンドボックス昇格は shell /
+   pwsh / edit ツールの**内部**（`tools/pre-execute` 後）から発生するためゲートはそれを
+   見ておらず、ゲートが自動許可した呼び出しでも確認プロンプトが表示されます。この戦略を
+   オンにすると、ゲートが許可した呼び出しを `callId` で正確に一致させてここで直接回答
+   します。
 
 ## インストール
 
@@ -133,6 +138,7 @@ Whitelist と並ぶ**独立した承認ティア**です。「自動承認」で
     permissiveStrategies:        # バックエンド戦略、組み合わせ可
       trustAutoAllow: true       # スコープ内安全操作は自動許可、危険/不明は ask
       alwaysConfirm: false       # すべて ask。許可コントロールに拡張ボタン 2 つ
+      trustEscalation: true      # ゲートが許可済みの呼び出し自身のサンドボックス昇格は確認不要
       llmAssist: false           # まず LLM が分類、ask/失敗時は人手へ
 ```
 
@@ -144,7 +150,30 @@ Whitelist と並ぶ**独立した承認ティア**です。「自動承認」で
 永続化して再読込）。`llmAssist` は設定済みの実際の LLM
 （受信先は設定カードで選択：**カスタム API**（`classifierEndpoint` / `classifierModel`。OpenAI 互換 API なら何でも可、Xiaomi MiMo `https://api.xiaomimimo.com/v1` 等のプリセット付き）または**ホストモデルグループ**（DSH の `llm` サービスと現在のモデルグループ、`classifierProvider` / `classifierModel` で上書き可）。**健全性テスト**ボタンで受信 LLM の疎通とレイテンシを確認可能）に
 `ask` の自動判定を委ね、`ask`/エラー時は人手のシームへフォールバックします —
-常に fail-closed です。`permissive` がオフなら、ゲートの挙動は以前と完全に同じです。
+常に fail-closed です。`trustEscalation`（ティア有効時に既定オン）はゲートがすでに許可した呼び出し内で
+`sandbox_permissions` 昇格が発生した際にここで回答します。以下参照。`permissive` がオフなら、ゲートの挙動は以前と完全に同じです。
+
+### サンドボックス昇格：なぜ `safe` 判定でもプロンプトが出たか
+
+ツール呼び出しは**2 つの独立した承認**を引き起こし得ます。ゲートが持つのが第 1 の承認 —
+`tools/pre-execute` ウォーターフォール上の `ask` です。第 2 はツール内部の `approveEscalation`、
+`tools/execute` 時刻に発生し、モデルが `sandbox_permissions` + `justification` を渡したとき；
+すでに `tools/pre-execute` は決着しているため、ゲートの allow はそこに届きません。LLM が `safe` と
+判定しゲートが自動許可した呼び出しでも、サンドボックス広げの確認プロンプトが出たままでした。
+
+`trustEscalation` はこの隙間を埋めます。ゲートは正面向上許可した呼び出し（ホストの `callId` で
+キー化され、昇格リクエストがこれを繰り返す）を記憶し、昇格をここで `allowed-once` と自答します。
+**すべてが満たされる場合のみ**適用されます：
+
+- Permissive ティアがオンで `trustEscalation` がオン；
+- 呼び出しにゲートが許可した `callId` があり、ツール名が一致；
+- 理由は認識された昇格で `workspace-write` または `danger-full-access` を命名。
+
+それ以外は — 認識されない理由、異なる呼び出し、ゲートが ask した/拒否した呼び出し、`approval:
+never` パススルー — は人手に変更なく委譲されるため、将来の DSH 変更でも open ではなく closed
+になります。自動回答はイベントフィードに記録されます
+（`verdict: "escalation-auto"`、`mode: <ターゲット>`）。スイッチをオフにすると広げは
+人手ゲート化されたまま、他の許可は自動のままとします。
 
 ### 選択可能なセッション ティア
 
@@ -174,7 +203,7 @@ Full access / `custom`）では、ゲートの判定フローは**一切実行�
 
 このティアは実行時にも **設定 → プラグイン → Permissive 承認ティア** から調整できます
 （プラグインのブラウザ側が描画する `settings.plugins.tab` ページ）。1 つのスイッチが
-`permissive` を切り替え、3 つのトグルがバックエンドの `permissiveStrategies` を編集
+`permissive` を切り替え、4 つのトグルがバックエンドの `permissiveStrategies` を編集
 します。host は名前空間を live に読むため、変更は再起動なしで次のツール呼び出しから
 適用されます。これは独立した承認クラスであり、DSH の「auto-approval」モードでは
 **ありません**。

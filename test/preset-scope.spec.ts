@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,12 +19,13 @@ afterEach(() => {
 /** The `permission/preset` event dsh-permission-presets pins per session. */
 const PRESET_EVENTS = (preset: string) => [{ type: 'permission/preset', data: { preset } }]
 
-function execOf(preset: string | undefined, command = 'git status'): ToolExecutionLike {
+function execOf(preset: string | undefined, command = 'git status', callId?: string): ToolExecutionLike {
   return {
     name: 'shell',
     arguments: { command },
     cwd: '/work',
     sessionId: 's1',
+    ...(callId === undefined ? {} : { callId }),
     ...(preset === undefined ? {} : { agent: { session: { id: 's1', events: PRESET_EVENTS(preset) } } }),
   }
 }
@@ -126,5 +127,36 @@ describe('gate scoping', () => {
   it('keeps the legacy always-on behaviour when no scope is configured', () => {
     const r = new PermGateRuntime({ rulesFile: undefined })
     expect(r.decideExecution(execOf('danger-full-access'))?.kind).toBe('ask')
+  })
+
+  it('records no escalation clearance outside the gate scope', () => {
+    // The `trustEscalation` answer can only fire for a call THIS gate cleared, so
+    // the scope is what keeps the other tiers' approval behaviour untouched: with
+    // no clearance, `answerEscalation` is a no-op and stock DSH asks the human.
+    const dir = tmpDir()
+    const rulesFile = join(dir, 'rules.yml')
+    writeFileSync(rulesFile, 'permissions:\n  allow:\n    - tools:\n        - shell\n      reason: test allow\n', 'utf8')
+    const runtime = new PermGateRuntime({
+      rulesFile,
+      gatePresets: ['permissive'],
+      permissive: true,
+      permissiveStrategies: { trustEscalation: true },
+    })
+    const escalation = 'escalate sandbox to danger-full-access: need it'
+
+    // Inside the gate's own tier the allow is remembered...
+    expect(runtime.decideExecution(execOf('permissive', 'git status', 'c1'))).toBeUndefined()
+    expect(runtime.clearedCallCount()).toBe(1)
+    expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c1', reason: escalation })).toBe('allowed-once')
+
+    // ...and outside it the gate stands down and remembers nothing, so the very
+    // same escalation still reaches the human. `danger-full-access` cannot even
+    // escalate (nothing is strictly wider), and `read-only` is out of scope too.
+    for (const preset of ['workspace-write', 'read-only', 'danger-full-access', undefined]) {
+      expect(runtime.decideExecution(execOf(preset, 'git status', 'c2'))).toBeUndefined()
+      expect(runtime.answerEscalation({ toolName: 'shell', callId: 'c2', reason: escalation })).toBeUndefined()
+    }
+    // Only the in-scope call was ever remembered.
+    expect(runtime.clearedCallCount()).toBe(1)
   })
 })

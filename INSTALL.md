@@ -23,6 +23,20 @@ decision chain, the rules file format and the Permissive tier.
 - A profile to install into — the browser half only ships for the `web` profile
   (`dsh.client.platform = "web"` in `package.json`).
 
+## Pick the tag for your DSH version
+
+One build serves both DSH lines, so either tag installs working code — the tag
+exists so a version you pin stays meaningful per line.
+
+| Your DSH | Install |
+|----------|---------|
+| `0.1.2-alpha.1` or newer (incl. `0.1.5-rc.2`) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| up to `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
+
+DSH does not enforce `engines.dsh`, so the tags are the selection mechanism rather
+than a compatibility gate. See [RELEASING.md](./RELEASING.md) for why one artifact
+covers both lines and how the tags are published.
+
 ## Install with the official CLI
 
 ```sh
@@ -107,12 +121,12 @@ Expected `--list` output shape:
   "defaultAction": "ask",
   "ruleCount": 8,
   "permissive": false,
-  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false }
+  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false, "trustEscalation": true }
 }
 ```
 
 In the UI, **Settings → Plugins → Permissive approval tier** should render one
-switch plus the three backend strategy toggles.
+switch plus the four backend strategy toggles.
 
 ## Uninstall
 

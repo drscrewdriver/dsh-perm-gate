@@ -10,10 +10,20 @@
  * happens through cordis services (`slots`, `locale`, `settingsScope`) and slot
  * registration only (client bundle purity). The `LocaleNamespaceMap`
  * augmentation below is a type-only merge so the `locale:` seat type-checks.
+ *
+ * `ClientContext` comes from cordis directly. DSH 0.1.1 exported the identical
+ * alias from `@deepseek-ai/dsh-client-runtime/client` (`export type ClientContext
+ * = Context`), but that package was removed in 0.1.2-alpha.1 — cordis is the one
+ * source that names the same type on both lines.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Declaration merge for `ctx.slots`. On the 0.1.2+ line the slot registry service
+// is declared by the renderer's client entry; on 0.1.1 it came from
+// `dsh-client-runtime/client` (via the settings client's peer), which is why the
+// renderer entry declares nothing there. Importing it is a no-op on the old line.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { NS, en, zh, type PermissiveKey } from './locales.ts'
 import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue } from './card.tsx'
 import { installPermissivePermissionIcon } from './permission-icon.ts'

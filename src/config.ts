@@ -129,12 +129,32 @@ export interface PermissiveStrategies {
   readonly alwaysConfirm: boolean
   /** LLM-assist classify first, human fallback on uncertainty or classifier failure. */
   readonly llmAssist: boolean
+  /**
+   * Answer a sandbox-escalation approval for a call the gate already cleared.
+   *
+   * The escalation ask is raised from inside the tool body (`ctx.approval.request`)
+   * after `tools/pre-execute` has finished, so the gate's own allow never reaches
+   * it: without this strategy, a call the gate auto-allowed still prompts the human
+   * for the privilege widening. With it on, an `approval/request` whose reason is
+   * `escalate sandbox to <mode>: …` and whose `callId` the gate positively cleared
+   * is answered `allowed-once` here instead of being forwarded to the answerers.
+   *
+   * Only a call the gate *allowed* qualifies, the target must be a known sandbox
+   * mode, and any unrecognized request still delegates to the human — fail-closed.
+   * Turn it off to keep sandbox widening human-gated while other allows stay
+   * automatic.
+   */
+  readonly trustEscalation: boolean
 }
 
 export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
   trustAutoAllow: true,
   alwaysConfirm: false,
   llmAssist: false,
+  // On inside the tier: the tier already owns the allow decision for the call, and
+  // the classifier's hard categories (deletion / credential / remote / system /
+  // bulk) — the escalation-worthy ones — auto-deny rather than allow.
+  trustEscalation: true,
 }
 
 /**
@@ -155,6 +175,7 @@ export function resolvePermissiveStrategies(bag: Partial<PermissiveStrategies> =
     trustAutoAllow: bag.trustAutoAllow ?? DEFAULT_PERMISSIVE_STRATEGIES.trustAutoAllow,
     alwaysConfirm: bag.alwaysConfirm ?? DEFAULT_PERMISSIVE_STRATEGIES.alwaysConfirm,
     llmAssist: bag.llmAssist ?? DEFAULT_PERMISSIVE_STRATEGIES.llmAssist,
+    trustEscalation: bag.trustEscalation ?? DEFAULT_PERMISSIVE_STRATEGIES.trustEscalation,
   }
 }
 
@@ -183,6 +204,7 @@ export const Config: z<PermGateConfig> = z.object({
     trustAutoAllow: z.boolean().default(true),
     alwaysConfirm: z.boolean().default(false),
     llmAssist: z.boolean().default(false),
+    trustEscalation: z.boolean().default(true),
   }),
   allowlist: z.array(z.string()),
   denyKeywords: z.array(z.string()),

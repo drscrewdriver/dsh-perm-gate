@@ -71,8 +71,12 @@ cross-plugin version coupling.
   model-visible reason matches the recorded outcome.
 - **Permissive tier** — an **independent approval mode** (separate from read-only, full-access
   and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end exposes a
-  **single switch** (`permissive`); the three backend strategies are **combinable** and driven
+  **single switch** (`permissive`); the four backend strategies are **combinable** and driven
   by plugin settings — still fail-closed against P0.
+- **Sandbox-escalation auto-answer** (`trustEscalation`) — a sandbox escalation is asked from
+  *inside* the shell / pwsh / edit tool body, after `tools/pre-execute`, so the gate never saw
+  it and a call it auto-allowed still prompted you to approve the widening. With this strategy
+  on, the exact call the gate cleared (matched by `callId`) is answered here instead.
 - **Risk-graded `llmAssist`** — a custom OpenAI-compatible LLM grades each `ask` as
   `safe` / `risky:<category>`; hard categories (deletion, credential, remote, system, bulk)
   **always ask**, neutral enters verdict learning, and every failure stays fail-closed.
@@ -161,6 +165,7 @@ In `cordis.yml`:
       trustAutoAllow: true       # in-scope safe ops auto-allow; dangerous/unknown ask
       alwaysConfirm: false       # every crossing asks; allow-controls add repeat-allow / wl-migrate buttons
       llmAssist: false           # LLM classify first, human fallback on ask/failure
+      trustEscalation: true      # a cleared call's own sandbox escalation needs no prompt
 ```
 
 `trustAutoAllow` is the baseline middle tier (rule-allow auto-passes). `alwaysConfirm` surfaces
@@ -169,8 +174,33 @@ the approval panel for every crossing; its "allow controls" add two extended but
 (which persists the command word into the `permissions.yaml` allow whitelist via
 `approveAllowEverywhere`). `llmAssist` consults a real, configurable LLM (`classifierEndpoint` /
 `classifierModel`, any OpenAI-compatible API) to auto-decide an `ask`, and falls back to the
-human seam on `ask`/error — always fail-closed. When `permissive` is off, the gate behaves
-exactly as before.
+human seam on `ask`/error — always fail-closed. `trustEscalation` (on by default while the tier
+is on) answers a `sandbox_permissions` escalation raised from inside a call the gate already
+allowed; see below. When `permissive` is off, the gate behaves exactly as before.
+
+### Sandbox escalation: why a `safe` verdict still prompted
+
+A tool call can raise **two independent approvals**. The gate owns the first — its own `ask`, on
+the `tools/pre-execute` waterfall. The second comes from `approveEscalation` **inside the tool
+body**, at `tools/execute` time, whenever the model passed `sandbox_permissions` +
+`justification`; by then `tools/pre-execute` has already settled, so the gate's allow never
+reaches it. A call the LLM graded `safe` and the gate auto-allowed therefore still showed a
+prompt asking you to approve the sandbox widening.
+
+`trustEscalation` closes that gap. The gate remembers every call it positively allowed (keyed by
+the host's `callId`, which the escalation request repeats) and answers the escalation
+`allowed-once` itself. It applies only when *all* hold:
+
+- the Permissive tier is on and `trustEscalation` is on;
+- the request carries a `callId` the gate cleared, with a matching tool name;
+- the reason is a recognized escalation naming `workspace-write` or `danger-full-access`.
+
+Everything else — an unrecognized reason, a different call, a call the gate asked or denied, the
+`approval: never` passthrough — delegates to the human unchanged, so a future DSH wording change
+fails closed rather than open. The auto-answer is recorded on the event feed
+(`verdict: "escalation-auto"`, `mode: <target>`). Turn the switch off to keep widening
+human-gated while other allows stay automatic.
+
 
 ### Risk-graded llmAssist, verdict learning, and the event feed
 
@@ -248,7 +278,7 @@ session's effective approval policy is `never`.
 
 The tier is also adjustable at runtime from **Settings → Plugins → Permissive approval tier**
 (a `settings.plugins.tab` page rendered by the plugin's browser client): one switch toggles
-`permissive`, and three toggles edit the backend `permissiveStrategies`. The host reads the
+`permissive`, and four toggles edit the backend `permissiveStrategies`. The host reads the
 namespace live, so a change applies to the next tool call without a restart. This is an
 independent approval class, NOT the DSH "auto-approval" mode.
 

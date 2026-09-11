@@ -23,6 +23,19 @@
 - 需要一个目标 profile —— 浏览器端只为 `web` profile 构建（`package.json`
   里 `dsh.client.platform = "web"`）。
 
+## 按你的 DSH 版本选择 tag
+
+单一构建同时覆盖两条 DSH 线，所以任一 tag 安装的代码都能工作 —— 保留 tag
+是为了让你锁定的版本在每条线上都有意义。
+
+| 你的 DSH | 安装方式 |
+|----------|----------|
+| `0.1.2-alpha.1` 或更高（含 `0.1.5-rc.2`） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| 不高于 `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
+
+DSH 不强制 `engines.dsh`，因此 tag 是选择机制而非兼容性关卡。
+详见 [RELEASING.md](./RELEASING.md) 了解为何单一制品覆盖两条线以及 tag 的发布方式。
+
 ## 用官方 CLI 安装
 
 ```sh
@@ -103,11 +116,11 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
   "defaultAction": "ask",
   "ruleCount": 8,
   "permissive": false,
-  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false }
+  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false, "trustEscalation": true }
 }
 ```
 
-UI 里 **设置 → 插件 → Permissive 审批档** 应渲染出一个开关加三个后台策略开关。
+UI 里 **设置 → 插件 → Permissive 审批档** 应渲染出一个开关加四个后台策略开关。
 
 ## 卸载
 

@@ -23,6 +23,21 @@
 - 설치할 profile. 브라우저 절반은 `web` profile용으로만 빌드됩니다
   (`package.json`의 `dsh.client.platform = "web"`).
 
+## DSH 버전에 맞는 tag 선택
+
+단일 빌드는 두 DSH 라인을 모두 커버하므로, 어느 tag를 골라도 작동하는 코드가
+설치됩니다 —— tag를 유지하는 이유는 당신이 고정하는 버전이 각 라인에서 의미 있게
+유지되도록 하기 위함입니다.
+
+| DSH 버전 | 설치 방법 |
+|----------|-----------|
+| `0.1.2-alpha.1` 이상 (`0.1.5-rc.2` 포함) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.1-rc.2` 이하 | `dsh plugin --profile web add dsh-perm-gate@legacy` |
+
+DSH는 `engines.dsh`를 강제하지 않으므로, tag는 선택 메커니즘이지 호환성 게이트가
+아닙니다. 단일 아티팩트가 두 라인을 커버하는 이유와 tag가 게시되는 방식에 대해서는
+[RELEASING.md](./RELEASING.md)를 참고하세요.
+
 ## 공식 CLI로 설치
 
 ```sh
@@ -104,12 +119,12 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
   "defaultAction": "ask",
   "ruleCount": 8,
   "permissive": false,
-  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false }
+  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false, "trustEscalation": true }
 }
 ```
 
 UI의 **설정 → 플러그인 → Permissive 승인 티어**에 스위치 하나와 백엔드 전략 토글
-세 개가 표시되어야 합니다.
+네 개가 표시되어야 합니다.
 
 ## 제거
 

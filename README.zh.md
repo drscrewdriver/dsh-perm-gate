@@ -54,7 +54,8 @@
 - **会话放行** — 精确的 `(工具, 规范化 fingerprint)` grant，带 `TTL` + `maxUses`；换目标绝不复用。子代理继承但不可自授。
 - **纯函数规则引擎** — glob/regex 编译 + ReDoS 上限、坏规则 loud fail、按源内容哈希缓存。
 - **审计** — 每次决策写为 `{ignorable:true}` 事件并带 `callId`；模型可见理由与记录一致。
-- **Permissive 档位** — 一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台三个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。
+- **Permissive 档位** — 一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。
+- **沙箱提权自动答复**（`trustEscalation`）— 沙箱提权是从 shell / pwsh / edit 工具**体内部**（`tools/pre-execute` 之后）发出的，所以门禁从未见过它，一个它自动放行的调用仍会弹出确认。开启后，门禁以 `callId` 精确匹配已放行调用并直接答复。
 
 ## 安装
 
@@ -101,6 +102,7 @@ P0 硬拒绝始终单调且不可协商。
     permissiveStrategies:        # 后台策略，可组合
       trustAutoAllow: true       # 作用域内安全操作自动放行；危险/未知转 ask
       alwaysConfirm: false       # 一律逐次 ask；允许控件附带重复允许/迁白名单按钮
+      trustEscalation: true      # 门禁已放行的调用，其自身的沙箱提权免确认
       llmAssist: false           # 先由 LLM 分类裁决；ask/无分类器时回退到人工
 ```
 (llmAssist 的真实接收 LLM 在设置页填 `classifierEndpoint` / `classifierModel`，OpenAI 兼容的自定义 API
@@ -110,7 +112,27 @@ P0 硬拒绝始终单调且不可协商。
 「允许控件」含两个扩展按钮：**本会话重复允许该类**（会话限次 grant，`approveRepeat`）与
 **允许所有类型**（把命令词持久写进 `permissions.yaml` 的 allow 白名单，`approveAllowEverywhere`）。
 `llmAssist` 调用配置的真实 LLM（任意 OpenAI 兼容 API）自动裁决 `ask`，结果不确定/出错时回退人工
-接缝——始终 fail-closed。`permissive` 关闭时，门禁行为与之前完全一致。
+接缝——始终 fail-closed。`trustEscalation`（档位开启时默认开）答复门禁已放行的调用在其工具体内
+提出的 `sandbox_permissions` 提权；见下文。`permissive` 关闭时，门禁行为与之前完全一致。
+
+### 沙箱提权：为何 `safe` 裁决仍会弹窗
+
+一个工具调用可能触发**两个独立的审批**。门禁负责第一个——它的 `ask`，在 `tools/pre-execute`
+瀑布上。第二个来自工具体内部的 `approveEscalation`，在 `tools/execute` 时刻，只要模型传了
+`sandbox_permissions` + `justification`；此时 `tools/pre-execute` 已结算，门禁的放行从未到达它。
+LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
+
+`trustEscalation` 填补这个缺口。门禁记住每个它正面向上放行的调用（以宿主 `callId` 为键，提权
+请求会重复该值），并在本处自行答复 `allowed-once`。它仅在**全部满足**时适用：
+
+- Permissive 档位开启且 `trustEscalation` 开启；
+- 请求携带门禁放行的 `callId`，且工具名匹配；
+- 原因为已知的提权，指明 `workspace-write` 或 `danger-full-access`。
+
+其余所有情况——未知原因、不同的调用、门禁要求或拒绝的调用、`approval: never` 透传——都保持交给人
+工，因此未来 DSH 措辞变更时 fail-closed。自动答复记录在事件流中
+（`verdict: "escalation-auto"`，`mode: <目标模式>`）。关闭开关可使沙箱放宽保持人工审批，其余
+自动放行不变。
 
 ### 权限下拉里可选档位
 
@@ -132,7 +154,7 @@ Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而�
 ### 在 UI 里可配置
 
 该档位也可在运行时从 **设置 → 插件 → Permissive 审批档** 调整（插件浏览器端渲染的
-`settings.plugins.tab` 页面）：一个开关切换 `permissive`，三个开关编辑后台
+`settings.plugins.tab` 页面）：一个开关切换 `permissive`，四个开关编辑后台
 `permissiveStrategies`。host 端 live 读取该命名空间，改动对下一条工具调用即时生效，无需重启。
 这是一个独立审批类，**不是** DSH 的"auto-approval"档。
 

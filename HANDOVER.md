@@ -162,7 +162,7 @@ dsh-perm-gate/
 | ~68–90 | `installSettingsSection()` — inline settings 注册器 |
 | ~92–121 | `PermissiveSurface` interface + `asSurface()` 转换器 |
 | ~128–156 | `buildSessionSender()` — 撤销消息投递 |
-| ~165–178 | `makeApprovalObserver()` — 被动批准观察者 |
+| ~165–178 | `makeApprovalAnswerer()` — 审批应答门：先尝试用门禁已放行的裁决直接批准沙箱提权（`answerEscalation`，免弹窗），否则 `next()` 转发并记录人工裁决 |
 | ~194–213 | `makePreExecuteListener()` — 水闸：**先 await `refineAsk`** 再返回决策（safe→`next()` 不弹面板 / 硬类别→deny / neutral·unresolved→ask） |
 | ~215–483 | `apply()` 主入口：config → runtime → settings → routes → watergate → approval |
 

@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 추가
+
+- Permissive 티어에 `trustEscalation` 전략 추가(티어 켜짐时 기본 켬): 게이트가 이미 허용한 호출의
+  샌드박스 승격 승인을 여기서 `allowed-once`로 응답하여 프롬프트를 표시하지 않음. 승격은 shell / pwsh / edit
+  도구 내부(`tools/pre-execute` 결착 후)에서 발생하므로 게이트의 allow는 여기에 닿지 않고,
+  LLM이 `safe`로 판정한 호출조차 승격 확인을 요구했음. 게이트가 허용한 호출만
+  (`callId` 및 툴 이름 일치) 프롬프트를 건너뛰고, `workspace-write` / `danger-full-access`를
+  명시하는 알려진 승격 원인에만 적용. 나머지는 변경 없이 사람에게 위임. 자동 응답은 이벤트 피드에 기록
+  (`verdict: "escalation-auto"`, `mode: <대상>`). 스위치를 끄면 승격은 사람 게이트화.
+
+### 수정
+
+- 설정 카드가 규칙 파일에서 편집 가능한 허용 목록을 시딩하도록 수정.
+  `installSettingsSection`은 호스트 설정 스코프에서 `scope.set('allowlist', …)`를 호출했지만,
+  호스트 스코프는 `get` / `watch` / `update` / `replace`만 제공 —
+  `set(field, value)`는 *클라이언트*의 `mutate()`용 convenience 래퍼로 다른 객체이므로
+  호출이 예외를 throw하고 네임스페이스가 시딩되지 않았음.
+  이제 `scope.update({ allowlist: … })`를 사용.
+- `approval/request` 리스너가 `prepend`로 등록되고 수동 옵서버에서 응답 게이트로 바뀌어,
+  브라우저 프롬프트를 렌더링하는 원격 브리ჯ 앞에 위치하게 됨.
+  그 브리ჯ 뒤에 리스너가 있으면 이미 표시된 프롬프트만 기록 가능했음.
+
 ## [0.2.1-beta.3] - 2026-09-10
 
 ### 추가

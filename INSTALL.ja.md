@@ -23,6 +23,21 @@
 - インストール先の profile。ブラウザ側は `web` profile 向けにのみビルドされます
   （`package.json` の `dsh.client.platform = "web"`）。
 
+## DSH のバージョンに合う tag を選ぶ
+
+単一ビルドが DSH 両ラインをカバーするため、どちらの tag を選んでも動作するコードが
+インストールされます —— tag を残しておくのは、あなたがピン留めするバージョンが
+各ラインで意味を持つようにするためです。
+
+| DSH のバージョン | インストール方法 |
+|-----------------|-----------------|
+| `0.1.2-alpha.1` 以上（`0.1.5-rc.2` を含む） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| `0.1.1-rc.2` まで | `dsh plugin --profile web add dsh-perm-gate@legacy` |
+
+DSH は `engines.dsh` を強制しないため、tag が選択メカニズムであり、互換性ゲート
+そのものではありません。単一ビルドが両ラインをカバーする理由と tag の公開方法については、
+[RELEASING.md](./RELEASING.md) を参照してください。
+
 ## 公式 CLI でインストール
 
 ```sh
@@ -105,11 +120,11 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
   "defaultAction": "ask",
   "ruleCount": 8,
   "permissive": false,
-  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false }
+  "permissiveStrategies": { "trustAutoAllow": true, "alwaysConfirm": false, "llmAssist": false, "trustEscalation": true }
 }
 ```
 
-UI では **設定 → プラグイン → Permissive 承認ティア** に、1 つのスイッチと 3 つの
+UI では **設定 → プラグイン → Permissive 承認ティア** に、1 つのスイッチと 4 つの
 バックエンド戦略トグルが表示されます。
 
 ## アンインストール

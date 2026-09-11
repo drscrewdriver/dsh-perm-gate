@@ -177,6 +177,57 @@ export interface RiskLearningState {
 /** Upper bound on in-flight learning candidates awaiting `tools/result`. */
 const PENDING_CAP = 100
 
+/**
+ * Bound on retained call clearances. An in-call approval is raised microseconds
+ * after the gate's decision, so the store only ever holds the calls currently
+ * executing; the cap keeps a pathological producer from growing it.
+ */
+const CLEARED_CALL_CAP = 256
+
+/**
+ * How long a clearance may answer an in-call approval. Generous next to one tool
+ * call's lifetime, short enough that a stale entry cannot outlive its call.
+ */
+const CLEARED_CALL_TTL_MS = 5 * 60_000
+
+/**
+ * The sandbox-escalation ask marker. `@deepseek-ai/dsh-sandbox`'s
+ * `approveEscalation` builds `escalate sandbox to <mode>: <justification>` for the
+ * approval request it raises from inside a shell/fs tool body. The request carries
+ * no structural kind field, so this reason text is the only discriminator; an
+ * unrecognized wording fails closed (the request is forwarded to the human).
+ */
+const SANDBOX_ESCALATION_REASON = /^escalate sandbox to (workspace-write|danger-full-access): /
+
+/** The minimal approval-request face the answering gate inspects. */
+export interface ApprovalRequestLike {
+  readonly toolName?: string
+  readonly callId?: string
+  readonly reason?: string
+}
+
+/** A closed approval outcome, structurally the DSH seam's `ApprovalOutcome`. */
+export type ApprovalOutcomeLike = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+
+/**
+ * One call the gate positively allowed, retained so an approval raised from inside
+ * that same call (the sandbox escalation) can be answered from the verdict that
+ * already cleared it. Keyed by the host's execution id, which the approval request
+ * repeats as its `callId`.
+ */
+interface ClearedCall {
+  readonly tool: string
+  readonly reason: string
+  /** The decision path that cleared it, e.g. `llm-safe` / `rule` / `grant`. */
+  readonly verdict: string
+  /** The audit source for the auto-answer. */
+  readonly source: DecisionSource
+  readonly sessionId: string
+  readonly files: readonly string[]
+  readonly baseDir?: string
+  readonly at: number
+}
+
 export class PermGateRuntime {
   private ruleset: CompiledRuleset
   private readonly grants: GrantRegistry
@@ -202,6 +253,12 @@ export class PermGateRuntime {
    * missing `callId` or an untriggered observer can never lose a record.
    */
   private readonly pendingAsks = new Map<string, PendingAsk>()
+  /**
+   * Calls the gate positively allowed, keyed by the host execution id. An approval
+   * raised from *inside* such a call (the sandbox escalation) is answered here
+   * instead of prompting the human — see {@link answerEscalation}.
+   */
+  private readonly cleared = new Map<string, ClearedCall>()
 
   constructor(private readonly options: PermGateRuntimeOptions = {}) {
     this.grants = new GrantRegistry('__session__', options.now)
@@ -508,6 +565,93 @@ export class PermGateRuntime {
     return this.pendingAsks.size
   }
 
+  /**
+   * Remember that the gate positively allowed one call, so an approval raised from
+   * inside that same call can be answered from this verdict.
+   *
+   * Only real allow decisions reach here: a `gateActive` stand-down returns before
+   * any decision, and the `approval: never` passthrough is a degradation rather
+   * than an approval, so neither may widen the call's privilege.
+   */
+  private clearCall(exec: ToolExecutionLike, reason: string, verdict: string, source: DecisionSource): void {
+    const callId = typeof exec.callId === 'string' ? exec.callId : ''
+    if (callId === '') return
+    if (this.cleared.size >= CLEARED_CALL_CAP) {
+      const oldest = this.cleared.keys().next()
+      if (!oldest.done) this.cleared.delete(oldest.value)
+    }
+    const now = typeof this.options.now === 'function' ? this.options.now : Date.now
+    this.cleared.set(callId, {
+      tool: exec.name,
+      reason,
+      verdict,
+      source,
+      sessionId: sessionIdOf(exec),
+      files: eventFiles(exec),
+      baseDir: cwdOf(exec),
+      at: now(),
+    })
+  }
+
+  /** Drop one clearance (the call settled; nothing more can be asked from it). */
+  private forgetCleared(callId: string): void {
+    if (callId !== '') this.cleared.delete(callId)
+  }
+
+  /** Clearances retained right now (diagnostics/tests). */
+  clearedCallCount(): number {
+    return this.cleared.size
+  }
+
+  /**
+   * Answer an in-call approval from the verdict that already cleared the call.
+   *
+   * The sandbox escalation is raised by `approveEscalation` from *inside* a shell
+   * or filesystem tool body — after `tools/pre-execute` settled — so the gate's
+   * allow never reaches it and a call the gate auto-allowed would still prompt the
+   * human for the privilege widening. Answering it here keeps the tier's contract:
+   * one decision per call.
+   *
+   * Returns `undefined` for every request that is not an escalation of a call this
+   * gate positively cleared, which delegates to the human unchanged (fail-closed).
+   *
+   * @param req - the `approval/request` payload (tool name, call id, reason).
+   * @returns `allowed-once` when the gate owns the answer, else `undefined`.
+   */
+  answerEscalation(req: ApprovalRequestLike | null | undefined): ApprovalOutcomeLike | undefined {
+    const permissive = this.livePermissive()
+    if (!permissive.enabled || !permissive.strategies.trustEscalation) return undefined
+    const callId = typeof req?.callId === 'string' ? req.callId : ''
+    if (callId === '') return undefined
+    const target = SANDBOX_ESCALATION_REASON.exec(
+      typeof req?.reason === 'string' ? req.reason : '',
+    )?.[1]
+    if (target === undefined) return undefined
+    const cleared = this.cleared.get(callId)
+    if (cleared === undefined) return undefined
+    if (typeof req?.toolName === 'string' && req.toolName !== '' && req.toolName !== cleared.tool) return undefined
+    const now = typeof this.options.now === 'function' ? this.options.now : Date.now
+    if (now() - cleared.at > CLEARED_CALL_TTL_MS) {
+      this.cleared.delete(callId)
+      return undefined
+    }
+
+    const reason = `sandbox escalation to ${target} auto-allowed: the gate cleared this call (${cleared.verdict})`
+    this.audit.append(makeEntry({ callId: randomId(), tool: cleared.tool, outcome: 'allow', source: cleared.source, reason, at: now() }))
+    this.events?.append({
+      sessionId: cleared.sessionId,
+      tool: cleared.tool,
+      kind: 'auto',
+      reason,
+      verdict: 'escalation-auto',
+      justification: cleared.reason,
+      mode: target,
+      files: cleared.files,
+      baseDir: cleared.baseDir,
+    })
+    return 'allowed-once'
+  }
+
   /** Get one pending ask by its key (diagnostics/tests only). */
   getPendingAsk(key: string): PendingAsk | undefined {
     return this.pendingAsks.get(key)
@@ -599,6 +743,10 @@ export class PermGateRuntime {
       this.trackAsk(exec, decision.reason)
       return { kind: 'ask', reason: decision.reason }
     }
+    // A genuine allow (grant / rule / classifier / permissive default): remember it
+    // so a sandbox escalation raised from inside this same call is answered here
+    // rather than prompted. Reached only after the two passthrough early-returns.
+    this.clearCall(exec, decision.reason, source, source)
     return undefined
   }
 
@@ -648,6 +796,7 @@ export class PermGateRuntime {
         this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
         this.recordEvent(exec, 'learned', reason, { risk: 'neutral', verdict: 'learned-sediment', category: 'neutral' })
         this.untrackAsk(exec) // auto-allowed: no human answer is coming
+        this.clearCall(exec, reason, 'learned-sediment', 'classifier')
         return undefined
       }
     }
@@ -684,6 +833,7 @@ export class PermGateRuntime {
       this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
       this.recordEvent(exec, 'auto', reason, { risk: 'safe', verdict: 'llm-safe' })
       this.untrackAsk(exec) // auto-allowed: no human answer is coming
+      this.clearCall(exec, reason, 'llm-safe', 'classifier')
       return undefined
     }
 
@@ -707,6 +857,7 @@ export class PermGateRuntime {
         this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
         this.recordEvent(exec, 'auto', reason, { risk: risk.category, verdict: 'llm-learned', category: risk.category })
         this.untrackAsk(exec) // auto-allowed: no human answer is coming
+        this.clearCall(exec, reason, 'llm-learned', 'classifier')
         return undefined
       }
       if (learning.enabled) {
@@ -755,6 +906,9 @@ export class PermGateRuntime {
    * approved it and it actually executed — one confirmation.
    */
   settleExecution(exec: ToolExecutionLike, result?: ToolResultLike): void {
+    // The call is over: no further in-call approval can arrive for it, so the
+    // clearance must not linger.
+    this.forgetCleared(typeof exec.callId === 'string' ? exec.callId : '')
     this.settleAskFromResult(exec, result)
 
     const callKey = canonicalizeCall(exec.name, exec.arguments ?? {})
