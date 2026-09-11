@@ -14,8 +14,9 @@
 # stays `permissive`: it is the key `gatePresets` matches and the value the
 # permission projection reports, so only the label text is user-facing.
 #
-# The tier carries no icon. The built-in glyphs the composer draws are keyed by
-# the three built-in values, and a plugin tier deliberately has none.
+# The tier now carries a shield+eye icon in the composer glyph map (patched
+# into dsh-client-ui-conversation).  The permissive glyph sits alongside the
+# three built-in ones so both the trigger button and the dropdown rows show it.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should
