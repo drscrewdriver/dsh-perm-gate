@@ -66,9 +66,9 @@ const RISK_SYSTEM_PROMPT = [
   '  {"risk":"risky","category":"<category>","reason":"short"}',
   '',
   'category must be exactly one of:',
-  '  deletion  — deletes or overwrites data that cannot be regenerated',
+  '  deletion  — deletes or overwrites data that cannot be regenerated (IMPORTANT: see exclusion rules below)',
   '  credential — creates/modifies/exposes credentials, keys, tokens, auth config',
-  '  remote    — affects remote systems, production, databases, messaging, billing, publishing',
+  '  remote    — WRITES to or MODIFIES remote systems (git push, git deploy, kubectl apply, terraform apply, production database writes, messaging, billing, publishing). Must have a write/modify/delete effect on the remote side.',
   '  system    — system-level paths or configuration (/etc, /usr, boot items), shutdown/reboot',
   '  bulk      — mass overwrite of many files, formatting, dd-style irreversible writes',
   '  neutral   — none of the above clearly applies (ordinary edits outside the obvious scope, or you are unsure but see no hard-risk sign)',
@@ -77,6 +77,17 @@ const RISK_SYSTEM_PROMPT = [
   '- safe is only for reversible, in-scope operations that touch no sensitive resource.',
   '- When unsure between safe and neutral, answer neutral; never guess safe.',
   '- Judge the operation content, not merely its location.',
+  '',
+  'DELETION exclusion rules (these override the deletion category):',
+  '- Cleanup of temporary files, build outputs, or failed clone directories is SAFE — even if using rm/rmdir/Remove-Item. Look for temp paths: paths containing "temp", "tmp", "test-clone", "node_modules", ".cache", "dist", "build", or numbered/timestamped directories.',
+  '- Removal of session-local artifacts (files the session itself created) is SAFE.',
+  '- rm -rf on node_modules, .next, __pycache__, .pytest_cache, .git, dist, build is SAFE — these are always regenerable.',
+  '- Deletion inside the workspace that targets non-existent or already-empty paths is SAFE (idempotent cleanup).',
+  '- Only flag as deletion when the target is: (a) user data with no backup, (b) configuration files, (c) database records, (d) files outside the workspace that were not created by this session, or (e) a destructive rm -rf on a directory containing unique, irreplaceable content.',
+  '',
+  'READ-ONLY remote operations are safe: git fetch, git pull, git clone, git log, git diff, git status, git show, npm install (read-only), pip install (read-only), apt-get update, curl/wget (read, no write flag).',
+  '- Operations that only READ from remote systems without modifying them are safe, even if they involve network traffic.',
+  '- Only flag as remote when the operation WRITES, DEPLOYS, PUSHES, or DELETES on the remote side.',
 ].join('\n')
 
 /** Parse one assistant message into a verdict; anything off-protocol → undefined (caller retries/fails). */
@@ -121,9 +132,20 @@ export type RiskSend = (system: string, user: string) => Promise<{ ok: true; con
 
 /** The bounded user prompt for one risk grading (shared by every transport). */
 export function riskUserText(req: RiskRequest): string {
+  // Enrich the prompt with full path context so the LLM can judge
+  // whether a deletion targets a temporary/build artifact vs real data.
+  const args = req.args ?? {}
+  const enriched = { ...args }
+  // Surface the working directory if present (helps LLM see temp paths).
+  if (typeof enriched.cwd === 'string' && enriched.cwd !== '') {
+    enriched.__cwd = enriched.cwd
+  }
+  if (typeof enriched.workdir === 'string' && enriched.workdir !== '') {
+    enriched.__cwd = enriched.workdir
+  }
   return JSON.stringify({
     tool: req.tool,
-    args: req.args ?? {},
+    args: enriched,
     reason: req.reason,
     instruction: 'Reply strictly as one JSON object: {"risk":"safe"} or {"risk":"risky","category":"..."} plus a short "reason".',
   })

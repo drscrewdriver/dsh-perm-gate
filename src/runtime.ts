@@ -242,6 +242,78 @@ const CLEARED_CALL_TTL_MS = 5 * 60_000
  */
 const SANDBOX_ESCALATION_REASON = /^escalate sandbox to (workspace-write|danger-full-access): /
 
+// --- Deterministic cleanup pre-screen ----------------------------------------
+// Pattern for shell deletion commands (rm, rmdir, Remove-Item) with flags.
+const SHELL_DELETE_RE = /^(?:rm|rmdir|Remove-Item)\b/i
+// Temp/build artifact directory name patterns (case-insensitive match on each path segment).
+const REGENERABLE_SEGMENT = /(?:^|[\\/])(?:temp|tmp|test[-_]clone|node_modules|\.cache|dist|build|__pycache__|\.pytest_cache|\.git|\.next|\.nuxt|coverage|\.tox|\.venv|venv|env|\.mypy_cache|\.parcel-cache)(?:[\\/]|$)/i
+// Workspace-relative path tokens that are always regenerable.
+const REGENERABLE_TOKENS = /^(?:node_modules|\.next|__pycache__|\.cache|dist|build|\.git|coverage|\.pytest_cache|\.tox|\.venv|venv|env)$/i
+
+/**
+ * Deterministic pre-screen for deletion commands. Returns a reason string when
+ * the deletion is clearly safe (targeting a regenerable/temp artifact inside the
+ * workspace), or undefined when the LLM should decide.
+ *
+ * This runs BEFORE the LLM risk grader to avoid the LLM's unconditional
+ * "Remove-Item → risky:deletion" bias. The LLM is still the fallback for
+ * ambiguous cases.
+ */
+function isCleanupSafe(exec: ToolExecutionLike): string | undefined {
+  const tool = exec.name
+  const args = exec.arguments ?? {}
+
+  // Only applies to shell/pwsh tools.
+  if (!/^(?:pwsh|bash|sh|cmd|shell|terminal)$/i.test(tool)) return undefined
+
+  const commandText = typeof args.command === 'string' ? args.command : undefined
+  if (commandText === undefined) return undefined
+
+  let commands: ReturnType<typeof decomposeShellCommand>['commands'] = []
+  try {
+    commands = decomposeShellCommand(commandText).commands
+  } catch {
+    return undefined
+  }
+
+  const cwd = typeof args.cwd === 'string' ? args.cwd : cwdOf(exec) ?? ''
+  const posixCwd = cwd.replace(/\\/g, '/').toLowerCase()
+
+  for (const cmd of commands) {
+    if (!SHELL_DELETE_RE.test(cmd.command)) continue
+
+    // Collect all non-flag argument tokens as potential targets.
+    const targets = cmd.args.filter((a) => !a.startsWith('-'))
+    if (targets.length === 0) continue
+
+    let allSafe = true
+    for (const target of targets) {
+      const posixTarget = target.replace(/\\/g, '/').toLowerCase()
+
+      // Resolve relative to cwd.
+      const fullPath = posixTarget.startsWith('/') || /^[a-z]:\//i.test(posixTarget)
+        ? posixTarget
+        : posixCwd !== '' ? `${posixCwd}/${posixTarget}` : posixTarget
+
+      // Check if the target path contains a regenerable segment.
+      if (REGENERABLE_SEGMENT.test(fullPath)) continue
+
+      // Check bare token (e.g. "node_modules" without path separators).
+      if (REGENERABLE_TOKENS.test(target)) continue
+
+      // Not clearly regenerable — let the LLM decide.
+      allSafe = false
+      break
+    }
+
+    if (allSafe) {
+      return `deletion targets regenerable/temp artifacts: ${targets.join(', ')}`
+    }
+  }
+
+  return undefined
+}
+
 /** The minimal approval-request face the answering gate inspects. */
 export interface ApprovalRequestLike {
   readonly toolName?: string
@@ -746,6 +818,20 @@ export class PermGateRuntime {
     const raw = decide(ctx, { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
     const decision = this.applyPermissive(raw)
 
+    // Deterministic cleanup pre-screen: if a deletion command targets a
+    // regenerable/temporary artifact inside the workspace, allow it directly.
+    // This runs BEFORE the ask/passthrough logic so it works even under
+    // `approval: never` (where refineAsk is never called).
+    if (decision.action === 'ask') {
+      const cleanupSafe = isCleanupSafe(exec)
+      if (cleanupSafe !== undefined) {
+        const reason = `cleanup-safe: ${cleanupSafe}`
+        this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
+        this.recordEvent(exec, 'auto', reason, { risk: 'safe', verdict: 'cleanup-safe', category: 'safe' })
+        return undefined  // passthrough (allow)
+      }
+    }
+
     let outcome: AuditOutcome
     let source: DecisionSource
     switch (decision.stage) {
@@ -854,6 +940,20 @@ export class PermGateRuntime {
       }
     }
 
+    // Defensive cleanup pre-screen: normally this is handled in decideExecution
+    // before refineAsk is ever called, but refineAsk is public and may be called
+    // directly by tests or future embedders. Keep the same deterministic check
+    // here as a safety net — identical logic to decideExecution's pre-screen.
+    const cleanupSafe = isCleanupSafe(exec)
+    if (cleanupSafe !== undefined) {
+      const reason = `cleanup-safe: ${cleanupSafe}`
+      this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
+      this.recordEvent(exec, 'auto', reason, { risk: 'safe', verdict: 'cleanup-safe', category: 'safe' })
+      this.untrackAsk(exec)
+      this.clearCall(exec, reason, 'cleanup-safe', 'classifier')
+      return undefined
+    }
+
     if (!permissive.strategies.llmAssist) return decision
 
     // One live read of the classifier setup. Without a usable receiver (a
@@ -867,7 +967,14 @@ export class PermGateRuntime {
       return decision
     }
 
-    const req: RiskRequest = { tool: exec.name, args: exec.arguments ?? {}, reason: decision.reason }
+    // Inject cwd into the risk request so the LLM can see the full path context
+    // (e.g. that a Remove-Item targets a temp directory, not user data).
+    const riskArgs = { ...(exec.arguments ?? {}) }
+    const cwd = cwdOf(exec)
+    if (typeof cwd === 'string' && cwd !== '' && typeof riskArgs.cwd !== 'string') {
+      riskArgs.cwd = cwd
+    }
+    const req: RiskRequest = { tool: exec.name, args: riskArgs, reason: decision.reason }
     let risk: RiskVerdict
     if (this.options.riskHook !== undefined) {
       risk = await this.options.riskHook(req)
