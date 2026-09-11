@@ -19,17 +19,21 @@
 
 > **▼ DSH 版本适配**
 >
-> | DSH 版本 | 加载 | 设置注册 | 宿主门 | 客户端半 |
-> | --- | --- | --- | --- | --- |
-> | 0.1.0-rc.7 ~ 0.1.1-rc.x | ✅ | `ctx.settings.register(ns, schema, { base })` | ✅ `tools/pre-execute` 一致 | ✅ 仅类型导入 |
-> | 0.1.2-alpha.2+ / 0.1.2-rc.1 | ✅ | `register` 仍保留（另加 `installSection`） | ✅ `tools/pre-execute` 一致 | ✅ 仅类型导入 |
+> 两个 DSH 版本线从两个长期分支分别维护，各有一套版本号系列、`engines.dsh`
+> 和 npm 分发标签（[发布布局](./RELEASING.md)）：
 >
-> 一份产物同时支持两版本。两处版本敏感点都用**能力探测**而非版本号判断：
-> ① 设置注册走 `register`，它在所有目标版本都存在（`installSection` 是 0.1.2 的
-> **新增**而非替代）；② `effectivePolicy` 在**两版本**中都是 user-approval 服务的
-> **私有**方法，故只在 `typeof` 探测后调用，缺失或抛错时降级为「策略未知」。
-> 客户端 bundle 对 `@deepseek-ai/*` 无任何值导入，因此 0.1.2 的
-> `dsh-client-runtime` → `dsh-client-store` 改名不会影响它。
+> | DSH 版本 | 分支 | 版本号 | npm 标签 |
+> | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
+> | 0.1.2-alpha.1+（含 0.1.5-rc.2） | `main` | `0.2.x` | `@latest` |
+>
+> `@deepseek-ai/dsh-client-runtime` 在 `0.1.2-alpha.1` 中已被**移除**——不仅仅是更名。
+> `legacy` 线仍通过它访问 `ctx.slots`；`main` 从
+> `@deepseek-ai/dsh-client-ui-renderer/client` 获得相同的声明。两处版本敏感
+> 接缝通过**能力探测**处理，而非版本号检查：（1）设置注册使用 `register`，两线
+> 都存在（`installSection` 是新增项，不是替代）；（2）`effectivePolicy` 在两
+> 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
+> 或抛错时降级为「策略未知」。
 
 版本 **0.2.1-beta.3** —— 变更见 [Changelog](./CHANGELOG.md)。
 

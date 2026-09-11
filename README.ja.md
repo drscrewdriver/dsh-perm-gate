@@ -18,6 +18,28 @@
 > `LOCALE_IDS`（locale-settings.ts）と `LOCALES` ラベル（client/index.ts）を更新した
 > DSH fork を使って再ビルドしてください。
 
+> **▼ DSH バージョン互換性**
+>
+> 2 つの DSH ラインが 2 つの長期ブランチから提供され、それぞれが独立したバージョン
+> 系列、`engines.dsh`、npm dist-tag を持っています
+> （[リリースレイアウト](./RELEASING.md)）：
+>
+> | DSH バージョン | ブランチ | バージョン | npm タグ |
+> | --- | --- | --- | --- |
+> | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
+> | 0.1.2-alpha.1+（0.1.5-rc.2を含む） | `main` | `0.2.x` | `@latest` |
+>
+> `@deepseek-ai/dsh-client-runtime` は `0.1.2-alpha.1` で**削除**されました ——
+> 単なる移動ではありません。`legacy` ラインは引き続きこれを通じて
+> `ctx.slots` にアクセスします；`main` は
+> `@deepseek-ai/dsh-client-ui-renderer/client` から同じ宣言を取得します。
+> 2 つのバージョン依存シームは、バージョンチェックではなく機能プロブで処理
+> されます：（1）設定登録は `register` を使い、両ラインとも存在します
+> （`installSection` は追加であり、置き換えではありません）；（2）
+> `effectivePolicy` は両ラインとも user-approval サービスの**プライベート**
+> メソッドであるため、`typeof` プロブで読み取り、欠落時やエラー時には「ポリシー
+> 不明」にフォールバックします。
+
 バージョン **0.2.1-beta.3** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
