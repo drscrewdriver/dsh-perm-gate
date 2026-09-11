@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` バージョン **0.2.1-beta.3**。判定チェーン、ルールファイル形式、Permissive
+`dsh-perm-gate` バージョン **0.2.1-beta.5**。判定チェーン、ルールファイル形式、自动审查
 ティアについては [日本語 README](./README.ja.md) を参照してください。
 
 ## 必要条件
@@ -44,7 +44,7 @@ DSH は `engines.dsh` を強制しないため、tag が選択メカニズムで
 dsh plugin --profile web add dsh-perm-gate
 ```
 
-公開パッケージを取得し、`cordis.patch.yml`（Permissive セッション ティアとプラグイン
+公開パッケージを取得し、`cordis.patch.yml`（自动审查セッション ティアとプラグイン
 本体の挿入）を適用して、host / client の両方を組み込みます。
 
 ## ソースからインストール
@@ -99,7 +99,7 @@ dsh profile reload --profile web
    追加します。
 3. それらが提供していた preset の上書きを削除します。`cordis.patch.yml` は
    `permission.config.presets` を**丸ごと置換**するため、他プラグインの古い
-   key 単位パッチが Permissive ティア（または組み込みティア）を黙って消すことがあります。
+   key 単位パッチが自动审查ティア（または組み込みティア）を黙って消すことがあります。
 4. profile を再読込し、後述の `--list` で検証します。
 
 ## 検証
@@ -124,7 +124,7 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
 }
 ```
 
-UI では **設定 → プラグイン → Permissive 承認ティア** に、1 つのスイッチと 4 つの
+UI では **設定 → プラグイン → 自动审查** に、1 つのスイッチと 4 つの
 バックエンド戦略トグルが表示されます。
 
 ## アンインストール
@@ -134,12 +134,12 @@ dsh plugin --profile web remove dsh-perm-gate
 dsh profile reload --profile web
 ```
 
-プラグインを削除するとパッチの寄与も失われるため、Permissive ティアはセッションの
+プラグインを削除するとパッチの寄与も失われるため、自动审查ティアはセッションの
 権限ピッカーから再び消えます。
 
 ## トラブルシューティング
 
-**権限ピッカーに Permissive ティアが出ない。**
+**権限ピッカーに自动审查ティアが出ない。**
 DSH の bundle patch は `permission.config.presets` を key 単位でマージせず**全体置換**
 します。profile を再読込して `cordis.patch.yml` を再適用し、後から読み込まれる
 プラグインが `presets` を上書きしていないか確認してください。
@@ -151,8 +151,15 @@ loud-fail し、暗黙に無効化されることはありません。
 
 **`llmAssist` が発火しない。**
 `classifierEndpoint` / `classifierModel` / `classifierApiKey` が必要です
-（**設定 → プラグイン → Permissive 承認ティア** または `cordis.yml` で設定）。
+（**設定 → プラグイン → 自动审查** または `cordis.yml` で設定）。
 欠落や通信エラー時は人手のシームへフォールバックします。設計上 fail-closed です。
+
+**「承認記録」ページが空のまま。**
+ゲートが動作するのは `gatePresets` に列挙したティア（既定 `['permissive']`、
+ピッカーでの表示名が「自动审查」）だけなので、他のティアのセッションでは
+イベントを一切記録しません —— 記録したいセッションで権限ピッカーから
+「自动审查」を選んでください。preset を一度も選んでいないセッションも対象外です。
+新しいセッションの初期ティアは `permission.defaultPreset` 設定で決まります。
 
 **設定カードに「設定名前空間が利用できません」と出る。**
 プラグインが現在の profile に組み込まれていません。

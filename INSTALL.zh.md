@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **0.2.1-beta.3**。裁决链、规则文件格式与 Permissive 档位请见
+`dsh-perm-gate` 版本 **0.2.1-beta.5**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件
@@ -42,7 +42,7 @@ DSH 不强制 `engines.dsh`，因此 tag 是选择机制而非兼容性关卡。
 dsh plugin --profile web add dsh-perm-gate
 ```
 
-该命令会拉取已发布的包、应用 `cordis.patch.yml`（Permissive 会话档位 + 插件条目），
+该命令会拉取已发布的包、应用 `cordis.patch.yml`（自动审查会话档位 + 插件条目），
 并装配 host / client 两半。
 
 ## 从源码安装
@@ -95,7 +95,7 @@ dsh profile reload --profile web
 2. 从 `cordis.yml` 删除上述四个插件，只加入唯一的 `dsh-perm-gate` 条目。
 3. 删除这些插件贡献的 preset 覆盖 —— `cordis.patch.yml` 是**整体替换**
    `permission.config.presets`，其他插件遗留的逐 key 补丁可能静默抹掉
-   Permissive 档（或某个内置档）。
+   自动审查档（或某个内置档）。
 4. 重载 profile，并用下面的 `--list` 验证。
 
 ## 验证
@@ -120,7 +120,7 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
 }
 ```
 
-UI 里 **设置 → 插件 → Permissive 审批档** 应渲染出一个开关加四个后台策略开关。
+UI 里 **设置 → 插件 → 自动审查** 应渲染出一个开关加四个后台策略开关。
 
 ## 卸载
 
@@ -129,11 +129,11 @@ dsh plugin --profile web remove dsh-perm-gate
 dsh profile reload --profile web
 ```
 
-移除插件也会移除它的补丁贡献，Permissive 档位会重新从会话权限下拉框消失。
+移除插件也会移除它的补丁贡献，自动审查档位会重新从会话权限下拉框消失。
 
 ## 排查
 
-**权限下拉框里没有 Permissive 档。**
+**权限下拉框里没有自动审查档。**
 DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key 合并。
 请重载 profile 让 `cordis.patch.yml` 重新生效，并确认没有更晚加载的插件覆盖了
 `presets`。
@@ -144,8 +144,14 @@ DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key
 
 **`llmAssist` 从不触发。**
 需要配置 `classifierEndpoint`、`classifierModel`、`classifierApiKey`
-（在 **设置 → 插件 → Permissive 审批档** 或 `cordis.yml` 中填写）。
+（在 **设置 → 插件 → 自动审查** 或 `cordis.yml` 中填写）。
 任一缺失或网络错误都会回退到人工接缝 —— 门禁按设计 fail-closed。
+
+**「审批记录」页一直是空的。**
+门禁只在 `gatePresets` 列出的档位里工作（默认 `['permissive']`，即下拉框里的
+「自动审查」），会话处在别的档位时它不记录任何事件——请在权限下拉框为本会话选择
+「自动审查」。从未选过档位的会话同样在范围之外。新会话的初始档位由
+`permission.defaultPreset` 设置决定。
 
 **设置卡片显示「设置命名空间不可用」。**
 该插件未装配进当前 profile。执行 `dsh plugin --profile web add dsh-perm-gate`

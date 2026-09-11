@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 버전 **0.2.1-beta.3**. 결정 체인, 규칙 파일 형식, Permissive 티어는
+`dsh-perm-gate` 버전 **0.2.1-beta.5**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
 
 ## 요구 사항
@@ -44,7 +44,7 @@ DSH는 `engines.dsh`를 강제하지 않으므로, tag는 선택 메커니즘이
 dsh plugin --profile web add dsh-perm-gate
 ```
 
-게시된 패키지를 가져오고 `cordis.patch.yml`(Permissive 세션 티어 + 플러그인 항목)을
+게시된 패키지를 가져오고 `cordis.patch.yml`(自动审查 세션 티어 + 플러그인 항목)을
 적용하여 host / client 양쪽을 조립합니다.
 
 ## 소스에서 설치
@@ -98,7 +98,7 @@ dsh profile reload --profile web
 2. 위 네 플러그인을 `cordis.yml`에서 제거하고 `dsh-perm-gate` 항목만 추가합니다.
 3. 해당 플러그인들이 제공하던 preset 재정의를 삭제합니다. `cordis.patch.yml`은
    `permission.config.presets`를 **전체 교체**하므로, 다른 플러그인의 오래된
-   key 단위 패치가 Permissive 티어(또는 내장 티어)를 조용히 없앨 수 있습니다.
+   key 단위 패치가 自动审查 티어(또는 내장 티어)를 조용히 없앨 수 있습니다.
 4. profile을 다시 불러오고 아래의 `--list`로 검증합니다.
 
 ## 검증
@@ -123,7 +123,7 @@ dsh-perm-gate --rules permissions.yaml --tool bash --args '{"command":"pnpm inst
 }
 ```
 
-UI의 **설정 → 플러그인 → Permissive 승인 티어**에 스위치 하나와 백엔드 전략 토글
+UI의 **설정 → 플러그인 → 自动审查**에 스위치 하나와 백엔드 전략 토글
 네 개가 표시되어야 합니다.
 
 ## 제거
@@ -133,12 +133,12 @@ dsh plugin --profile web remove dsh-perm-gate
 dsh profile reload --profile web
 ```
 
-플러그인을 제거하면 패치 기여도 사라지므로 Permissive 티어가 세션 권한 선택기에서
+플러그인을 제거하면 패치 기여도 사라지므로 自动审查 티어가 세션 권한 선택기에서
 다시 사라집니다.
 
 ## 문제 해결
 
-**권한 선택기에 Permissive 티어가 없습니다.**
+**권한 선택기에 自动审查 티어가 없습니다.**
 DSH 번들 패치는 `permission.config.presets`를 key 단위로 병합하지 않고 **전체 교체**
 합니다. profile을 다시 불러와 `cordis.patch.yml`을 재적용하고, 더 늦게 로드되는
 플러그인이 `presets`를 덮어쓰지 않는지 확인하세요.
@@ -150,8 +150,14 @@ DSH 번들 패치는 `permission.config.presets`를 key 단위로 병합하지 �
 
 **`llmAssist`가 동작하지 않습니다.**
 `classifierEndpoint`, `classifierModel`, `classifierApiKey`가 필요합니다
-(**설정 → 플러그인 → Permissive 승인 티어** 또는 `cordis.yml`에서 지정).
+(**설정 → 플러그인 → 自动审查** 또는 `cordis.yml`에서 지정).
 값이 없거나 네트워크 오류가 나면 사람 승인 심으로 폴백합니다. 설계상 fail-closed입니다.
+
+**「승인 기록」 페이지가 계속 비어 있습니다.**
+게이트는 `gatePresets`에 나열한 티어(기본 `['permissive']`, 선택기 표시명 「自动审查」)
+에서만 동작하므로 다른 티어의 세션에서는 이벤트를 전혀 기록하지 않습니다 —— 기록하려면
+해당 세션에서 권한 선택기로 「自动审查」를 고르세요. preset을 한 번도 선택하지 않은
+세션도 범위 밖입니다. 새 세션의 초기 티어는 `permission.defaultPreset` 설정이 정합니다.
 
 **설정 카드에 "설정 네임스페이스를 사용할 수 없습니다"가 표시됩니다.**
 플러그인이 현재 profile에 조립되지 않았습니다.

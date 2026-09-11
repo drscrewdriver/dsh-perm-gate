@@ -111,7 +111,7 @@ export const VERDICT_LABELS: Readonly<Record<string, string>> = {
   'deny-keyword': '黑名单关键词',
   default: '默认策略',
   ask: '默认策略',
-  permissive: 'Permissive 放行',
+  permissive: '自动审查放行',
   classifier: 'LLM 裁决',
   'llm-safe': 'LLM 判定安全',
   'llm-learned': 'LLM 学习放行',

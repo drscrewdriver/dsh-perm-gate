@@ -1,6 +1,6 @@
 # dsh-perm-gate — 交接文档（HANDOVER.md）
 
-> 版本线：v0.2.1-beta.3（`package.json`）
+> 版本线：v0.2.1-beta.5（`package.json`）· 分支 `main`（DSH ≥ 0.1.2）
 > 仓库：`E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate`
 > 安装：`dsh plugin --profile web add dsh-perm-gate`
 > 目标读者：续接会话 / 新协作者 — 15 分钟理解全貌，30 分钟开始贡献。
@@ -9,7 +9,7 @@
 
 ## 0. 一句话背景
 
-`dsh-perm-gate` 是一个 **DSH Web 插件**：为 DeepSeek Harness 提供 P0–P4 五层权限门控——P0 硬拒绝凭据/保护路径/危险 shell、P1 会话级精确放行 grant、P2 静态规则链（deny→allow→ask）、P3 可选 LLM 风险分级裁决、P4 人工确认缝。独立 "Permissive" 档位与只读/完全权限/白名单平行，前端仅一个开关 + 三策略组合。
+`dsh-perm-gate` 是一个 **DSH Web 插件**：为 DeepSeek Harness 提供 P0–P4 五层权限门控——P0 硬拒绝凭据/保护路径/危险 shell、P1 会话级精确放行 grant、P2 静态规则链（deny→allow→ask）、P3 可选 LLM 风险分级裁决、P4 人工确认缝。独立「自动审查」档位（机器值 `permissive`）与只读/完全权限/白名单平行，前端仅一个开关 + 四策略组合。
 
 ---
 
@@ -46,7 +46,6 @@ dsh-perm-gate/
 │       ├── feed.ts           # Feed 组件 + session 解析 + diff/revert 网络层
 │       ├── locales.ts        # 四语字典（zh 源 + en/ja/ko Record<keyof typeof zh>）
 │       ├── sediment.tsx      # 沉淀学习可视化子组件
-│       ├── permission-icon.ts # permission-picker 盾牌图标装饰
 │       └── sediments.tsx     # SedimentSection 子组件
 ├── test/                     # vitest：23 文件 / 199 测试
 │   ├── engine.spec.ts        # P0/P1/P2 决策路径
@@ -294,7 +293,7 @@ npm run build               # → lib/index.js + lib/client.js
 # link 注册
 dsh plugin --profile web add link:$PWD
 # 验证
-# F12 Console → 检查 settings → plugins 出现 "Permissive 审批档" 卡片
+# F12 Console → 检查 settings → plugins 出现「自动审查」卡片
 ```
 
 ### 发布（固定步骤）

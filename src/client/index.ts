@@ -3,8 +3,8 @@
  *
  * Registers the `dsh-perm-gate` dictionaries and one `settings.plugins.tab`
  * page keyed by the plugin's settings namespace, so the Plugins section of the
- * settings panel renders an editable page: the single Permissive tier switch
- * plus the three combinable backend approval strategies.
+ * settings panel renders an editable page: the single 自动审查 tier switch
+ * plus the four combinable backend approval strategies.
  *
  * All @deepseek-ai/* imports are type-only at the value level: collaboration
  * happens through cordis services (`slots`, `locale`, `settingsScope`) and slot
@@ -26,7 +26,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { NS, en, zh, type PermissiveKey } from './locales.ts'
 import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue } from './card.tsx'
-import { installPermissivePermissionIcon } from './permission-icon.ts'
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
 
@@ -78,10 +77,10 @@ export const inject = ['slots', 'locale', 'settingsScope']
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-perm-gate: dictionaries')
 
-  // Decorate the Permissive permission-picker item with a shield glyph, matching
-  // the Auto tier's icon. Guarded in case `document` is unavailable in a
-  // non-browser build (tsdown targets the browser; the guard keeps typecheck green).
-  ctx.effect(() => installPermissivePermissionIcon(globalThis.document), 'dsh-perm-gate: permission icon')
+  // No permission-picker decoration: the tier's label is the Chinese product
+  // string supplied by cordis.patch.yml, and the composer draws glyphs only for
+  // the three built-in values, so a plugin-contributed tier is icon-free on
+  // every surface.
 
   // Decision notice strip above the conversation input: polls the host's
   // event feed so auto-allows / asks / denies are visible without opening logs.

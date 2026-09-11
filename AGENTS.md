@@ -16,10 +16,12 @@ records repo-local decisions.
 - `src/grant.ts` — precise session grants keyed by canonical fingerprint (key order / cosmetic whitespace normalized; different targets never share).
 - `src/path.ts` — pure workspace-relative normalization + protected/sensitive detection + `ArtifactRegistry`.
 - `src/audit.ts` — `{ignorable:true}` decision events, host probe, model-visible⟺logged invariant.
-- `src/runtime.ts` — host-facing gate; constructed from config or directly in tests.
+- `src/runtime.ts` — host-facing gate; constructed from config or directly in tests. The session
+  event log (the permission-preset fold) is read through whichever accessor the DSH line ships —
+  `session.events` on 0.1.1, `snapshotEvents()` / `ownEvents()` on 0.1.2+ — via `sessionEventsOf`.
 - `src/cli.ts` — standalone dry-run evaluator (`dsh-perm-gate --rules ... --tool ... --args ...`).
 - `src/client/` — browser half: `index.ts` (registers the `settings.plugins.tab` page + dictionaries),
-  `card.tsx` (Permissive tier settings card: single switch + three strategies), `locales.ts`.
+  `card.tsx` (自动审查 tier settings card: single switch + four strategies), `locales.ts`.
   Bundled to `lib/client.js` by `tsdown` (`tsdown.config.ts`); node half stays on `tsc`.
 - `test/` — vitest; the full decision path (P0/P1/P2/P4 + grants + audit) is exercised without a live harness.
 
@@ -31,6 +33,10 @@ records repo-local decisions.
 - Unknown or malformed config/rules fail loud at load (never silently disabled).
 - Grants are precise and bounded; a different target is never covered (no cross-target replay).
 - P0 (hard-deny) is monotonic and never negotiated by any later stage.
+- Host-contract reads are version-tolerant and probe-only: a renamed/removed host accessor must
+  never silently stand the gate down (`gatePresets` scoping reads the session log through every
+  known accessor shape), and `cordis.patch.yml` `permission.config.presets` values stay the machine
+  keys the gate matches — only their `name:` label is user-facing.
 
 ## Build
 
@@ -41,7 +47,7 @@ which emits `lib/*.js` + `lib/*.d.ts`.
 
 Docs follow the **multilingual-docs-skill** layout (four languages × three types):
 
-- `README.{md,zh,ja,ko}.md` — project intro, P0–P4 chain, rules format, Permissive tier, CLI.
+- `README.{md,zh,ja,ko}.md` — project intro, P0–P4 chain, rules format, 自动审查 tier, CLI.
 - `INSTALL.{md,zh,ja,ko}.md` — install / upgrade / migration / verify / troubleshooting
   (split out of the README).
 - `CHANGELOG.{md,ja,ko}.md` — Keep-a-Changelog; zh is covered by `README.zh.md`.

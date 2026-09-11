@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **호환성 안내:** v0.2.1-beta.3은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
+> **호환성 안내:** v0.2.1-beta.5은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
 > `zh` / `en`만 노출합니다(`LOCALE_IDS = ["zh", "en"]`). 기본 DSH에서 `ja` / `ko`를
 > 선택하면 `locale "<id>" is not registered` 오류가 발생합니다. `LOCALE_IDS`
 > (locale-settings.ts)와 `LOCALES` 라벨(client/index.ts)을 갱신한 DSH fork를 사용해
@@ -38,7 +38,7 @@
 > 모두에서 user-approval 서비스의 **개인** 메소드이므로 `typeof` 프로브를 통해
 > 읽으며, 누락되거나 예외 발생 시 "정책_unknown"으로 후퇴합니다.
 
-버전 **0.2.1-beta.3** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+버전 **0.2.1-beta.5** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 
@@ -75,10 +75,11 @@ DSH 안전 생태계에서는 이 역할이 `dsh-permission-rules` / `dsh-auto-m
   소스 콘텐츠 해시 기반 컴파일 캐시.
 - **감사** — 모든 판정을 `callId`와 함께 `{ignorable:true}` 이벤트로 기록합니다.
   모델에 보이는 이유와 기록된 결과는 항상 일치합니다.
-- **Permissive 티어** — read-only / full-access / whitelist와 구별되는 **독립 승인
-  모드**. "자동 승인"도 아니고 포괄적 권한 부여도 아닙니다. 프론트는 **단일 스위치**
+- **自动审查 티어**(`permissive`) — read-only / full-access / whitelist와 구별되는 **독립 승인
+  모드**. 범용 "자동 승인"도 아니고 포괄적 권한 부여도 아닙니다. 프론트는 **단일 스위치**
   (`permissive`)만 노출하고, 백엔드의 네 가지 전략은 **조합 가능**하며 플러그인
   설정으로 제어됩니다. P0에 대해서는 여전히 fail-closed입니다.
+  권한 선택기와 설정 행 모두 제품명 「自动审查」로 표시하며 아이콘은 그리지 않습니다.
 - **샌드박스 승격 자동 응답** (`trustEscalation`) — 샌드박스 승격은 shell / pwsh /
    edit 도구의 **내부**(`tools/pre-execute` 이후)에서 발생하므로 게이트가 이를 볼 수
    없고, 게이트가 자동 허용한 호출에도 확인 프롬프트가 나타납니다. 이 전략을 켜면 게이트가
@@ -138,12 +139,18 @@ permissions:
 
 전체 예시: [examples/permissions.example.yaml](./examples/permissions.example.yaml)
 
-## Permissive 티어
+## 自动审查 티어(머신 값 `permissive`)
 
-Permissive는 권한 선택기에서 Read Only / Workspace Write / Full access / Whitelist와
-나란한 **독립 승인 티어**입니다. "자동 승인"이 아니며 포괄적 권한을 발행하지도 않습니다.
+自动审查는 권한 선택기에서 읽기 전용 / 워크스페이스 내 수정 / 완전 권한 / 허용 목록과
+나란한 **독립 승인 티어**입니다. 범용 "자동 승인"이 아니며 포괄적 권한을 발행하지도 않습니다.
 사람/LLM 심 **이전에** 판정을 좁히거나 넓힐 뿐이고, P0 하드 거부는 단조롭고 협상
 불가능하게 유지됩니다.
+
+선택기의 표시 이름은 **호스트가 공급하는 제품명**이며 언어별 사전 항목이 아닙니다. DSH 0.1.2는
+플러그인 티어의 `name:`을 두 권한 화면(일반 설정 기본 행과 입력창 선택기)에 그대로 렌더링하고
+자체 지역화 라벨은 세 가지 내장 값에만 부여하므로, `cordis.patch.yml`이 모든 세션에 중국어
+라벨을 배포합니다. 이 티어는 **아이콘을 그리지 않습니다** —— 선택기의 글리프는 내장 값에만
+연결됩니다.
 
 `cordis.yml`에서:
 
@@ -187,7 +194,7 @@ LLM이 `safe`로 판정하고 게이트가 자동 허용한 호출조차 샌드�
 `callId`로 키화, 승격 요청이 이를 반복)을 기억하고 승격을 여기서 `allowed-once`로
 자응답합니다. **모든 조건이 충족될 때만** 적용됩니다:
 
-- Permissive 티어가 켜져 있고 `trustEscalation`이 켜져 있음;
+- 自动审查 티어가 켜져 있고 `trustEscalation`이 켜져 있음;
 - 호출에 게이트가 허용한 `callId`가 있고, 툴 이름이 일치;
 - 원인이 알려진 승격이며 `workspace-write` 또는 `danger-full-access`를 명시.
 
@@ -199,15 +206,15 @@ never` 패스스루 — 는 사람에 그대로 위임되므로 향후 DSH 변�
 
 ### 선택 가능한 세션 티어
 
-`cordis.patch.yml`은 DSH의 `permission.config.presets`에 Workspace Write와
-Full access 사이의 `permissive` preset(`sandbox: workspace-write`, `approval: ask`,
-이름 **Permissive**)을 추가합니다. DSH의 bundle patch는 이 map을 **전체 교체**하므로
+`cordis.patch.yml`은 DSH의 `permission.config.presets`에 워크스페이스 내 수정과
+완전 권한 사이의 `permissive` preset(`sandbox: workspace-write`, `approval: ask`,
+이름 **自动审查**)을 추가합니다. DSH의 bundle patch는 이 map을 **전체 교체**하므로
 (키 단위 병합이 아닙니다) 내장 3개 티어
 (`read-only` / `workspace-write` / `danger-full-access`,
 `@deepseek-ai/dsh-base/cordis.patch.yml` 기준)도 다시 기재해야 하며,
 `test/patch-presets.spec.ts`가 그 키 집합을 고정합니다. 따라서 세션 권한
-선택기에는 "auto-approval"이 아니라 **독립적으로 선택 가능한 승인 티어**인 Permissive가
-놓입니다.
+선택기에는 "auto-approval"이 아니라 **독립적으로 선택 가능한 승인 티어**인
+「自动审查」가 놓입니다.
 
 게이트가 동작하는 범위는 **`gatePresets`에 나열한 티어 안뿐**입니다(기본 `['permissive']`,
 이 플러그인이 추가하는 티어). 그 밖의 티어(Read Only / Workspace Write / Full access /
@@ -248,7 +255,9 @@ host는 네임스페이스를 live로 읽으므로 변경은 재시작 없이 �
 키워드를 포함하는 호출(대소문자 구분 없는 부분 일치)은 허용 목록/권한/LLM보다 먼저 거부됩니다. 설정
 카드에서 목록으로 편집할 수 있고(프리셋 항목에는 태그 표시, 원클릭 복원 지원) 미설정·빈 목록 시 프리셋이
 적용됩니다——블랙리스트가 조용히 꺼지지 않습니다.
- Permissive 티어는 권한 선택기에서 방패 아이콘을 유지합니다(메뉴 항목과 축소 트리거 모두).
+블랙리스트가 조용히 꺼지는 일은 없습니다.
+이 티어는 권한 선택기에 **아이콘을 표시하지 않습니다** —— 선택기의 글리프는 내장 세 값에만
+연결되고, 플러그인 티어는 텍스트만입니다.
 
 
 ## CLI(독립 실행 dry-run)

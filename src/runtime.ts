@@ -48,19 +48,62 @@ export interface ToolExecutionLike {
    * read from `agent.session.id` / `agent.session.header.cwd`.
    */
   readonly agent?: {
+    /** The agent's own session id (DSH ≥ 0.1.2 exposes it beside `session`). */
+    readonly sessionId?: string
     readonly session?: {
       readonly id?: string
       readonly header?: { readonly cwd?: string }
-      /** The durable event log; the permission-preset fold reads it. */
+      /**
+       * The durable event log, behind whichever accessor this DSH line ships:
+       * a plain `events` array (0.1.1), or the `snapshotEvents()` / `ownEvents()`
+       * readers 0.1.2 replaced it with. See {@link sessionEventsOf}.
+       */
       readonly events?: readonly SessionEventLike[]
+      readonly snapshotEvents?: () => readonly SessionEventLike[]
+      readonly ownEvents?: () => readonly SessionEventLike[]
     }
   }
+}
+
+/**
+ * One execution's session event log, or `undefined` when the host exposes none.
+ *
+ * The accessor moved between DSH lines: 0.1.1 exposed `session.events` as a
+ * plain array, while 0.1.2 made the log private behind `snapshotEvents()` /
+ * `ownEvents()`. Reading only `.events` therefore made {@link
+ * PermGateRuntime.presetOf} return `undefined` on 0.1.2, which silently stood
+ * the whole gate down (no rule, grant, deny-keyword, or P0 hard-deny decision,
+ * and no audit event). Every carrier is probed, array-first; a throwing or
+ * missing accessor just moves to the next one, so an unknown future shape
+ * degrades to "no events" instead of breaking the decision path.
+ *
+ * @param exec - the execution whose owning session is inspected.
+ * @returns the session's events in log order, or `undefined`.
+ */
+function sessionEventsOf(exec: ToolExecutionLike): readonly SessionEventLike[] | undefined {
+  const session = exec.agent?.session
+  for (const carrier of [session, exec]) {
+    if (carrier === undefined) continue
+    const direct = (carrier as { readonly events?: unknown }).events
+    if (Array.isArray(direct)) return direct as readonly SessionEventLike[]
+    for (const read of ['snapshotEvents', 'ownEvents'] as const) {
+      const accessor = (carrier as Record<string, unknown>)[read]
+      if (typeof accessor !== 'function') continue
+      try {
+        const events = (accessor as () => unknown).call(carrier)
+        if (Array.isArray(events)) return events as readonly SessionEventLike[]
+      } catch {
+        // An accessor that throws is no accessor: try the next carrier.
+      }
+    }
+  }
+  return undefined
 }
 
 /** The session id of one execution (direct field, else the agent's session). */
 function sessionIdOf(exec: ToolExecutionLike): string {
   if (typeof exec.sessionId === 'string' && exec.sessionId !== '') return exec.sessionId
-  const id = exec.agent?.session?.id
+  const id = exec.agent?.sessionId ?? exec.agent?.session?.id
   return typeof id === 'string' ? id : ''
 }
 
@@ -240,8 +283,15 @@ export class PermGateRuntime {
   private readonly gatePresets: readonly string[]
   /** Extra tool names the user classified as safe (config `autoAllowTools`). */
   private readonly autoAllowExtra: ReadonlySet<string>
-  /** Cache of the permission-preset fold, keyed by log identity + length. */
-  private presetCache: { events: readonly SessionEventLike[] | undefined; length: number; preset: string | undefined } | undefined
+  /**
+   * Cache of the permission-preset fold. The key is the log's length plus the
+   * identity of its LAST event: a session's log only appends, so "same length
+   * and same last event" means the last `permission/preset` event is unchanged.
+   * Identity of the tail — not of the array — is the key because DSH 0.1.2's
+   * `snapshotEvents()` answers every read with a fresh array over the same
+   * frozen events, which would otherwise re-fold on every tool call.
+   */
+  private presetCache: { length: number; last: SessionEventLike | undefined; preset: string | undefined } | undefined
   private readonly learning: RiskLearning
   private readonly events?: EventLog
   /** Learning candidates awaiting human approval + execution (call fingerprint → candidate). */
@@ -410,17 +460,20 @@ export class PermGateRuntime {
 
   /**
    * The session's selected permission preset, folded from its event log. The
-   * fold is cached by the log array identity plus its length: a session's log
-   * is a stable, append-only array, so a changed reference or a grown log
-   * invalidates the cache while repeated calls on the same log stay cheap.
+   * fold is cached on the log's length plus the identity of its last event: a
+   * session's log only appends, so an unchanged tail means the last
+   * `permission/preset` event is unchanged too. Tail identity — rather than the
+   * array's — is the key because DSH 0.1.2's snapshot accessor returns a fresh
+   * array over the same frozen events on every read.
    */
   private presetOf(exec: ToolExecutionLike): string | undefined {
-    const events = exec.agent?.session?.events
+    const events = sessionEventsOf(exec)
     const length = events?.length ?? -1
+    const last = length > 0 ? events?.[length - 1] : undefined
     const cached = this.presetCache
-    if (cached !== undefined && cached.events === events && cached.length === length) return cached.preset
+    if (cached !== undefined && cached.length === length && cached.last === last) return cached.preset
     const preset = permissionPresetOf(events)
-    this.presetCache = { events, length, preset }
+    this.presetCache = { length, last, preset }
     return preset
   }
 

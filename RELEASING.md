@@ -27,6 +27,22 @@ actually selects the artifact a user installs.
 | `@deepseek-ai/dsh-client-runtime` | ships | removed |
 | Where `ctx.slots` is declared | that package's client entry (`Context` comes with it) | `@deepseek-ai/dsh-client-ui-renderer/client` |
 | Where `SettingsScope` is exported | that package's `client` subpath | `@deepseek-ai/dsh-client-ui-settings/client` |
+| `Session` event log | `session.events` (plain array) | `snapshotEvents()` / `ownEvents()` — no `events` member |
+| Permission-picker label | free-form `name:`, no built-in localization | `name:` rendered verbatim; only the three built-ins localize |
+| Permission-picker icon | `auto` tier glyph decoration possible | plugin tiers draw no glyph |
+
+**The host contracts are no longer merely type-level.** Everything above the `Session`
+row is type-only, but the `Session` row is a real behavioral fork: `gatePresets`
+scoping folds a session's `permission/preset` events, and 0.1.2 made that log private
+behind `snapshotEvents()` / `ownEvents()`. Reading only `session.events` makes the fold
+return `undefined`, which makes `gateActive` false for **every** call — the gate stands
+down silently (no decisions, no audit events, an empty Approvals page) instead of
+failing loud. `src/runtime.ts#sessionEventsOf` therefore probes every known accessor
+shape; treat that probe as load-bearing on both lines and keep
+`test/preset-scope.spec.ts`'s `execModern` fixtures in step with it.
+
+A change to the host-contract edges must be verified on **both** branches by running
+`verify:line` on each — a fix proven on one line is not a fix on the other.
 
 The plugin is written so those edges are **type-only**:
 
@@ -104,5 +120,15 @@ branch — never assume a fix built for one line is still correct on the other.
 | dist-tag | Meaning | Install target |
 |----------|---------|----------------|
 | `latest` | newest stable, current DSH line (`main`, `0.2.x`) | `dsh plugin add dsh-perm-gate` |
-| `legacy` | the DSH `<= 0.1.1` line (`legacy`, `1.x`) | `dsh plugin add dsh-perm-gate@legacy` |
 | `beta` | pre-release of the latest line | `dsh plugin add dsh-perm-gate@beta` |
+| `legacy` | the DSH `<= 0.1.1` line (`legacy`, `1.x`) | `dsh plugin add dsh-perm-gate@legacy` |
+| `next` | **placeholder channel for the DSH `0.1.2` line** (`main`, `0.2.x`) | `dsh plugin add dsh-perm-gate@next` |
+
+`next` exists because `latest` still points at the `0.2.0` release that predates the
+version-tolerant session accessor: an installed `^0.2.1-beta.4` is not upgraded by
+`dsh plugin update` (the caret range is already satisfied), so the fixed 0.1.2 build
+needs a channel a user can name explicitly. Promote it once verified:
+
+```sh
+npm dist-tag add dsh-perm-gate@<version> latest
+```

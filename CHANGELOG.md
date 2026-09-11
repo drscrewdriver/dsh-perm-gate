@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta.5] - 2026-09-11
+
+### Fixed
+
+- **The gate stood down on every call under DSH 0.1.2, so the Approvals page stayed empty.** The
+  session's permission-preset fold read the log as `exec.agent.session.events`. DSH 0.1.1 exposed
+  that array; 0.1.2 made the log private behind `Session.snapshotEvents()` / `ownEvents()` and kept
+  no `events` member, so the read returned `undefined`, `presetOf` answered `undefined`, and
+  `presetInScope(undefined, ['permissive'])` made `gateActive` false for **every** call: no rule,
+  grant, deny-keyword, classifier, or P0 hard-deny decision, and no audit event — including in
+  sessions that had selected the gate's own tier, which is why the tab showed "本会话暂无审批记录"
+  rather than a failure. The fold now reads the log through every known accessor shape
+  (`events` array, `snapshotEvents()`, `ownEvents()`) and degrades to "no events" only when the host
+  exposes none; the fold cache keys on the log's length plus its last event's identity, since a
+  0.1.2 snapshot is a fresh array over the same frozen events on every read. `test/preset-scope.spec.ts`
+  pins both shapes: a `0.1.2`-shaped session must yield a decision (and a recorded event), and a
+  grown log must re-fold so a preset switch takes effect on the next call.
+
+### Changed
+
+- **The permission tier is labelled 自动审查 on every surface, with no icon.** The preset's
+  `name:` in `cordis.patch.yml` is now the Chinese product string, and the General-settings default
+  row, the composer picker, and the plugin's settings tab all show it. DSH 0.1.2 renders a
+  plugin-contributed tier's `name:` verbatim and localizes only the three built-in values
+  (`仅可查看` / `工作区内修改` / `完全权限`), so the one host-supplied string is what a zh session sees;
+  the tier's machine value stays `permissive`, which is what `gatePresets` matches. The
+  permission-picker icon decoration is removed (`src/client/permission-icon.ts` deleted): it existed
+  to match the retired `auto` tier's shield glyph, it applied to the settings row through the
+  0.1.2 `aria-haspopup="menu"` selector, and a plugin tier draws no glyph because the composer's
+  glyphs are keyed to the built-in values only.
+
 ## [0.2.1-beta.4] - 2026-09-11
 
 ### Added

@@ -30,6 +30,42 @@ function execOf(preset: string | undefined, command = 'git status', callId?: str
   }
 }
 
+/** One session-log reader over a mutable log, in one DSH line's accessor shape. */
+type SessionReader = 'snapshotEvents' | 'ownEvents'
+
+/**
+ * A `0.1.2`-shaped execution: the session exposes the log ONLY through
+ * `snapshotEvents()` / `ownEvents()` — the plain `events` array DSH 0.1.1 had is
+ * gone — and the agent carries the session id beside the session.
+ *
+ * The `append` handle grows the log like a real session does; every snapshot
+ * read returns a FRESH array over the same frozen events, which is the property
+ * the preset-fold cache has to survive.
+ */
+function execModern(preset: string, reader: SessionReader, callId?: string, command = 'git status') {
+  const log: { type: string; data: Record<string, unknown> }[] = [...PRESET_EVENTS(preset)]
+  const session: Record<string, unknown> = {
+    id: 's1',
+    header: { cwd: '/work' },
+    seq: () => log.length,
+    snapshotEvents: () => [...log],
+    ownEvents: () => [...log],
+  }
+  let agent: Record<string, unknown> | undefined = { sessionId: 's1', session }
+  return {
+    exec: (): ToolExecutionLike => ({
+      name: 'shell',
+      arguments: { command },
+      ...(callId === undefined ? {} : { callId }),
+      ...(agent === undefined ? {} : { agent }),
+    }),
+    /** Append a durable session event, like the host's log does. */
+    append: (type: string, data: Record<string, unknown>): void => { log.push({ type, data }) },
+    /** Drop the agent carrier entirely (the gate then sees no session at all). */
+    dropAgent: (): void => { agent = undefined },
+  }
+}
+
 describe('permission-preset fold', () => {
   it('folds the last selected preset', () => {
     expect(permissionPresetOf([...PRESET_EVENTS('read-only'), ...PRESET_EVENTS('permissive')])).toBe('permissive')
@@ -50,6 +86,37 @@ describe('permission-preset fold', () => {
     expect(resolveConfig({ gatePresets: ['permissive', 'workspace-write'] }).gatePresets)
       .toEqual(['permissive', 'workspace-write'])
     expect(resolveConfig({ gatePresets: [] }).gatePresets).toEqual(['permissive'])
+  })
+
+  it('reads the log through whichever accessor this DSH line ships', () => {
+    // Regression: the gate used to read `session.events` only. DSH 0.1.2 made
+    // the log private behind `snapshotEvents()` / `ownEvents()`, so that read
+    // returned undefined, `presetOf` answered undefined, and the gate stood
+    // down for EVERY call — no decisions and no audit events in the approvals
+    // page. Each `0.1.2` shape must fold the pinned preset on its own.
+    for (const reader of ['snapshotEvents', 'ownEvents'] as const) {
+      const modern = execModern('permissive', reader)
+      const runtime = new PermGateRuntime({ rulesFile: undefined, gatePresets: ['permissive'] })
+      expect(runtime.decideExecution(modern.exec())?.kind).toBe('ask')
+    }
+  })
+
+  it('re-folds when the log grows but not on every read', () => {
+    // A `0.1.2` snapshot is a fresh array per read over the same frozen events,
+    // so the fold cache keys on the log's tail; a grown log must still be
+    // re-folded (a preset switch has to take effect on the next call).
+    const modern = execModern('permissive', 'snapshotEvents')
+    const r = new PermGateRuntime({ rulesFile: undefined, gatePresets: ['permissive'] })
+    expect(r.decideExecution(modern.exec())?.kind).toBe('ask')
+    modern.append('permission/preset', { preset: 'workspace-write' })
+    expect(r.decideExecution(modern.exec())).toBeUndefined()
+  })
+
+  it('sees no session when the host carries none', () => {
+    const modern = execModern('permissive', 'snapshotEvents')
+    modern.dropAgent()
+    const r = new PermGateRuntime({ rulesFile: undefined, gatePresets: ['permissive'] })
+    expect(r.decideExecution(modern.exec())).toBeUndefined()
   })
 })
 
@@ -82,6 +149,22 @@ describe('gate scoping', () => {
     })
     expect(runtime.decideExecution(execOf('danger-full-access', 'rm -rf /work/build'))).toBeUndefined()
     expect(runtime.eventLog?.query() ?? []).toHaveLength(0)
+  })
+
+  it('records the decision on the `0.1.2` snapshot shape', () => {
+    // The approvals page reads this log back; a gate that stood down recorded
+    // nothing, which is exactly how the empty page showed up. A hard-deny is
+    // recorded immediately (asks are recorded when the human answers), so it
+    // proves the whole decide-and-record path runs on the snapshot accessor.
+    const dir = tmpDir()
+    const modern = execModern('permissive', 'snapshotEvents', 'c1', 'rm -rf /work/build')
+    const runtime = new PermGateRuntime({
+      rulesFile: undefined,
+      gatePresets: ['permissive'],
+      eventsFile: join(dir, 'events.jsonl'),
+    })
+    expect(runtime.decideExecution(modern.exec())?.kind).toBe('deny')
+    expect(runtime.eventLog?.query() ?? []).toHaveLength(1)
   })
 
   it('degrades an ask when the approval policy cannot reach a human', () => {

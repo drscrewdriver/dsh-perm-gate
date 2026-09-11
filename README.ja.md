@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **互換性に関する注記:** v0.2.1-beta.3 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
+> **互換性に関する注記:** v0.2.1-beta.5 は `ja` / `ko` 辞書を同梱しますが、公式 DSH の
 > `LocaleRuntime` が公開するのは `zh` / `en` のみです（`LOCALE_IDS = ["zh", "en"]`）。
 > 素の DSH で `ja` / `ko` を選択すると `locale "<id>" is not registered` になります。
 > `LOCALE_IDS`（locale-settings.ts）と `LOCALES` ラベル（client/index.ts）を更新した
@@ -40,7 +40,7 @@
 > メソッドであるため、`typeof` プロブで読み取り、欠落時やエラー時には「ポリシー
 > 不明」にフォールバックします。
 
-バージョン **0.2.1-beta.3** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
+バージョン **0.2.1-beta.5** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
 
@@ -77,10 +77,11 @@ DSH の安全まわりのエコシステムでは、この役割が `dsh-permiss
   loud fail、ソースの内容ハッシュによるコンパイル キャッシュ。
 - **監査** — すべての判定を `callId` 付きの `{ignorable:true}` イベントとして記録。
   モデルに見える理由と記録される結果は常に一致します。
-- **Permissive ティア** — read-only / full-access / whitelist とは別の**独立した承認
-  モード**。「自動承認」でもなく、包括的な権限付与でもありません。フロントが露出する
+- **自动审查ティア**（`permissive`）— read-only / full-access / whitelist とは別の**独立した承認
+  モード**。汎用の「自動承認」でもなく、包括的な権限付与でもありません。フロントが露出する
   のは**単一スイッチ**（`permissive`）だけで、バックエンドの 4 つの戦略は**組み合わせ
   可能**でプラグイン設定から制御されます。P0 に対しては依然 fail-closed です。
+  権限ピッカーと設定行はいずれも製品名「自动审查」で表示し、アイコンは描きません。
 - **サンドボックス昇格の自動回答**（`trustEscalation`）— サンドボックス昇格は shell /
    pwsh / edit ツールの**内部**（`tools/pre-execute` 後）から発生するためゲートはそれを
    見ておらず、ゲートが自動許可した呼び出しでも確認プロンプトが表示されます。この戦略を
@@ -141,12 +142,18 @@ permissions:
 
 完全な例: [examples/permissions.example.yaml](./examples/permissions.example.yaml)
 
-## Permissive ティア
+## 自动审查ティア（マシン値 `permissive`）
 
-Permissive は権限ピッカーの中で Read Only / Workspace Write / Full access /
-Whitelist と並ぶ**独立した承認ティア**です。「自動承認」ではなく、包括的な権限を
+自动审查は権限ピッカーの中で 読み取り専用 / ワークスペース内変更 / 完全権限 /
+許可リストと並ぶ**独立した承認ティア**です。汎用の「自動承認」ではなく、包括的な権限を
 発行することもありません。人間/LLM のシーム**の前**で判定を狭めたり広めたりする
 だけで、P0 ハード拒否は単調かつ交渉不能のままです。
+
+ピッカーの表示名は**ホストが供給する製品名**で、言語別辞書の項目ではありません。DSH 0.1.2 は
+プラグイン提供ティアの `name:` を 2 つの権限サーフェス（一般設定の既定行と入力欄のピッカー）で
+そのまま描画し、自前のローカライズ済みラベルは 3 つの組み込み値にしか与えないため、
+`cordis.patch.yml` は全セッション共通で中国語ラベルを配布します。このティアは**アイコンを
+描きません** —— ピッカーのグリフは組み込み値にのみ紐づきます。
 
 `cordis.yml` では：
 
@@ -187,7 +194,7 @@ Whitelist と並ぶ**独立した承認ティア**です。「自動承認」で
 キー化され、昇格リクエストがこれを繰り返す）を記憶し、昇格をここで `allowed-once` と自答します。
 **すべてが満たされる場合のみ**適用されます：
 
-- Permissive ティアがオンで `trustEscalation` がオン；
+- 自动审查ティアがオンで `trustEscalation` がオン；
 - 呼び出しにゲートが許可した `callId` があり、ツール名が一致；
 - 理由は認識された昇格で `workspace-write` または `danger-full-access` を命名。
 
@@ -199,15 +206,15 @@ never` パススルー — は人手に変更なく委譲されるため、将�
 
 ### 選択可能なセッション ティア
 
-`cordis.patch.yml` は DSH の `permission.config.presets` に、Workspace Write と
-Full access の間に `permissive` preset（`sandbox: workspace-write`、`approval: ask`、
-名称 **Permissive**）を追加します。DSH の bundle patch はこの map を**全体置換**するため
+`cordis.patch.yml` は DSH の `permission.config.presets` に、ワークスペース内変更と
+完全権限の間に `permissive` preset（`sandbox: workspace-write`、`approval: ask`、
+名称 **自动审查**）を追加します。DSH の bundle patch はこの map を**全体置換**するため
 （キー単位のマージではありません）、組み込み 3 ティア
 （`read-only` / `workspace-write` / `danger-full-access`、
 `@deepseek-ai/dsh-base/cordis.patch.yml` 由来）も再記載する必要があり、
 `test/patch-presets.spec.ts` がそのキー集合を固定しています。したがって
 セッションの権限ピッカーには「auto-approval」ではなく、**独立して選択できる承認
-ティア**として Permissive が並びます。
+ティア**として「自动审查」が並びます。
 
 ゲートが動作するのは **`gatePresets` に列挙したティアの中だけ**です（既定 `['permissive']`、
 このプラグインが追加するティア）。それ以外のティア（Read Only / Workspace Write /
@@ -245,7 +252,9 @@ Full access / `custom`）では、ゲートの判定フローは**一切実行�
 
 人手に回した `ask` は回答が返るまで追跡されます。受動的な `approval/request` オブザーバが閉じた結果を記録し（`allowed-once` → **承認**、`rejected` → **拒否**、`cancelled` → **キャンセル**、`unavailable` → 拒否＝承認チャネルなし）、オブザーバが関連付けできない場合（`callId` 欠落・approval サービスなし・上流リスナーの短絡）は `tools/result` が同じ ask をフォールバックとして解決します。承認時には承認後の学習進捗（`n`/しきい値）を表示し、通知バーも 3 つの終態にラベルを付けます。
 
-さらにプリセットの**拒否キーワード黑名単**（dsh-approval-gate の `DEFAULT_DENY_KEYWORDS` を継承：`rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` など）を備え、テキストがキーワードを含む呼び出し（大小文字を区別しない部分一致）は許可リスト / 許可 / LLM より先に拒否します。設定カードでリストとして編集でき（プリセット項目にはタグ付き、ワンクリック復元対応）、未設定・空ならプリセットを適用します——黑名単が静かに無効化されることはありません。Permissive ティアは権限ピッカーに盾アイコンを保持します（メニュー項目と折りたたみトリガーの両方）。
+さらにプリセットの**拒否キーワード黑名単**（dsh-approval-gate の `DEFAULT_DENY_KEYWORDS` を継承：`rm -rf`、`push --force`、`drop table`、`mkfs`、`git reset --hard`、`docker system prune` など）を備え、テキストがキーワードを含む呼び出し（大小文字を区別しない部分一致）は許可リスト / 許可 / LLM より先に拒否します。設定カードでリストとして編集でき（プリセット項目にはタグ付き、ワンクリック復元対応）、未設定・空ならプリセットを適用します——黑名単が静かに無効化されることはありません。
+このティアは権限ピッカーに**アイコンを表示しません** —— ピッカーのグリフは組み込み 3 値にのみ
+紐づき、プラグイン提供ティアはテキストのみです。
 
 
 ## CLI（スタンドアロン dry-run）

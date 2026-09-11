@@ -1,9 +1,21 @@
 # dsh-perm-gate profile patch.
 #
 # Two jobs:
-# 1) Add the plugin's own "Permissive" session approval tier to the DSH
+# 1) Add the plugin's own "自动审查" session approval tier to the DSH
 #    permission picker, and restate the built-in tiers it must not drop.
 # 2) Insert the plugin itself (host half) into the profile.
+#
+# The tier's DISPLAY NAME is the Chinese product label, matching every official
+# 0.1.2 permission label (仅可查看 / 工作区内修改 / 完全权限) in a zh session. Both
+# permission surfaces — the General-settings default row and the composer
+# picker — render a host-supplied name verbatim unless the value is one of the
+# three built-ins, so a single `name:` string is what both show; neither surface
+# is localized per-dictionary for plugin-contributed tiers. The machine value
+# stays `permissive`: it is the key `gatePresets` matches and the value the
+# permission projection reports, so only the label text is user-facing.
+#
+# The tier carries no icon. The built-in glyphs the composer draws are keyed by
+# the three built-in values, and a plugin tier deliberately has none.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should
@@ -31,8 +43,8 @@
       permissive:
         sandbox: workspace-write
         approval: ask
-        name: Permissive
-        description: Independent approval tier — safe in-scope ops auto-allow, dangerous crossings ask (approval strengths tunable under Settings → Plugins → Permissive approval tier).
+        name: 自动审查
+        description: 独立审批档 —— 作用域内安全操作自动放行，危险/未知越界转人工确认（审批强度可在「设置 → 插件 → 自动审查」调整）。
       danger-full-access:
         sandbox: danger-full-access
         approval: never

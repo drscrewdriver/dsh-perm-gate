@@ -8,9 +8,9 @@ export type PermissiveKey = keyof typeof zh
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'card.title': 'Permissive 审批档',
-  'card.description': '独立审批模式档位：与只读 / 完全权限 / 白名单平行。前端只暴露一个开关；后台三个审批策略可组合、由此处设置决定，仍对 P0 硬拒绝保持 fail-closed。',
-  'card.permissive': '启用 Permissive 档位',
+  'card.title': '自动审查',
+  'card.description': '独立审批档位：与只读 / 完全权限 / 白名单平行，在会话权限下拉中显示为「自动审查」。前端只暴露一个开关；后台四个审批策略可组合、由此处设置决定，仍对 P0 硬拒绝保持 fail-closed。',
+  'card.permissive': '启用自动审查档位',
   'card.permissiveHint': '关闭时门禁行为与此前完全一致。',
   'card.strategies': '后台审批策略（至少一个生效；可组合）',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — 作用域内安全操作自动放行，危险/未知转 ask（中间档基线）',
@@ -118,9 +118,9 @@ export const zh = {
 
 /** English dictionary (keys mirror zh). */
 export const en: Record<keyof typeof zh, string> = {
-  'card.title': 'Permissive approval tier',
-  'card.description': 'Independent approval mode tier, parallel to read-only / full-access / whitelist. The front-end exposes a single switch; the three backend approval strategies are combinable via this panel and still fail-closed against P0 hard-deny.',
-  'card.permissive': 'Enable Permissive tier',
+  'card.title': '自动审查 (Auto review)',
+  'card.description': 'Independent approval tier, parallel to read-only / full-access / whitelist, shown as 自动审查 in the session permission picker. The front-end exposes a single switch; the four backend approval strategies are combinable via this panel and still fail-closed against P0 hard-deny.',
+  'card.permissive': 'Enable the 自动审查 tier',
   'card.permissiveHint': 'When off, the gate behaves exactly as before.',
   'card.strategies': 'Backend approval strategies (at least one effective; combinable)',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — safe in-scope ops auto-allow; dangerous/unknown ask (baseline middle tier)',
@@ -228,9 +228,9 @@ export const en: Record<keyof typeof zh, string> = {
 
 /** Japanese dictionary (keys mirror zh). */
 export const ja: Record<keyof typeof zh, string> = {
-  'card.title': 'Permissive 承認ティア',
-  'card.description': 'read-only / full-access / whitelist と並ぶ独立の承認モード。フロントは単一スイッチのみ。バックエンドの 3 つの承認戦略はこのパネルで組み合わせ可能で、P0 ハード拒否に対して依然 fail-closed。',
-  'card.permissive': 'Permissive ティアを有効化',
+  'card.title': '自动审查（自動審査）ティア',
+  'card.description': 'read-only / full-access / whitelist と並ぶ独立の承認モード。セッション権限ピッカーでは「自动审查」と表示されます。フロントは単一スイッチのみ。バックエンドの 4 つの承認戦略はこのパネルで組み合わせ可能で、P0 ハード拒否に対して依然 fail-closed。',
+  'card.permissive': '自动审查ティアを有効化',
   'card.permissiveHint': 'オフのときは以前と完全に同じ動作です。',
   'card.strategies': 'バックエンド承認戦略（少なくとも 1 つ有効、組み合わせ可）',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — スコープ内の安全操作は自動許可、危険/不明は ask（中間ティアのベースライン）',
@@ -338,9 +338,9 @@ export const ja: Record<keyof typeof zh, string> = {
 
 /** Korean dictionary (keys mirror zh). */
 export const ko: Record<keyof typeof zh, string> = {
-  'card.title': 'Permissive 승인 티어',
-  'card.description': 'read-only / full-access / whitelist와 나란한 독립 승인 모드. 프론트는 단일 스위치만 노출. 백엔드의 세 가지 승인 전략은 이 패널에서 조합 가능하며 P0 하드 거부에 대해 여전히 fail-closed.',
-  'card.permissive': 'Permissive 티어 활성화',
+  'card.title': '自动审查(자동 검토) 티어',
+  'card.description': 'read-only / full-access / whitelist와 나란한 독립 승인 모드. 세션 권한 선택기에서는 「自动审查」로 표시됩니다. 프론트는 단일 스위치만 노출. 백엔드의 네 가지 승인 전략은 이 패널에서 조합 가능하며 P0 하드 거부에 대해 여전히 fail-closed.',
+  'card.permissive': '自动审查 티어 활성화',
   'card.permissiveHint': '꺼져 있으면 이전과 완전히 동일하게 동작합니다.',
   'card.strategies': '백엔드 승인 전략(하나 이상 유효, 조합 가능)',
   'card.strategy.trustAutoAllow': 'trustAutoAllow — 범위 내 안전 작업은 자동 허용, 위험/미확인은 ask(중간 티어 기준)',

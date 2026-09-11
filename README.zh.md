@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **兼容性说明：** v0.2.1-beta.3 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
+> **兼容性说明：** v0.2.1-beta.5 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
 > 只暴露 `zh` / `en`（`LOCALE_IDS = ["zh", "en"]`）。在原版 DSH 上选择 `ja` / `ko`
 > 会报 `locale "<id>" is not registered`。请使用更新了 `LOCALE_IDS`
 > （locale-settings.ts）与 `LOCALES` 标签（client/index.ts）的 DSH fork 并重新构建。
@@ -35,7 +35,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **0.2.1-beta.3** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **0.2.1-beta.5** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 
@@ -58,7 +58,7 @@
 - **会话放行** — 精确的 `(工具, 规范化 fingerprint)` grant，带 `TTL` + `maxUses`；换目标绝不复用。子代理继承但不可自授。
 - **纯函数规则引擎** — glob/regex 编译 + ReDoS 上限、坏规则 loud fail、按源内容哈希缓存。
 - **审计** — 每次决策写为 `{ignorable:true}` 事件并带 `callId`；模型可见理由与记录一致。
-- **Permissive 档位** — 一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。
+- **自动审查档位**（机器值 `permissive`）——一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。权限下拉框与设置行都按产品名「自动审查」显示，且不带图标。
 - **沙箱提权自动答复**（`trustEscalation`）— 沙箱提权是从 shell / pwsh / edit 工具**体内部**（`tools/pre-execute` 之后）发出的，所以门禁从未见过它，一个它自动放行的调用仍会弹出确认。开启后，门禁以 `callId` 精确匹配已放行调用并直接答复。
 
 ## 安装
@@ -88,11 +88,16 @@ dsh plugin --profile web add dsh-perm-gate
 
 规则示例：见 [examples/permissions.example.yaml](./examples/permissions.example.yaml)。
 
-## Permissive 档位
+## 自动审查档位（机器值 `permissive`）
 
-Permissive 是权限下拉框里一个**独立审批档**，与 Read Only / Workspace Write / Full access /
-Whitelist 平行。它**不叫"自动审批"**、也不授予泛化权限：只会在人类/LLM 接缝**之前**收窄或放宽决策，
+自动审查是权限下拉框里一个**独立审批档**，与只读 / 工作区内修改 / 完全权限 / 白名单平行。
+它不是泛化的"自动审批"、也不授予泛化权限：只会在人类/LLM 接缝**之前**收窄或放宽决策，
 P0 硬拒绝始终单调且不可协商。
+
+下拉框里的名字是**宿主提供的产品名**，不是逐语言的字典项：DSH 0.1.2 对插件档位在**两个**权限界面上
+（通用设置默认档行、输入栏权限选择器）都原样渲染补丁里的 `name:`，只给三个内置档提供自己的本地化
+标签，因此 `cordis.patch.yml` 直接写中文名，对所有会话一致。该档位**不画图标**——选择器的图标只按
+三个内置值取。
 
 `cordis.yml`：
 
@@ -129,7 +134,7 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 `trustEscalation` 填补这个缺口。门禁记住每个它正面向上放行的调用（以宿主 `callId` 为键，提权
 请求会重复该值），并在本处自行答复 `allowed-once`。它仅在**全部满足**时适用：
 
-- Permissive 档位开启且 `trustEscalation` 开启；
+- 自动审查档位开启且 `trustEscalation` 开启；
 - 请求携带门禁放行的 `callId`，且工具名匹配；
 - 原因为已知的提权，指明 `workspace-write` 或 `danger-full-access`。
 
@@ -141,11 +146,11 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 ### 权限下拉里可选档位
 
 `cordis.patch.yml` 在 DSH 的 `permission.config.presets` 里新增了 `permissive` preset
-（`sandbox: workspace-write`、`approval: ask`、名称 **Permissive**），位于 Workspace Write 与
-Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而非逐键合并，所以该文件还必须重述三个内置档
+（`sandbox: workspace-write`、`approval: ask`、名称 **自动审查**），位于工作区内修改与
+完全权限之间。DSH 的 bundle patch 对这个 map 是**整表替换**而非逐键合并，所以该文件还必须重述三个内置档
 （`read-only` / `workspace-write` / `danger-full-access`，取自
 `@deepseek-ai/dsh-base/cordis.patch.yml`）；`test/patch-presets.spec.ts` 固定了这份键集合。因此会话权限
-下拉里会出现 Permissive 这个**独立可选审批档**，而不是"auto-approval"档。
+下拉里会出现「自动审查」这个**独立可选审批档**，而不是"auto-approval"档。
 
 门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive']`，即本插件新增的那一档）。在其余任何档位
 （Read Only、Workspace Write、Full access、`custom`）里，门禁的判定流程**完全不运行**：不放行、不弹审批、
@@ -157,7 +162,7 @@ Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而�
 
 ### 在 UI 里可配置
 
-该档位也可在运行时从 **设置 → 插件 → Permissive 审批档** 调整（插件浏览器端渲染的
+该档位也可在运行时从 **设置 → 插件 → 自动审查** 调整（插件浏览器端渲染的
 `settings.plugins.tab` 页面）：一个开关切换 `permissive`，四个开关编辑后台
 `permissiveStrategies`。host 端 live 读取该命名空间，改动对下一条工具调用即时生效，无需重启。
 这是一个独立审批类，**不是** DSH 的"auto-approval"档。
@@ -182,7 +187,7 @@ Full access 之间。DSH 的 bundle patch 对这个 map 是**整表替换**而�
 调用文本命中任一关键词（大小写不敏感子串）即直接拒绝，且先于白名单 / 授权 / LLM。黑名单在设置
 卡片中按列表查看与增删（预置条目带标签，可一键恢复预置）；未设置或为空时应用预置列表——黑名单
 不会静默关闭。
-Permissive 档在权限选择器中保留盾形图标——菜单项与折叠触发按钮均有图标。
+该档位在权限选择器中**不显示图标**：选择器的图标只按三个内置值取，插件新增的档位是纯文字。
 
 
 ## CLI（独立 dry-run）

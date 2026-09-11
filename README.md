@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-> **Compatibility note:** v0.2.1-beta.3 ships `ja` / `ko` dictionaries, but official DSH exposes
+> **Compatibility note:** v0.2.1-beta.5 ships `ja` / `ko` dictionaries, but official DSH exposes
 > only `zh` / `en` through `LocaleRuntime` (`LOCALE_IDS = ["zh", "en"]`). On stock DSH,
 > selecting `ja` / `ko` fails with `locale "<id>" is not registered`. Use a DSH fork that
 > updates `LOCALE_IDS` (locale-settings.ts) and `LOCALES` labels (client/index.ts), then
@@ -37,7 +37,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **0.2.1-beta.3** — see the [Changelog](./CHANGELOG.md).
+Version **0.2.1-beta.5** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -72,10 +72,11 @@ cross-plugin version coupling.
   malformed rules, and source-hash compile caching.
 - **Audit** — every decision is logged as an `{ignorable:true}` event with its `callId`; the
   model-visible reason matches the recorded outcome.
-- **Permissive tier** — an **independent approval mode** (separate from read-only, full-access
-  and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end exposes a
-  **single switch** (`permissive`); the four backend strategies are **combinable** and driven
-  by plugin settings — still fail-closed against P0.
+- **自动审查 tier** (`permissive`) — an **independent approval mode** (separate from read-only,
+  full-access and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end
+  exposes a **single switch** (`permissive`); the four backend strategies are **combinable** and
+  driven by plugin settings — still fail-closed against P0. The permission picker and the
+  settings row both show it under the product label 自动审查, with no icon.
 - **Sandbox-escalation auto-answer** (`trustEscalation`) — a sandbox escalation is asked from
   *inside* the shell / pwsh / edit tool body, after `tools/pre-execute`, so the gate never saw
   it and a call it auto-allowed still prompted you to approve the widening. With this strategy
@@ -148,12 +149,18 @@ permissions:
 A command entry `word#flag` matches the command word (`word`) with the modifier `recursive` or
 `force` — so `rm#recursive` matches `rm -rf`, `env rm -rf`, and `sh -c "rm -rf /"`.
 
-## Permissive mode
+## The 自动审查 tier (machine value `permissive`)
 
-Permissive is an **independent approval tier** in the DSH permission picker, parallel to
-Read Only / Workspace Write / Full access / Whitelist. It is **not** "auto-approval" and never
-mints blanket authority: it only narrows or widens the seam *before* the human/LLM step while
-P0 hard-deny stays monotonic and non-negotiable.
+自动审查 is an **independent approval tier** in the DSH permission picker, parallel to
+Read Only / Workspace Write / Full access / Whitelist. It is **not** generic "auto-approval" and
+never mints blanket authority: it only narrows or widens the seam *before* the human/LLM step
+while P0 hard-deny stays monotonic and non-negotiable.
+
+The picker label is a **host-supplied product string**, not a per-locale dictionary entry: DSH
+0.1.2 renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
+default row and the composer picker) and only supplies its own localized labels for the three
+built-in values, so `cordis.patch.yml` ships the Chinese label for every session. The tier draws
+**no icon** — the composer renders glyphs only for the built-in values.
 
 In `cordis.yml`:
 
@@ -194,7 +201,7 @@ prompt asking you to approve the sandbox widening.
 the host's `callId`, which the escalation request repeats) and answers the escalation
 `allowed-once` itself. It applies only when *all* hold:
 
-- the Permissive tier is on and `trustEscalation` is on;
+- the 自动审查 tier is on and `trustEscalation` is on;
 - the request carries a `callId` the gate cleared, with a matching tool name;
 - the reason is a recognized escalation naming `workspace-write` or `danger-full-access`.
 
@@ -253,18 +260,18 @@ channel existed), with `tools/result` settling the same ask as a fallback when t
 correlate it. Approvals report the post-approval learning progress (`n`/threshold), and the notice
 strip labels all three terminal states.
 
-The Permissive tier keeps its shield icon in the permission picker — on both the
-menu item and the collapsed picker trigger.
+The tier draws no icon in the permission picker: the composer's glyphs are keyed to the three
+built-in values, so a plugin-contributed tier is text-only on every surface.
 
 ### A selectable session tier
 
 `cordis.patch.yml` adds a `permissive` preset (`sandbox: workspace-write`, `approval: ask`, name
-**Permissive**) between Workspace Write and Full access. The DSH bundle patch replaces the whole
+**自动审查**) between Workspace Write and Full access. The DSH bundle patch replaces the whole
 `permission.config.presets` map rather than merging per key, so the file also restates the three
 built-ins (`read-only` / `workspace-write` / `danger-full-access`, from
 `@deepseek-ai/dsh-base/cordis.patch.yml`); `test/patch-presets.spec.ts` pins that key set. So the
-session permission picker offers Permissive as an independent selectable approval tier, not an
-"auto-approval" mode.
+session permission picker offers 自动审查 as an independent selectable approval tier, not a
+generic "auto-approval" mode.
 
 The gate is active **only in the tiers listed in `gatePresets`** (default `['permissive']`, the
 tier this plugin adds). In every other tier — Read Only, Workspace Write, Full access,
@@ -279,11 +286,11 @@ session's effective approval policy is `never`.
 
 ### Configurable in the UI
 
-The tier is also adjustable at runtime from **Settings → Plugins → Permissive approval tier**
+The tier is also adjustable at runtime from **Settings → Plugins → 自动审查**
 (a `settings.plugins.tab` page rendered by the plugin's browser client): one switch toggles
 `permissive`, and four toggles edit the backend `permissiveStrategies`. The host reads the
 namespace live, so a change applies to the next tool call without a restart. This is an
-independent approval class, NOT the DSH "auto-approval" mode.
+independent approval class, NOT a generic "auto-approval" mode.
 
 ## CLI
 

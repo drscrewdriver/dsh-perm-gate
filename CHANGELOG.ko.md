@@ -5,6 +5,34 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [0.2.1-beta.5] - 2026-09-11
+
+### 수정
+
+- **DSH 0.1.2에서 게이트가 모든 호출에서 대기 상태가 되어 「승인 기록」 페이지가 비어 있었습니다.** 세션의
+  권한 preset fold가 로그를 `exec.agent.session.events`로 읽었습니다. DSH 0.1.1은 이 배열을
+  노출했지만 0.1.2는 로그를 `Session.snapshotEvents()` / `ownEvents()` 뒤로 감추고 `events` 멤버를
+  남기지 않아, 읽기가 `undefined`를 반환하고 `presetOf`도 `undefined`를 반환했으며
+  `presetInScope(undefined, ['permissive'])` 때문에 `gateActive`가 **모든** 호출에서 false가
+  되었습니다 —— 규칙 / grant / 거부 키워드 / 분류기 / P0 하드 거부 판정이 전혀 없고 감사 이벤트도
+  기록되지 않았습니다(게이트 자체 티어를 선택한 세션에서도 마찬가지여서, 탭에는 실패가 아니라
+  「이 세션에는 아직 승인 기록이 없습니다」가 표시되었습니다). fold는 알려진 모든 접근자 형태
+  (`events` 배열, `snapshotEvents()`, `ownEvents()`)로 로그를 읽고, 호스트가 아무것도 노출하지
+  않을 때만 "이벤트 없음"으로 축소됩니다. fold 캐시는 로그 길이와 마지막 이벤트의 동일성을 키로
+  사용합니다(0.1.2 스냅샷은 동일한 동결 이벤트에 대한 매번 새로운 배열입니다).
+  `test/preset-scope.spec.ts`가 두 형태를 고정합니다.
+
+### 변경
+
+- **권한 티어의 표시 이름을 모든 화면에서 「自动审查」로 통일하고 아이콘을 제거했습니다.**
+  `cordis.patch.yml`의 preset `name:`이 중국어 제품명이 되어 일반 설정 기본 행, 입력창 선택기,
+  플러그인 설정 탭이 모두 같은 이름을 표시합니다. DSH 0.1.2는 플러그인 티어의 `name:`을 그대로
+  렌더링하고 내장 세 값(`仅可查看` / `工作区内修改` / `完全权限`)만 지역화하므로, zh 세션이 보는 것은
+  이 하나의 문자열입니다. 머신 값은 `permissive` 그대로입니다(`gatePresets`가 대조하는 값).
+  권한 선택기의 아이콘 장식은 제거했습니다(`src/client/permission-icon.ts` 삭제): 은퇴한 `auto` 티어의
+  방패 글리프에 맞추기 위한 것이었고, 0.1.2에서는 `aria-haspopup="menu"` 선택자를 통해 설정 행에도
+  적용되었으며, 선택기의 글리프는 내장 값에만 연결되므로 플러그인 티어는 그리지 않습니다.
+
 ## [Unreleased]
 
 ### 추가

@@ -39,13 +39,23 @@ describe('cordis.patch.yml permission presets', () => {
     expect(presets['danger-full-access']).toMatchObject({ sandbox: 'danger-full-access', approval: 'never' })
   })
 
-  it('adds the Permissive tier with a label and description', () => {
+  it('adds the 自动审查 tier with a label and description', () => {
     expect(presets['permissive']).toMatchObject({
       sandbox: 'workspace-write',
       approval: 'ask',
-      name: 'Permissive',
+      name: '自动审查',
     })
     expect(presets['permissive']?.description).toBeTruthy()
+  })
+
+  it('lifts the label into the product string while the key stays machine-stable', () => {
+    // The 0.1.2 permission surfaces render a host-supplied `name` verbatim and
+    // simply title-case a kebab-case name, so the localized label can only come
+    // from this one string; the KEY stays `permissive` because `gatePresets`
+    // matches keys and the permission projection reports them.
+    const name = presets['permissive']?.name ?? ''
+    expect(name).toBe('自动审查')
+    expect(name).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
   })
 
   it('does not resurrect the retired auto tier', () => {

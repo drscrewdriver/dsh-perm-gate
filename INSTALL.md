@@ -12,8 +12,8 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` version **0.2.1-beta.3**. Continue with the [README](./README.md) for the
-decision chain, the rules file format and the Permissive tier.
+`dsh-perm-gate` version **0.2.1-beta.5**. Continue with the [README](./README.md) for the
+decision chain, the rules file format and the 自动审查 tier.
 
 ## Requirements
 
@@ -43,7 +43,7 @@ covers both lines and how the tags are published.
 dsh plugin --profile web add dsh-perm-gate
 ```
 
-This pulls the published package, applies its `cordis.patch.yml` (the Permissive
+This pulls the published package, applies its `cordis.patch.yml` (the 自动审查
 session tier plus the plugin entry) and assembles both halves.
 
 ## Install from source
@@ -100,7 +100,7 @@ and `dsh-movein-permissions`.
    entry above.
 3. Delete any preset overrides those plugins contributed — `cordis.patch.yml`
    **replaces** `permission.config.presets` wholesale, so stale per-key patches
-   from other plugins can silently drop the Permissive tier (or a built-in one).
+   from other plugins can silently drop the 自动审查 tier (or a built-in one).
 4. Reload the profile and verify with `--list` (below).
 
 ## Verify
@@ -125,7 +125,7 @@ Expected `--list` output shape:
 }
 ```
 
-In the UI, **Settings → Plugins → Permissive approval tier** should render one
+In the UI, **Settings → Plugins → 自动审查** should render one
 switch plus the four backend strategy toggles.
 
 ## Uninstall
@@ -135,12 +135,12 @@ dsh plugin --profile web remove dsh-perm-gate
 dsh profile reload --profile web
 ```
 
-Removing the plugin also removes its patch contribution, so the Permissive tier
+Removing the plugin also removes its patch contribution, so the 自动审查 tier
 disappears from the session permission picker again.
 
 ## Troubleshooting
 
-**The Permissive tier is missing from the permission picker.**
+**The 自动审查 tier is missing from the permission picker.**
 The DSH bundle patch replaces the whole `permission.config.presets` map instead of
 merging per key. Reload the profile so `cordis.patch.yml` is re-applied, and make
 sure no later plugin overwrites `presets`.
@@ -152,9 +152,16 @@ fails loud at load — it is never silently disabled.
 
 **`llmAssist` never fires.**
 It needs `classifierEndpoint`, `classifierModel` and `classifierApiKey` (set them
-in **Settings → Plugins → Permissive approval tier** or in `cordis.yml`). Any
+in **Settings → Plugins → 自动审查** or in `cordis.yml`). Any
 missing value or network error falls back to the human seam — the gate is
 fail-closed by design.
+
+**The Approvals tab stays empty.**
+The gate is scoped to the tiers listed in `gatePresets` (default
+`['permissive']`), so it records nothing while the session runs in another tier —
+pick 自动审查 in the permission picker for the session you want recorded. A
+session that has never selected a preset is out of scope too. New sessions start
+in the tier named by the `permission.defaultPreset` setting.
 
 **Settings card shows "Settings namespace unavailable".**
 The plugin is not assembled into the active profile. Run
