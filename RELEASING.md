@@ -97,6 +97,12 @@ branches have genuinely forked and `verify:line` is the only check that matters.
 Last measured while the branches were in sync — identical on both lines:
 `e8f03f902738bd09cf63499b8557943c96a0ebc75117f8c2a10d4c5b17b1be3f`.
 
+The lines have since **genuinely forked**: `main` dropped the permission-icon
+decoration and changed the client copy, so the two bundles differ by design and
+`verify:line` per branch is the check that matters. `main` at 2.0.0 measures
+`4881524a53ddbb0d2a828035b77f50692a9a3cd2bfb0b48f9ec072a11cee58af` (99.95 kB,
+against DSH 0.1.5-rc.2).
+
 ## Publish
 
 Publish from the branch that owns the line:
