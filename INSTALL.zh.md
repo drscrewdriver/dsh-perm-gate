@@ -30,7 +30,8 @@
 
 | 你的 DSH | 安装方式 |
 |----------|----------|
-| `0.1.2-alpha.1` 或更高（含 `0.1.5-rc.2`） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| `0.1.5-rc.1` 或更高 | `dsh plugin --profile web add dsh-perm-gate@dsh-0.1.5`（专属 0.1.5 线，`3.x`） |
+| `0.1.2-alpha.1` 或更高 | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`，`2.x`） |
 | 不高于 `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH 不强制 `engines.dsh`，因此 tag 是选择机制而非兼容性关卡。
@@ -152,6 +153,10 @@ DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key
 「自动审查」），会话处在别的档位时它不记录任何事件——请在权限下拉框为本会话选择
 「自动审查」。从未选过档位的会话同样在范围之外。新会话的初始档位由
 `permission.defaultPreset` 设置决定。
+
+**DSH 升级后所有客户端插件消失 / 档位不见了。**
+DSH 重建后 web client 组合包被浏览器缓存，插件树可能无法重新激活。先强制刷新
+浏览器（Ctrl+Shift+R）或清站点缓存，再考虑重装插件——这是宿主侧缓存问题，不是插件缺陷。
 
 **设置卡片显示「设置命名空间不可用」。**
 该插件未装配进当前 profile。执行 `dsh plugin --profile web add dsh-perm-gate`

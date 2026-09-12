@@ -59,6 +59,11 @@ const LINES = {
     branch: 'main',
     note: 'DSH >= 0.1.2-alpha.1 — dsh-client-runtime removed',
   },
+  '015': {
+    dsh: '0.1.5-rc.2',
+    branch: 'compat/0.1.5',
+    note: 'DSH >= 0.1.5-rc.1 — the 3.x line (permission presets via dsh-permission-presets)',
+  },
 }
 
 /**

@@ -19,6 +19,7 @@ import { decideRules, type ToolCallContext } from './evaluate.js'
 import { canonicalizeCall, GrantRegistry } from './grant.js'
 import { learnKey, operationFingerprint, RiskLearning } from './learning.js'
 import { ArtifactRegistry } from './path.js'
+import { decomposeShellCommand } from './shell.js'
 import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } from './risk.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
@@ -283,7 +284,7 @@ function isCleanupSafe(exec: ToolExecutionLike): string | undefined {
     if (!SHELL_DELETE_RE.test(cmd.command)) continue
 
     // Collect all non-flag argument tokens as potential targets.
-    const targets = cmd.args.filter((a) => !a.startsWith('-'))
+    const targets = cmd.args.filter((a: string) => !a.startsWith('-'))
     if (targets.length === 0) continue
 
     let allSafe = true

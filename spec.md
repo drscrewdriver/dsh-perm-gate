@@ -1,69 +1,41 @@
-# Spec: dsh-perm-gate 增强(学习 dsh-approval-gate 方式)
+# Spec: dsh-perm-gate 升级适配 DSH 0.1.5（compat/0.1.5 分支）
+
+> 前一份 spec（dsh-approval-gate 增强）已完成并随 2.1.0 发布，本文件覆盖为新一轮任务。
+> 历史记录见 git（main @ 6dfd091）。
 
 ## 需求
 
-1. **风险分级判定(升级现有 `llmAssist` 策略)**:llmAssist 开启时,自定义 LLM API 按
-   `{"risk":"safe"}` / `{"risk":"risky","category":...}` 协议判定一次 ask 请求:
-   - `safe` → 自动放行;`risky` + 硬类别(deletion/credential/remote/system/bulk)→ **永远转人工**(不学习、不放行);
-   - `risky` + `neutral` → 进入裁决学习;协议违规/超时/失败 → 维持 ask(fail-closed),且**不学习**;
-   - LLM 调用带超时(默认 20s,可配)+ 失败重试 1 次。
-2. **裁决学习闭环**(默认关闭,卡片可开):neutral 类 ask 被人工放行并实际执行后
-   (经 `tools/result` 感知),确认计数 +1 并记录操作指纹样本;同一 `tool|category`
-   计数 ≥ 阈值(默认 3,1–10 可配)且本次指纹命中已确认样本 → 自动放行。
-   学习状态持久化为独立 JSON(`$DSH_HOME/perm-gate/learning.json`),不写入用户 YAML 规则文件。
-3. **权限模式图标**:保留现有 Permissive 菜单项图标,增强为同时装饰权限选择器的
-   触发按钮(`button[aria-haspopup="menu"]` 文案匹配时),与 dsh-approval-gate 的"无图标"形成差异。
-4. **简化版事件流**:
-   - host:每次裁决追加一条 JSONL 事件到 `$DSH_HOME/perm-gate/events.jsonl`,
-     并注册 `GET /api/dsh-perm-gate/events?sessionId=&since=`(webServer 服务,不可用时静默降级);
-   - client:`conversation.input.dock`(order=30)提示条,2s 轮询,auto/deny 自动收起、ask 常驻。
-5. **工程约束**:全部为重写实现(仅学习设计思路,不复制代码);**不做任何 git commit**,
-   只留工作区改动;走完整 typecheck / lint / vitest / build 验证。
+1. 在新分支 `compat/0.1.5`（自 `main` 切出）上，将插件适配为 DSH 0.1.5 专属版本线，发布为 3.x 系列（沿用仓库版本线惯例：`legacy` = 0.1.1 线，`main` 2.x = 0.1.2+ 线）。
+2. `engines` 声明对齐 0.1.5：`dsh >=0.1.5-rc.1 <0.2.0-0`、`node >=24`（0.1.5 在 Node < 24 静默失败，见 findings F10）。
+3. `cordis.patch.yml` 的「自动审查」预设档 patch 迁移到 0.1.5 的 `@deepseek-ai/dsh-permission-presets` 服务配置（键形状兼容：`sandbox`/`approval`/`name`/`description`，可评估补 `defaultPreset`），并按 0.1.5 实际内置预设表重述全部必须保留的档位（0.1.5 默认表只有 `workspace-write` 与 `danger-full-access`，见 findings F1）。
+4. 权限选择器图标（permissive 档盾形 glyph）在 0.1.5 上继续生效：核实 glyph 装饰在 0.1.5 的落点（`ui-conversation` composer 侧 vs 新增 `ui-permission-presets` 设置侧），patch/DOM 装饰随之调整。
+5. 宿主半集成点在 0.1.5-rc.2 上逐项核实并修复：`approval/request` 回答者链、`effectivePolicy` 私有方法读取、`installSection` settings、`webServer.register` HTTP 通道、`inject` 服务可用性。
+6. 浏览器半集成点在 0.1.5-rc.2 上逐项核实：slots 契约（`conversation.input.dock` / `conversation.view` / `settings.plugins.tab`）、locale、settingsScope、client bundle purity。
+7. 全量测试 + 真实 DSH 0.1.5-rc.2 profile 冒烟验证，README（四语）/CHANGELOG 版本兼容矩阵更新。
 
 ## 技术方案
 
-新增 3 个纯模块 + 1 个 client 组件,对既有 P0–P4 瀑布零侵入(只在 ask 决策后精炼):
-
-```
-src/risk.ts        风险协议:classifyRisk(cfg, req) → safe | risky:<category> | unresolved
-src/learning.ts    RiskLearning(learning.json 读写、确认计数、指纹样本、shouldAutoAllow) + operationFingerprint
-src/events.ts      EventLog(events.jsonl 追加 + since/sessionId 查询) + registerEventsRoute
-src/client/notice.tsx  conversation.input.dock 提示条(轮询 + 展示)
-```
-
-改动点:
-- `classifier.ts`:抽出共享 `chatCompletion()`(单次 POST + AbortController 超时,`{ok:true,content}`/`{ok:false}`);
-  `classifyWithLLM` 与 `classifyRisk` 共用,并都获得"失败重试 1 次"。
-- `runtime.ts`:新方法 `refineAsk(exec, askDecision)`(替代原 llmAssist 三值精炼;
-  内含硬类别守卫、学习查询、pending 登记)与 `settleExecution(exec)`(tools/result 结算 pending);
-  原 `applyPermissive` 中 sync llmAssist 分支移除(统一走异步 refineAsk)。
-- `index.ts`:listener 改用 refineAsk;注册 `tools/result` → settleExecution;
-  `inject` 增加 `webServer`(存在性守卫),注册事件查询路由。
-- `config.ts` + settings namespace:`riskLearning: boolean`(默认 false)、`riskThreshold: number`(默认 3)、
-  `riskTimeoutMs: number`(默认 20000)、`learningFile`/`eventsFile`(组合入口可选,不入卡片)。
-- `client/card.tsx` + `locales.ts`:llmAssist 区块内新增 riskLearning 开关 + 阈值输入 + 协议说明(zh/en/ja/ko)。
-- `permission-icon.ts`:新增 trigger 装饰(`button[aria-haspopup="menu"]`,文案匹配 Permissive 标签,`data-*='trigger'` 小尺寸)。
-- 文档:README.{md,zh,ja,ko} 增补章节;CHANGELOG(.ja/.ko)Unreleased;package.json 0.2.0。
+- **分支与版本**：`git checkout -b compat/0.1.5 main`；`package.json` version → `3.0.0`，`engines.dsh` → `>=0.1.5-rc.1 <0.2.0-0`，`engines.node` → `>=24`。devDeps 已在 `^0.1.5-rc.2`，无需改。
+- **预设档 patch**：先在 0.1.5-rc.2 环境确认拥有 `presets` 配置的 cordis 插件 id（0.1.5 由 `dsh-permission-presets` 服务承接，配置 `Record<string, PresetSpec>` + 可选 `defaultPreset`），`cordis.patch.yml` 的 `- id: permission` 块改为实际 owner id；`test/patch-presets.spec.ts` 同步钉住新 owner + 键集。patch 值合法性关键——0.1.5 上非法 preset 配置会触发 cordis 无限 reload + OOM（findings F9）。
+- **glyph 装饰**：反编译核对 `@deepseek-ai/dsh-client-ui-conversation@0.1.5-rc.2` `lib/client.js` 的 `permissionGlyphs` map 是否仍在原位；composer 侧在 → 现有 patch 不变；若选择器迁至 `ui-permission-presets` → 在该包 lib 上加等价 patch 或依赖既有 DOM 装饰（`permission-icon.ts` MutationObserver）覆盖。
+- **宿主半**：核心判定逻辑（P0–P4 瀑布、learning、risk 协议）零改动。仅（a）核实 `effectivePolicy` 私有方法在 0.1.5 `user-approval` 包仍存在（审批缝契约 R1/R2 保留，findings F3）；不在则回退读 `permissions` projection；（b）`tools`/`webServer`/`llm`/`agentDefaultModel` inject 在 0.1.5 profile 下逐项可用性核实，`webServer` 已有存在性守卫，其余按需加探测降级。
+- **浏览器半**：重点核实三个 slot 契约在 0.1.5（conversation 重写 + sidebar 重写后）不变；`settingsScope.bind` 行为不变；purity gate 不变。
+- **不做**（YAGNI）：不引入 `ctx.permissionPresets.set()/current()` 调用（gate 不切预设，只贡献档位）；不做 0.1.2/0.1.5 双兼容（main 2.x 已承担 0.1.2+ 线）；不改会话数据写入（gate 不写会话日志事件，不涉及 V3 迁移拒载风险）。
 
 ## 决策记录
 
 | 选项 | 选择 | 理由 |
 |------|------|------|
-| 风险协议接入 | 升级现有 llmAssist | 策略组合不爆炸,UI 改动最小;旧三值行为被协议严格超集覆盖 |
-| 学习闭环 | 纳入,默认关闭 | approval-gate 核心特色;默认关闭符合本仓库 fail-closed 保守基调 |
-| 审查 UI | 简化版事件流(dock 提示条) | 用户选定;不做 diff/撤销/历史 tab(YAGNI) |
-| 学习持久化 | 独立 JSON,不写 rulesFile | 用户 YAML 是人所有的确定性层,学习是插件自有状态,分离避免互相污染 |
-| 人工确认感知 | `tools/result` 结算 pending | dsh-auto-mode 已验证该事件契约;exec+result 到达即代表调用被放行并执行 |
-| 拒绝学习 | 不做自动升级拦截 | ask 返回后无法区分"拒绝/取消/未执行",误升级违背 fail-closed;保留显式 deny 规则路径 |
-| 指纹来源 | 结构化 args(命令词+路径基名) | 我们有真实参数,优于 approval-gate 对 justification 文本的正则挖掘 |
-| LLM 端点 | 沿用 classifierEndpoint/Model/ApiKey | 需求 2 的"自定义 LLM API"已存在,直接复用并增强协议 |
-| git | 工作区改动,不 commit | 用户硬性要求 |
+| 双兼容 vs 0.1.5 专属线 | 0.1.5 专属线（3.x，compat/0.1.5 分支） | 仓库惯例是版本线分支；预设 patch owner id 两线不同，单文件双兼容需双 patch，复杂度不成比例 |
+| 预设档 patch 目标 | 迁到 `dsh-permission-presets` 实际 owner id | 0.1.5 preset 表由该服务配置承接，键形状完全兼容 |
+| gate 是否改用 `permissionPresets` API | 否，保持 `effectivePolicy` + 回退 | gate 只读审批策略不写；减少对新 API 的硬依赖 |
+| node engines | `>=24` | DSH 0.1.5 自身要求（#6124/#6115 静默失败） |
+| 判定逻辑 | 零改动 | 0.1.5 审批缝契约（`approval/request` 回答者链、闭集结果、fail-closed）与 0.1.2 一致，无需动 |
 
 ## 约束
 
-- client 半区零 `@deepseek-ai/*` 值导入(tsdown purity gate),全部经 cordis services/type-only。
-- locales 以 zh 为 key 源,en/ja/ko 镜像;运行时仅 zh/en 可选(ja/ko 照发)。
-- P0 hard-deny / deny 规则 / grant 决策永不 Learning 或 LLM 精炼触碰。
-- 事件/学习文件 IO 一切失败吞掉并降级(内存态),绝不影响门禁主流程。
-- 学习文件路径缺省派生:`dshHome` 存在 → `$DSH_HOME/perm-gate/*.jsonl|json`;否则仅内存。
-- 水 fail-close 不变:unresolved/无配置/异常一律维持 ask。
+- 分支基线：`main` @ 6dfd091（2.1.0）。
+- 验证环境：本机 DSH 0.1.5-rc.2 profile（`dsh plugin --profile web add`）；冒烟前备份 profile（0.1.5 会话迁移/升级损坏问题高发，findings F11）。
+- 全程不改 `src/risk.ts`/`learning.ts`/`engine.ts` 判定语义；改动集中在 manifest、patch、inject、客户端契约核实。
+- 测试基线 121/121 全绿；升级后零回归（slot/patch 相关 spec 按 0.1.5 契约更新除外）。
+- 仓库规约（AGENTS.md）继续生效：listener 放行必须 `next()`；P0 永不协商；unknown 配置 fail loud；四语文档镜像。

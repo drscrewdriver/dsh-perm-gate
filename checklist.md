@@ -1,68 +1,43 @@
-# Checklist
+# Checklist — 0.1.5 升级（compat/0.1.5）
 
-> 2026-09-06 验收记录。验证口径:`npm run typecheck && npm run lint && npm test && npm run build` 全绿(121/121 测试)。
+> 验证口径：`npm run typecheck && npm run lint && npm test && npm run build` 全绿 + DSH 0.1.5-rc.2 真实 profile 冒烟。
 
 ## Must Pass
 
-### 构建/静态
-- [x] `npm run typecheck`(node 半区 + client 半区)零错误
-- [x] `npm run lint` 零错误
-- [x] `npm run build` 产出 lib/*.js + lib/client.js,purity gate 无报错(lib/risk|learning|events.d.ts 均存在)
-- [x] `git status` 确认无新 commit(HEAD 停在 2a7a156,仅工作区改动)
+### 分支与 manifest
+- [ ] `compat/0.1.5` 分支自 main@6dfd091 切出；`package.json` version=3.0.0、`engines.dsh`=`>=0.1.5-rc.1 <0.2.0-0`、`engines.node`=`>=24`
+- [ ] dist 发布元数据沿用 2.0.0 流程（dist-tag `next`），README 四语兼容矩阵更新为 3.x = 0.1.5 线
 
-### 风险协议(src/risk.ts,test/risk.spec.ts 10 例)
-- [x] safe / risky+已知类别 / risky+未知类别 / 非 JSON 输出 / 两次失败 → safe / risky / unresolved / unresolved / unresolved
-- [x] 超时(短 timeoutMs)→ unresolved,不挂起
-- [x] 第一次失败第二次成功 → 正常返回(重试 1 次)
-- [x] 无 endpoint/model → unresolved(fail-closed)
-- [x] 硬类别常量集 = deletion/credential/remote/system/bulk;未知类别按硬风险处理
+### 预设档 patch（核心）
+- [ ] 已在 0.1.5-rc.2 实测确认 `presets` 配置的 cordis owner id，`cordis.patch.yml` patch 落在该 owner
+- [ ] patch 重述 0.1.5 实际内置预设集（默认表仅 workspace-write / danger-full-access；read-only 是否需要保留按实测决定）
+- [ ] `permissive` 档：sandbox=workspace-write + approval=ask + name=自动审查 + description 完整
+- [ ] `test/patch-presets.spec.ts` 钉住新 owner id + 新键集（防漂移）
+- [ ] patch 值形状 100% 合法（非法 preset 配置在 0.1.5 触发无限 reload OOM）
 
-### 学习库(src/learning.ts,test/learning.spec.ts 8 例)
-- [x] operationFingerprint:shell 末位目标基名(`npm install foo`→`npm|foo`)/ file_path 基名 / 纯 tool 兜底
-- [x] 确认计数达阈值 + 指纹命中样本 → shouldAutoAllow=true;指纹未命中 → false
-- [x] 阈值未满 → false;reset 可清空
-- [x] 持久化:新实例从同一路径读回;路径不可用(父级是文件)时降级内存不抛错
-- [x] 坏 JSON 文件 → 起始干净;maxSamples 淘汰旧样本并按指纹去重
+### 宿主半集成
+- [ ] `approval/request` 回答者链在 0.1.5 生效：应放行调用走 gate、应拦截调用转人工
+- [ ] `effectivePolicy` 读取核实：私有方法在则直用；不在则回退实现（读 projection/服务）且测试覆盖
+- [ ] escalation-auto 路径冒烟通过（对照 #6215 场景）
+- [ ] `/api/dsh-perm-gate/events` 路由注册成功且可查询（对照 #5926/#5889）
+- [ ] `tools`/`llm`/`agentDefaultModel` inject 在 0.1.5 profile 全部解析成功
 
-### runtime 集成(test/runtime-risk.spec.ts 5 例 + test/permissive.spec.ts)
-- [x] llmAssist+safe → allow 且审计 source=classifier
-- [x] llmAssist+risky 硬类别(credential/deletion)→ 自动拒绝(auto-deny),不产生 pending
-- [x] llmAssist+risky neutral → ask + pending 登记;settleExecution 后计数 +1
-- [x] 阈值满足 + 同指纹 → 直接 allow(learned);跨运行时实例持久化生效
-- [x] 不同目标(`npm install right-pad`)仍 ask —— 无跨目标复用
-- [x] riskLearning=false → neutral 也只 ask 不学习
-- [x] 协议失败/未配置 → 维持原 ask,永不 deny/allow
-- [x] P0/deny/grant 决策不进 refineAsk(仅 ask 进入精炼;alwaysConfirm 升级的 ask 亦可被精炼)
+### 浏览器半集成
+- [ ] 三个 slot（`conversation.input.dock` / `conversation.view` / `settings.plugins.tab`）在 0.1.5 渲染正常
+- [ ] settings 卡片可编辑且实时生效（字符串命名空间 + installSection 路径）
+- [ ] permissive 档图标：composer 菜单项 + 触发按钮两处装饰生效（glyph map 迁移则 patch 跟随）
+- [ ] client bundle purity gate 通过（`@deepseek-ai/*` 仅 type-import）
 
-### pre-execute 水闸(test/pre-execute.spec.ts 7 例)
-- [x] safe → listener 返回 undefined 并调用 next():宿主收不到 ask,面板不出现(pendingAskCount=0,事件 verdict=llm-safe)
-- [x] 硬类别 → 返回 deny 且不调 next(auto-deny 真正到达宿主)
-- [x] risky:neutral → 返回 ask(reason 含 `llm-assist risky:neutral`)且不调 next,pending 登记
-- [x] unresolved / 判定抛错 → 保留原 ask(fail-closed,不调 next)
-- [x] 已取消的调用(exec.signal.aborted)→ 不调 LLM,保留 ask
-- [x] 非 ask 决策(read 只读工具)→ 直接 next(),不调 LLM
+### 静态与回归
+- [ ] typecheck / lint / 121+ 测试全绿，零回归（patch-presets.spec 等按新契约更新者除外）
+- [ ] `src/risk.ts` / `learning.ts` / `engine.ts` 判定语义零改动（git diff 核实）
 
-### 事件流(src/events.ts,test/events.spec.ts 8 例)
-- [x] 每次裁决追加 JSONL 一行(id 单调,重启恢复游标);since/sessionId 过滤正确
-- [x] webServer 缺失时 registerEventsRoute 返回 false 静默降级(仅落盘),插件不崩
-- [x] 非 GET/POST → 405;GET 带查询参数正常应答
-- [x] client dock 已入 bundle(lib/client.js 含 conversation.input.dock / 事件轮询 / riskLearning 控件 / aria-haspopup 装饰)
-
-### UI
-- [x] 权限菜单 Permissive menuitem 图标逻辑保留(回归:原 decorate 分支未变)
-- [x] 触发按钮(`button[aria-haspopup="menu"]` 文案匹配)装饰 `data-*='trigger'`(14px 小号);不匹配的按钮不受影响(静态核对 bundle;DOM 实测需在 DSH 环境手动确认)
-- [x] 卡片新增 riskLearning 开关 + 阈值输入(1–10),四语 key 编译期对齐(typecheck 通过即证明 en/ja/ko 缺 key 会报编译错)
-
-### 自定义 LLM 配置路(test/custom-llm.spec.ts 7 例,真实 HTTP 服务,无注入 hook)
-- [x] 设置面形状的 readClassifyConfig → refineAsk 真实打到自定义端点:Bearer key、model、消息体正确,路径 `/v1/chat/completions`
-- [x] safe 判定 → 自动放行(审计 source=classifier);risky 硬类别 → 保持人工 ask
-- [x] 网关拒绝 `response_format`(400)→ 自动去参降级重试一次,仍能拿到判定
-- [x] 用户粘贴完整路径 `…/v1/chat/completions` → 不重复拼接(chatCompletionsUrl 归一化)
-- [x] 端点不可达 → 回落人工 ask(审计 source=default,fail-closed)
-- [x] 非 JSON 纯文本响应(如 `SAFE - …`)→ 关键词回退解析成功
-- [x] host 半区 timeoutMs 实时读取补默认值(20s);refineAsk 单次读取分类器配置
+### 真实 profile 冒烟
+- [ ] 冒烟前备份 profile；先在禁用插件的干净 profile 确认 0.1.5-rc.2 基线可用
+- [ ] 安装 gate 后重启 → 加载无 `Failed to load plugins`；升级场景先强刷浏览器（client combo 缓存）
+- [ ] 端到端：切「自动审查」档 → shell 放行/拦截行为正确 → dock 提示条出没 → 事件流可查 → 卸载无残留
 
 ## Should Pass
-- [x] 事件/学习文件坏行、路径不可用均不抛错(单测覆盖)
-- [x] 新增导出(risk/learning/events)进入 lib/*.d.ts
-- [x] README 四语新增章节,语言切换链接块完整(四文件头部链接未改动)
+- [ ] README 排障章节补充「升级后插件消失 → 强刷浏览器」条目
+- [ ] CHANGELOG（四语）3.0.0 条目：engines 收窄、patch owner 迁移、0.1.5 适配说明
+- [ ] 本机 `node -v` ≥ 24（跑 0.1.5 宿主的前提，不符合先升 Node）

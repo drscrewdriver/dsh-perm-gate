@@ -1,7 +1,7 @@
 {
   "name": "dsh-perm-gate",
-  "version": "2.1.0",
-  "description": "DSH permission-gate for the DeepSeek Harness 0.1.2+ line: a single self-sufficient, deterministic-first, fail-closed gate covering P0 hard-deny -> P1 session grant -> P2 static rule (allow/deny) chain -> P3 optional LLM semantic classifier -> P4 ask, with command whitelist/blacklist.",
+  "version": "3.0.0",
+  "description": "DSH permission-gate for the DeepSeek Harness 0.1.5 line: a single self-sufficient, deterministic-first, fail-closed gate covering P0 hard-deny -> P1 session grant -> P2 static rule (allow/deny) chain -> P3 optional LLM semantic classifier -> P4 ask, with command whitelist/blacklist.",
   "type": "module",
   "files": [
     "lib",
@@ -57,8 +57,8 @@
     "dsh-perm-gate": "./lib/cli.js"
   },
   "engines": {
-    "node": ">=20",
-    "dsh": ">=0.1.2-alpha.1 <0.2.0-0"
+    "node": ">=24",
+    "dsh": ">=0.1.5-rc.1 <0.2.0-0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1"
@@ -93,6 +93,7 @@
     "verify:lines": "node scripts/verify-line.mjs both",
     "release:latest": "npm publish --tag latest",
     "release:2x": "npm publish --tag 2.x",
+    "release:3x": "npm publish --tag dsh-0.1.5",
     "release:legacy": "npm publish --tag legacy"
   },
   "license": "MIT",

@@ -32,11 +32,17 @@ describe('cordis.patch.yml permission presets', () => {
     expect(Object.keys(presets).length).toBeGreaterThan(0)
   })
 
-  it('restates every built-in tier of @deepseek-ai/dsh-base', () => {
-    // dsh-base/cordis.patch.yml (`id: permission`) is the authoritative set.
+  it('restates every built-in tier of dsh-base (id: permission, backed by dsh-permission-presets on 0.1.5)', () => {
+    // dsh-base/cordis.patch.yml (`id: permission`) is the authoritative set;
+    // on the 0.1.5 line the same id is backed by @deepseek-ai/dsh-permission-presets
+    // and the built-in set is unchanged (verified against 0.1.5-rc.2).
     expect(presets['read-only']).toMatchObject({ sandbox: 'read-only', approval: 'ask' })
     expect(presets['workspace-write']).toMatchObject({ sandbox: 'workspace-write', approval: 'ask' })
     expect(presets['danger-full-access']).toMatchObject({ sandbox: 'danger-full-access', approval: 'never' })
+  })
+
+  it('never uses the reserved `custom` key (0.1.5 PermissionPresetService throws on it)', () => {
+    expect(Object.keys(presets)).not.toContain('custom')
   })
 
   it('adds the 自动审查 tier with a label and description', () => {

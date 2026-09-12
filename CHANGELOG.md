@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-09-13
+
+### Changed
+
+- **The plugin now ships a dedicated DSH 0.1.5 line: branch `compat/0.1.5`, version series `3.x`,
+  npm dist-tag `dsh-0.1.5`.** `engines.dsh` narrows to `>=0.1.5-rc.1 <0.2.0-0` and `engines.node`
+  to `>=24` (DSH 0.1.5 silently does nothing below Node 24). The major bump is the fence: a `^2.x`
+  install never resolves `3.x` and vice versa.
+- **Verified against the published `@deepseek-ai/dsh@0.1.5-rc.2` bundle — zero code changes were
+  required on any integration seam:**
+  - The permission preset table is still patched under cordis id `permission`; the backing package
+    moved to `@deepseek-ai/dsh-permission-presets` (`PermissionPresetService`) with a fully
+    compatible config shape (`sandbox`/`approval` required, `name`/`description` optional strings,
+    `custom` reserved). The built-in set (read-only / workspace-write / danger-full-access) is
+    unchanged, so the whole-map restatement in `cordis.patch.yml` stays correct as-is.
+  - `approval/request` waterfall, the closed outcome set (`allowed-once`/`rejected`/`cancelled`/
+    `unavailable`), and the sandbox escalation reason format are identical to 0.1.2.
+  - `effectivePolicy` remains a private method of the user-approval service (read via `typeof` probe).
+  - `permission/preset` event payloads (`{ preset }`), the `snapshotEvents()`/`ownEvents()` log
+    accessors, and all three client slots (`conversation.input.dock`, `conversation.view`,
+    `settings.plugins.tab`) are unchanged; the settings plugins tab now lives in
+- The optional manual glyph patch (`patches/add-permissive-glyph.patch`) stays applicable:
+  the composer's `permissionGlyphs` map is structurally unchanged on 0.1.5-rc.2 but moved to
+  line 15559, so re-anchor the hunk line numbers when applying it there.
+    `dsh-client-ui-settings-plugins` with a compatible contract.
+- `test/patch-presets.spec.ts` additionally pins the reserved-`custom` guard, and
+  `scripts/verify-line.mjs` gains the `015` line for this branch.
+
 ## [2.0.0] - 2026-09-11
 
 ### Fixed

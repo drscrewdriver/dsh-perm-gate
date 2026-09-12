@@ -6,7 +6,7 @@
 # 2) Insert the plugin itself (host half) into the profile.
 #
 # The tier's DISPLAY NAME is the Chinese product label, matching every official
-# 0.1.2 permission label (仅可查看 / 工作区内修改 / 完全权限) in a zh session. Both
+# 0.1.5 permission label (仅可查看 / 工作区内修改 / 完全权限) in a zh session. Both
 # permission surfaces — the General-settings default row and the composer
 # picker — render a host-supplied name verbatim unless the value is one of the
 # three built-ins, so a single `name:` string is what both show; neither surface
@@ -14,16 +14,23 @@
 # stays `permissive`: it is the key `gatePresets` matches and the value the
 # permission projection reports, so only the label text is user-facing.
 #
-# The tier now carries a shield+eye icon in the composer glyph map (patched
-# into dsh-client-ui-conversation).  The permissive glyph sits alongside the
-# three built-in ones so both the trigger button and the dropdown rows show it.
+# The tier's icon comes from the optional MANUAL host-side patch
+# `patches/add-permissive-glyph.patch`, applied to the installed
+# node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js — this
+# plugin ships no picker decoration of its own. Verified against
+# 0.1.5-rc.2: the `permissionGlyphs` map is structurally unchanged (same
+# read-only / workspace-write / FULL_ACCESS keys, same `shieldOutline`
+# variable) but moved to line 15559, so re-anchor the hunk when applying.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should
-# survive. The authoritative built-in set is
-# `@deepseek-ai/dsh-base/cordis.patch.yml` (`id: permission`):
+# survive. The authoritative built-in set is `dsh-base/cordis.patch.yml`
+# (`id: permission`, backed by @deepseek-ai/dsh-permission-presets on the
+# 0.1.5 line — same id as 0.1.2, different backing package):
 #   read-only / workspace-write / danger-full-access
 # Omitting any of them silently drops that tier on the next profile load.
+# Shape per entry (0.1.5 PermissionPresetService.Config): sandbox/approval
+# required, name/description optional strings; `custom` is a reserved key.
 # `test/patch-presets.spec.ts` pins the exact key set so the two cannot drift.
 #
 # The `auto` tier is deliberately NOT restated. It was contributed by

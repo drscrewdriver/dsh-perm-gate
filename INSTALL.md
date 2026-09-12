@@ -30,7 +30,8 @@ exists so a version you pin stays meaningful per line.
 
 | Your DSH | Install |
 |----------|---------|
-| `0.1.2-alpha.1` or newer (incl. `0.1.5-rc.2`) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.5-rc.1` or newer | `dsh plugin --profile web add dsh-perm-gate@dsh-0.1.5` (the dedicated 0.1.5 line, `3.x`) |
+| `0.1.2-alpha.1` or newer | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`, `2.x`) |
 | up to `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH does not enforce `engines.dsh`, so the tags are the selection mechanism rather
@@ -162,6 +163,12 @@ The gate is scoped to the tiers listed in `gatePresets` (default
 pick 自动审查 in the permission picker for the session you want recorded. A
 session that has never selected a preset is out of scope too. New sessions start
 in the tier named by the `permission.defaultPreset` setting.
+
+**After a DSH upgrade, every client plugin is gone / the tier vanished.**
+The web client combo is served from browser cache after a DSH rebuild, so the
+plugin tree can fail to re-activate. Hard-refresh the browser (Ctrl+Shift+R) or
+clear the site's cache before reinstalling anything — this is a host-side cache
+issue, not a plugin defect.
 
 **Settings card shows "Settings namespace unavailable".**
 The plugin is not assembled into the active profile. Run

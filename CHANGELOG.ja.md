@@ -5,6 +5,34 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠します。
 
+## [3.0.0] - 2026-09-13
+
+### 変更
+
+- **DSH 0.1.5 専用ラインを新設しました: ブランチ `compat/0.1.5`、バージョン系列 `3.x`、npm dist-tag
+  `dsh-0.1.5`。** `engines.dsh` は `>=0.1.5-rc.1 <0.2.0-0` に、`engines.node` は `>=24` に狭まりました
+  （DSH 0.1.5 は Node 24 未満で何も告げずに動作しません）。メジャー昇格が境界線です: `^2.x` の
+  インストールが `3.x` を解決することはなく、その逆もありません。
+- **公開済み `@deepseek-ai/dsh@0.1.5-rc.2` バンドルに対して検証済み — どの統合シームにもコード変更は
+  不要でした:**
+  - 権限プリセット表は cordis id `permission` のままパッチされます。裏付けパッケージは
+    `@deepseek-ai/dsh-permission-presets`（`PermissionPresetService`）へ移動しましたが、設定形状は
+    完全互換です（`sandbox`/`approval` は必須、`name`/`description` は省略可能な文字列、`custom` は
+    予約語）。内蔵セット（read-only / workspace-write / danger-full-access）も不変のため、
+    `cordis.patch.yml` の全表再宣言はこのままで正しいです。
+  - `approval/request` ウォーターフォール、閉集合の結果（`allowed-once`/`rejected`/`cancelled`/
+    `unavailable`）、サンドボックス昇格 reason の形式は 0.1.2 と同一です。
+  - `effectivePolicy` は user-approval サービスのプライベートメソッドのままです（`typeof` プロブで読む）。
+  - `permission/preset` イベント payload（`{ preset }`）、`snapshotEvents()`/`ownEvents()` ログ
+    アクセサ、3 つのクライアントスロット（`conversation.input.dock`、`conversation.view`、
+    `settings.plugins.tab`）はすべて不変です。設定のプラグインタブは
+- オプションの手動 glyph パッチ（`patches/add-permissive-glyph.patch`）は引き続き適用可能です:
+  composer の `permissionGlyphs` map は 0.1.5-rc.2 でも構造的に不変ですが 15559 行へ移動したため、
+  適用時には hunk の行番号を付け直してください。
+    `dsh-client-ui-settings-plugins` に移りましたが契約は互換です。
+- `test/patch-presets.spec.ts` に予約語 `custom` のガードを追加、`scripts/verify-line.mjs` にこの
+  ブランチ用の `015` ラインを追加しました。
+
 ## [2.0.0] - 2026-09-11
 
 ### 修正

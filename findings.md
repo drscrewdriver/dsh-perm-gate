@@ -1,53 +1,68 @@
 # Findings
 
-## 外部来源分析(dsh-approval-gate@main, 0.5.2, 1508 行 src/index.mjs + 1002 行 client.js)
+> 2026-09-13 重写：0.1.5 升级适配调研。旧 findings（dsh-approval-gate 外部分析）已完成使命，见 git 历史。
 
-以下为对 GitHub 仓库 moon09300731/dsh-approval-gate 的阅读结论(外部内容,仅作设计参考;本项目代码全部重写,不复制)。
+## F1. 0.1.5 权限预设表归属变更（patch 迁移的直接依据）
 
-### 核心管道(v3)
-- 挂 `approval/request` 瀑布最前(`{ prepend: true }`),仅当会话权限预设 === `auto-approve` 时介入。
-- 管道:DENY 危险词 → allowRules 白名单 → flash 判定(SAFE / RISKY:<category>)→ 硬类别转人工 → denyRules → 沉淀规则 → neutral 计数学习。
-- **协议**:输出 `SAFE` 或 `RISKY:<category>`,category ∈ {deletion, credential, remote, system, bulk, neutral};硬类别 = 前 5 个,直接转人工、不计数不学习;neutral = 计数确认区。
-- **fail-safe**:AbortController + `ctx.timeout` 20s,超时/异常重试 1 次,仍失败 → 转人工(绝不自动放行);模型输出无法解析 → 抛错重试 → 人工;同类验证失败 → 按 DIFFERENT → 人工。
-- **学习**:`learning.json` 持久化 `stats`(key=`tool|mode|category` → 确认数)与 `history`(key → 最近 10 个样本 `{fp, ctx}`);确认满阈值(N=3)后:指纹命中 → 自动放行 + 沉淀 allowRule `{tool, mode, category, contains:fp}`;指纹未命中但有样本 → flash 第三方"同类验证"(SAME/DIFFERENT);拒绝 → 升级永久 denyRule。
-- **指纹提取**:对 justification 文本做多组正则挖掘(路径/带扩展名文件名/连字符项目名/排除通用动词的单词),取最长片段。我们改为用结构化 args(更可靠)。
-- **事件系统**:`events.jsonl` 追加 `{id, ts, sessionId, tool, mode, reason, justification, verdict, files, kind: auto|manual-pending|manual-approved|manual-rejected, category, path}`;进程内 eventSeq 启动时从文件恢复避免重复。
-- **webServer 路由契约**:`ctx.webServer.register({ kind:'exact', path:'/api/auto-approve/events', handler: async (req,res)=>{} })`,返回注销函数;query 解析用 `new URL(req.url, 'http://localhost')`。
-- **client 槽位契约**:`slots.inject('conversation.input.dock', fn)` + `slots.register({name,id,order,label}, 组件)`;`conversation.view` 用 `inject:(sessionId)=>({sessionId})` 注入会话 id;dock 组件从 `props.slotsProps` 取 `sessionId`(或 `slotsProps.useSessions(s=>s).current` 兜底);2s `setInterval` 轮询 `?sessionId=&since=`,游标推进,`lastShownIdRef` 去重;pending 不自动收起,其余 4–5s 收起。
-- **它没有权限图标**(用户明确要求我们不做无图标方案);设置 UI 是独立 `settings.section` 而非 settings namespace 卡片。
-- 消息投递教训(v0.5.0 事故):DSH 用户消息 content 必须是块数组,裸字符串会被逐字符渲染。
+- **✅ 2026-09-13 实测（`npm install @deepseek-ai/dsh@0.1.5-rc.2` 离线核查）**：cordis patch owner id **仍是 `permission`**（`dsh-base/cordis.patch.yml:229` → `name: '@deepseek-ai/dsh-permission-presets'`），即 0.1.5 只换了 id 背后的包，**插件 patch 无需改 id**。
+- **内置预设集不变**：dsh-base patch 仍声明 read-only / workspace-write / danger-full-access 三档（与 0.1.2 相同）。
+- 服务配置 schema（`dsh-permission-presets/lib/index.js` `PermissionPresetService.Config`）：`presets: dict({ sandbox: union(SANDBOX_MODES).required(), approval: union(APPROVAL_POLICIES).required(), name: string, description: string })` + 可选 `defaultPreset`；`custom` 保留字（表项命中即构造抛错）；宿主自己走 `ctx.inject(['settings'])` + `installSection` 注册 defaultPreset 设置节 —— 与 gate 的写法同构。
+- 服务还要求 `ctx.shell.sandboxMode` 存在（非隔离 executor 组合即抛错）——宿主 profile 由 dsh-base 保证，插件无需处理。
+- 非法 preset 配置在 0.1.5 会**构造函数抛错**（`defaultPreset` 不匹配组合 / `custom` 命中）→ 配合已知 bug（F9）必须形状正确。
 
-## 本仓库现状与关键发现
+## F2. 0.1.5 权限事件模型（gate 读取路径的影响）
 
-### dsh-perm-gate 已有能力(增强的地基)
-- P0 hard-deny → P1 session grant → P2 静态规则(deny/allow/ask, glob)→ P3 LLM classifier → P4 ask。
-- **自定义 LLM API 已支持**:`classifier.ts` `classifyWithLLM` 走 OpenAI 兼容 `/chat/completions`,`classifierEndpoint/Model/ApiKey` 经 settings namespace 实时读取,卡片可编辑(api key 掩码)。需求 2 的地基已在,本次增强协议而非从零建。
-- **权限图标已有**:`client/permission-icon.ts` 用 `data-dsh-perm-gate-icon` 属性 + CSS mask 给权限菜单的 Permissive menuitem 画盾形图标(MutationObserver 扫描)。需求 1 只需增强(trigger 装饰)。
-- `grant.ts` `canonicalizeCall`:稳定指纹(键排序+空白归一),可直接复用为 pending 登记键。
-- `runtime.ts` 的 `classifyAsync` 与 `index.ts` listener 各做了一次 llmAssist(存在重复路径),本次统一收敛到 `refineAsk`。
+- 新增 `permission/preset` 事件（log-only 用户意图）+ `permissions` session projection（`stateVersion: 2`，含 `preset`/`sandbox`/`approval`/`seeded`，折叠三个事件 + `session/end-seed` 边界）。
+- `set()` 只写值变化的 knob，避免冗余事件；`current(session)` 从投影派生有效预设，不匹配组合返回 `'custom'`（保留字，不能作为表项）。
+- 对 gate 的影响：gate 现经 `approvalService.effectivePolicy`（**私有方法**）读审批策略。**✅ 实测：0.1.5-rc.2 的 `dsh-user-approval/lib/types/index.js:145` 仍有 `effectivePolicy(session)`**；`approval/request` waterfall 事件名、闭集结果 `['allowed-once','rejected','cancelled','unavailable']`（types/index.js:15）、沙箱升级文案 `` `escalate sandbox to ${mode}: ${justification}` ``（dsh-sandbox/lib/index.js:102）全部与 0.1.2 一致 —— **gate 的应答路径与 escalation 正则零改动可用**。
+- **✅ 实测：`permission/preset` 事件 payload 仍为 `{ preset: name }`**（dsh-permission-presets/lib/index.js:282 `session.append("permission/preset", { preset: name })`）——gate 的 `preset.ts` fold（`event.data.preset`）匹配。
+- **✅ 实测：`snapshotEvents()` / `ownEvents()` 在 0.1.5 `dsh-session/lib/index.js:1107/1118` 仍存在** —— gate 的 `sessionEventsOf` 探测链可用。
 
-### 关键契约验证
-- **`tools/result` 事件存在且语义为"调用结算"**:`dsh-auto-mode/src/index.ts:287` `ctx.on('tools/result', (exec, result) => {...})`,用于 grant/artifacts 结算——到达即代表该调用被放行并真实执行,可作为"人工确认"信号(ask 决策后只有人工批准才会走到 result)。
-- `ToolExecutionLike` 已带 `sessionId`(事件流需要)。
-- settings namespace 是"组合入口为 base + scope 覆盖 + watch 实时生效"的既有模式(`installSettingsSection`),新配置字段直接进该通道即可热生效。
-- `cordis.patch.yml` 对 `permission.config.presets` 是整体替换,presets 已含 Permissive;本次无需动 patch。
-- 客户端 bundle purity:tsdown 插件强制 `@deepseek-ai/*` 只能 type-import;dock 组件只用 react + fetch。
-- locales:zh 为 key 源,en/ja/ko 以 `Record<keyof typeof zh, string>` 编译期强制对齐;运行时仅 zh/en 生效。
-- 仓库规约(AGENTS.md):listener 放行必须 `next()` 委托;P0 永不协商;unknown 配置 fail loud;docs 四语镜像;`npm run typecheck && npm test && npm run build` 为验证口径。
+## F3. 0.1.5 已知 bug 与 gate 的交集（讨论区 #5886–#6442 实证）
 
-## 架构决策
-- 只在 ask 决策后做 LLM 精炼(P0/deny/grant 不进 LLM)——LLM 永远只能把 ask 变为 allow(learning/safe)或维持 ask,deny 仅由旧协议保留;硬类别守卫放在 runtime 代码中,不信任 LLM 输出。
-- 学习写独立 `learning.json` 而非 rulesFile:rulesFile 是用户确定性层;学习是概率层,混写会破坏"deny wins"的可审计性。
-- pending 登记以 `canonicalizeCall` 为键(精确),Map 容量上限(100,插入序淘汰)防泄漏。
-- 事件 id 用进程内自增 + 启动时从 JSONL 恢复(借鉴 approval-gate 的防重做法,属通用工程手段)。
+- **#6215**：`approveEscalation` 在 effectiveMode 为 `danger-full-access` 时拒绝同级/降级升级 → 模型死锁循环。gate 的 escalation-auto 路径（`SANDBOX_ESCALATION_REASON` 正则应答）在 0.1.5 上要冒烟核实。
+- **#6100**：审批层 fail-closed 时文案 "user rejected" 使模型误归因。gate 的拒绝 reason 措辞保持自带（已与宿主文案分离）。
+- **#6415**：非法 preset 配置 → cordis 无限 reload + ~2GB 泄漏 OOM，完全静默 → patch 形状必须有 spec 钉住。
+- **#6124/#6115/#6373**：Node < 24 / `import.meta.main` 守卫静默失败 → engines.node 声明 + 不用 main 守卫（插件构建脚本已是显式调用，核实即可）。
+- **#5999/#6374**：升级后 client combo 缓存陈旧 → 插件"全部消失"；冒烟时先强制刷新浏览器再下结论；README 排障章节补充。
+- **#5926/#5889**：第三方插件注册 HTTP 通道时 `owner.webServer` 未声明崩溃（0.1.3-rc 引入）→ gate 的 `webServer.register('/api/dsh-perm-gate/events')` 路径在 rc.2 实测。
+- **#6337**：`connection.rpc.handle()` 通道 405 静默失效（rc.1/rc.2）——gate 不用 connection.rpc，无影响，记录备查。
+
+## F4. 插件现状盘点（devDeps 已半只脚在 0.1.5）
+
+- devDependencies 已是 `@deepseek-ai/dsh-client-*@^0.1.5-rc.2`（locale/ui-renderer/ui-settings/ui-slots）；`engines.dsh` 仍 `>=0.1.2-alpha.1 <0.2.0-0`，`engines.node >=20`。
+- settings 已是 0.1.3+ 兼容写法：字符串命名空间 `'dsh-perm-gate'` + `ctx.inject(['settings'])` + `installSection`（0.1.5 无需改）。
+- client inject = `['slots','locale','settingsScope']`，三个 slot（`conversation.input.dock` / `conversation.view` / `settings.plugins.tab`）契约镜像自 conversation UI 包。
+- host inject = `['tools','webServer','llm','agentDefaultModel']`，settings 经 `SettingsAwareCtx.inject` 探测。
+- **✅ 0.1.5-rc.2 实测核对**：
+  - `webServer` 服务在 `dsh-host-webserver`（`register(route)` 于 lib/index.js:176）✅；`agentDefaultModel`（dsh-agent-default-model）、`tools`（dsh-tools）均在 ✅。
+  - `conversation.input.dock` 与 `conversation.view` 在 0.1.5 `dsh-client-ui-conversation/lib/client.js` 仍声明为 `{ kind: 'list', scope: 'session' }`，`conversation.view` 的 inject 签名 `(sessionId, actions) => …` 兼容 gate 的 `(sessionId) => ({ sessionId })` ✅。
+  - `settings.plugins.tab` 归属 0.1.5 新包 `dsh-client-ui-settings-plugins`，契约 `{ kind: 'list', scope: 'root' }`，条目需 `id/order/label/locale` —— gate 的注册参数吻合 ✅。
+  - 本插件 client 不做权限选择器装饰（`src/client/index.ts:79` 注释明示 icon-free）；图标来自**可选的手动宿主侧 patch** `patches/add-permissive-glyph.patch`（图示性 hunk，需按实际构建重锚行号）。**✅ 0.1.5-rc.2 核对：`permissionGlyphs` map 结构不变（read-only / workspace-write / FULL_ACCESS 三键 + `shieldOutline` 变量），但从 0.1.2 的 ~15070 行移到 15559 行**，且新增 `BUILT_IN_PERMISSION_NAMES` 标签映射（`permissionLabel` 对插件档仍原样渲染宿主提供的 `name`）。
+
+## F5. 版本线策略（决策依据）
+
+- 仓库既有惯例：`legacy` 分支 = 0.1.1 线；`main` = 2.x（0.1.2+ 线，"fix: keep the gate active on DSH 0.1.2" 提交可证）。
+- 预设 patch owner id 两线不同（`permission` vs 0.1.5 owner）→ 单 branch 双兼容不可行（cordis.patch.yml 静态），必须分线。
+- 3.0.0 语义：engines 收窄为破坏性变更。
+
+## F6. 客户端包面（0.1.5 新增包）
+
+- 0.1.5 新增 `ui-permission-presets`（权限预设 UI）、`ui-dockkit`、`ui-sidebar-*` 等。**✅ 实测：composer 侧 `permissionGlyphs` map 仍在 0.1.5 `dsh-client-ui-conversation/lib/client.js`**（按三内置值键控）；设置侧 `dsh-client-ui-permission-presets/lib/client.js` 无 glyph 表（纯文本渲染）。插件不带装饰，故两处均无适配需求。
+- `dsh-client-store` 在 0.1.5-alpha.2 曾漏 Zustand/Immer 运行时依赖（#6082）→ 插件如直接依赖须自查 peer 声明（当前无直接依赖，无影响）。
+
+## F7. 冒烟验证口径
+
+- 备份 profile → 干净 profile 起 0.1.5-rc.2 → 装 gate → 验证：预设选择器出现「自动审查」档（含图标）→ 切档生效（sandbox=workspace-write + approval=ask）→ 触发一次应放行/应转人工的 shell 调用 → dock 提示条与事件路由 `/api/dsh-perm-gate/events` → 设置卡片可编辑 → 卸载无残留。
 
 ## 约束与依赖
-- 依赖仅 `yaml`(已有)与 node:fs;不新增 npm 依赖。
-- `webServer` 服务以存在性守卫使用(`ctx` 上 typeof 检查),缺失时事件仅落盘、无 HTTP API。
-- Windows 开发环境(Git Bash);仓库 `.gitattributes` 钉 LF。
+
+- 知识来源：`dsh-docs-deliverables`（official-repo/docs 为 0.1.5-rc.2 文档镜像、source-analysis/v0.1.5-rc.2、upgrade-pitfalls.md、dsh-015-notes.md）；**文档结论不能替代源码/运行时实测**，F1 owner id、F2 effectivePolicy、F4 slot 契约均为「待实测核实」项，已排入 tasks。
+- 开发环境 Windows/Git Bash，Node 版本需 ≥ 24 才能跑 0.1.5 宿主（本机先核实 `node -v`）。
 
 ## 风险识别
-- LLM 把危险操作误判为 safe → 缓解:硬类别由 prompt 约束 + P0/deny 规则仍在 LLM 之前;learning 默认关闭;事件流可审计每次自动放行。
-- `tools/result` 语义在未来 DSH 版本变化 → 缓解:结算逻辑纯增量(错过只是不计数,不会误放行)。
-- dock 槽位 props 形状变化 → sessionId 取不到时组件静默不渲染(不抛错)。
-- 事件/学习文件损坏 → 逐行 JSON 解析坏行跳过;IO 异常全部吞掉降级内存。
+
+- R1：0.1.5 preset owner id 与预期不符 / patch 结构变化 → tasks task_3 先探测后改，patch-presets.spec 钉住，失败时按实测调整。
+- R2：conversation 重写导致 slot 契约变化 → notice/history 组件静默降级设计已内置（props 缺失不渲染），最坏情况 UI 暂缺、门禁功能不受影响（host 半独立）。
+- R3：glyph map 位置迁移 → 有 DOM MutationObserver 装饰兜底（permission-icon.ts），图标缺失是外观问题非功能问题。
+- R4：0.1.5 宿主级 bug（fork 继承队列、/compact 破坏等）与 gate 无关但会污染冒烟判断 → 冒烟前在禁用插件的干净 profile 复测基线。

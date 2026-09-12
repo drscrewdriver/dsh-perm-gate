@@ -13,12 +13,15 @@ series, its own `engines.dsh`, and its own npm dist-tag.
 |--------|----------------|---------------|----------|-----|
 | `legacy` | `1.x` | `>=0.1.0-rc.7 <0.1.2-alpha.1` | `legacy` | up to `0.1.1-rc.2` |
 | `main` | `2.x` | `>=0.1.2-alpha.1 <0.2.0-0` | `latest` | from `0.1.2-alpha.1` on (current `0.1.5-rc.2`) |
+| `compat/0.1.5` | `3.x` | `>=0.1.5-rc.1 <0.2.0-0` | `dsh-0.1.5` | from `0.1.5-rc.1` on |
 
 `beta` stays the pre-release channel for `main`.
 
 The series number tracks the **DSH line**, not the plugin's own feature history: `1.x`
-is the `<= 0.1.1` line and `2.x` is the `0.1.2+` line, so a plugin version says at a
-glance which DSH it was built for. The `0.2.x` series an earlier layout used has been
+is the `<= 0.1.1` line, `2.x` is the `0.1.2+` line, and `3.x` is the dedicated
+`0.1.5+` line (created because the permission-preset patch, while keeping the same
+cordis id `permission`, is backed by a different package there), so a plugin version
+says at a glance which DSH it was built for. The `0.2.x` series an earlier layout used has been
 retired — its releases stay on the registry under `beta`/`next` but are superseded by
 `2.x`, and a `^0.2.1-beta.4` range does **not** resolve to `2.0.0` (caret ranges never
 cross a major), so every existing installer must be bumped deliberately.
@@ -124,6 +127,13 @@ npm run verify:line
 npm run build
 npm run release:legacy
 npm dist-tag add dsh-perm-gate@<version> dsh-0.1.1
+
+# compat/0.1.5 -> dsh-0.1.5
+git switch compat/0.1.5
+npm version <major|minor|patch>     # 3.x series
+npm run verify:line
+npm run build
+npm run release:3x
 ```
 
 Fix a defect on both lines by cherry-picking, and re-run `verify:line` on each
@@ -144,6 +154,7 @@ branch — never assume a fix built for one line is still correct on the other.
 | `latest` | newest stable, current DSH line (`main`, `2.x`) | `dsh plugin add dsh-perm-gate` |
 | `beta` | pre-release of the latest line | `dsh plugin add dsh-perm-gate@beta` |
 | `legacy` | the DSH `<= 0.1.1` line (`legacy`, `1.x`) | `dsh plugin add dsh-perm-gate@legacy` |
+| `dsh-0.1.5` | the DSH `0.1.5+` line (`compat/0.1.5`, `3.x`) | `dsh plugin add dsh-perm-gate@dsh-0.1.5` |
 | `next` | extra pointer at the current release | `dsh plugin add dsh-perm-gate@next` |
 | `dsh-0.1.2` | the current `main` release named by the **DSH** version it targets | `dsh plugin add dsh-perm-gate@dsh-0.1.2` |
 

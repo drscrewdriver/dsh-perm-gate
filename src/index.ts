@@ -269,9 +269,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // The live approval service, captured by the optional inject below. Its
   // `effectivePolicy` tells the gate whether an ask can reach a human at all.
   //
-  // DUAL-VERSION NOTE (DSH 0.1.1-rc.2 and 0.1.2-rc.1): `effectivePolicy` is a
-  // **private** method of the user-approval service in BOTH versions
-  // (packages/interaction/user-approval/src/index.ts, `private effectivePolicy`).
+  // DUAL-VERSION NOTE (DSH 0.1.1-rc.2, 0.1.2-rc.1 and 0.1.5-rc.2): `effectivePolicy` is a
+  // **private** method of the user-approval service in ALL THREE versions
+  // (0.1.5: packages/interaction/user-approval/lib/types/index.js:145, verified
+  // present in the published @deepseek-ai/dsh@0.1.5-rc.2 bundle).
   // It is therefore a duck-typed, non-contract dependency: read it only through
   // a `typeof` probe, never assume it exists, and never let a failure escape
   // (a throw would be normalized by the approval seam into a rejection on the

@@ -31,7 +31,8 @@
 
 | DSH 버전 | 설치 방법 |
 |----------|-----------|
-| `0.1.2-alpha.1` 이상 (`0.1.5-rc.2` 포함) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.5-rc.1` 이상 | `dsh plugin --profile web add dsh-perm-gate@dsh-0.1.5` (0.1.5 전용 라인, `3.x`) |
+| `0.1.2-alpha.1` 이상 | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`, `2.x`) |
 | `0.1.1-rc.2` 이하 | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH는 `engines.dsh`를 강제하지 않으므로, tag는 선택 메커니즘이지 호환성 게이트가
@@ -158,6 +159,11 @@ DSH 번들 패치는 `permission.config.presets`를 key 단위로 병합하지 �
 에서만 동작하므로 다른 티어의 세션에서는 이벤트를 전혀 기록하지 않습니다 —— 기록하려면
 해당 세션에서 권한 선택기로 「自动审查」를 고르세요. preset을 한 번도 선택하지 않은
 세션도 범위 밖입니다. 새 세션의 초기 티어는 `permission.defaultPreset` 설정이 정합니다.
+
+**DSH 업그레이드 후 클라이언트 플러그인이 모두 사라짐 / 티어가 보이지 않음.**
+DSH 재빌드 후 web client 콤보가 브라우저 캐시에서 제공되어 플러그인 트리가 다시 활성화되지
+않을 수 있습니다. 무엇을 재설치하기 전에 브라우저를 강제 새로 고침(Ctrl+Shift+R)하거나 사이트
+캐시를 지우세요 — 이는 호스트 측 캐시 문제이지 플러그인 결함이 아닙니다.
 
 **설정 카드에 "설정 네임스페이스를 사용할 수 없습니다"가 표시됩니다.**
 플러그인이 현재 profile에 조립되지 않았습니다.

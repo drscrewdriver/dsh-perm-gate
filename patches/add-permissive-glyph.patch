@@ -1,0 +1,32 @@
+--- a/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
++++ b/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js
+@@ -15070,6 +15070,24 @@
+ 		const permissionGlyphs = new Map([
+ 			["read-only", ...],
++			["permissive", (0, react_jsx_runtime.jsxs)("svg", {
++				width: "16",
++				height: "16",
++				viewBox: "0 0 16 16",
++				fill: "none",
++				"aria-hidden": true,
++				children: [(0, react_jsx_runtime.jsx)("path", {
++					d: shieldOutline,
++					stroke: "currentColor",
++					strokeWidth: "1.31831",
++					strokeLinejoin: "round"
++				}), (0, react_jsx_runtime.jsx)("path", {
++					d: "M8.20554 4.5C8.20554 4.5 6.5 5.5 6.5 7.5C6.5 9.5 8.20554 11.5 8.20554 11.5C8.20554 11.5 9.90958 9.5 9.90958 7.5C9.90958 5.5 8.20554 4.5 8.20554 4.5Z",
++					fill: "none",
++					stroke: "currentColor",
++					strokeWidth: "1.2",
++					strokeLinejoin: "round"
++				}), (0, react_jsx_runtime.jsx)("circle", {
++					cx: "8.20554",
++					cy: "7.8",
++					r: "1.2",
++					fill: "currentColor"
++				})]
++			})],
+ 			["workspace-write", ...],
+ 			[FULL_ACCESS, ...]
+ 		]);

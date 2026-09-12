@@ -27,11 +27,12 @@
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
 > | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x` is a range) |
+> | 0.1.5-rc.1+ (dedicated line) | `compat/0.1.5` | `3.x` | `@dsh-0.1.5` |
 >
-> The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+),
-> and the majors fence each other: a `^1.x` install never resolves a `2.x` release and
-> vice versa. `engines.dsh` states the same split but DSH never reads it — the ranges
-> and dist-tags are what hold an old DSH on `1.x`.
+> The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+,
+> `3.x` = DSH 0.1.5+), and the majors fence each other: a `^1.x` install never resolves
+> a `2.x` release and vice versa. `engines.dsh` states the same split but DSH never
+> reads it — the ranges and dist-tags are what hold an old DSH on `1.x`.
 >
 > `@deepseek-ai/dsh-client-runtime` was **removed** at `0.1.2-alpha.1` — it did not
 > merely move. The `legacy` line still reaches `ctx.slots` through it; `main` gets
@@ -42,7 +43,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.0.0** — see the [Changelog](./CHANGELOG.md).
+Version **3.0.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 

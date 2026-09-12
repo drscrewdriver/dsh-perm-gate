@@ -5,6 +5,34 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [3.0.0] - 2026-09-13
+
+### 변경
+
+- **DSH 0.1.5 전용 라인을 새로 만들었습니다: 브랜치 `compat/0.1.5`, 버전 계열 `3.x`, npm dist-tag
+  `dsh-0.1.5`.** `engines.dsh`는 `>=0.1.5-rc.1 <0.2.0-0`으로, `engines.node`는 `>=24`로 좁아졌습니다
+  (DSH 0.1.5는 Node 24 미만에서 아무 알림 없이 동작하지 않습니다). 메이저 bump가 경계선입니다:
+  `^2.x` 설치가 `3.x`를 해석하는 일은 없고 그 반대도 마찬가지입니다.
+- **공개된 `@deepseek-ai/dsh@0.1.5-rc.2` 번들 대비 검증 완료 — 어떤 통합 시브에도 코드 변경이
+  필요하지 않았습니다:**
+  - 권한 프리셋 표는 여전히 cordis id `permission` 아래에서 패치됩니다. 뒷받침 패키지는
+    `@deepseek-ai/dsh-permission-presets`(`PermissionPresetService`)로 옮겼지만 설정 형상은 완전히
+    호환됩니다(`sandbox`/`approval` 필수, `name`/`description` 선택 문자열, `custom`은 예약어).
+    내장 세트(read-only / workspace-write / danger-full-access)도 불변이므로 `cordis.patch.yml`의
+    전체 표 재선언은 그대로 올바릅니다.
+  - `approval/request` 워터폴, 폐집합 결과(`allowed-once`/`rejected`/`cancelled`/`unavailable`),
+    샌드박스 승격 reason 형식은 0.1.2와 동일합니다.
+  - `effectivePolicy`는 user-approval 서비스의 private 메서드로 남아 있습니다(`typeof` 프로브로 읽음).
+  - `permission/preset` 이벤트 payload(`{ preset }`), `snapshotEvents()`/`ownEvents()` 로그
+    접근자, 3개의 클라이언트 슬롯(`conversation.input.dock`, `conversation.view`,
+    `settings.plugins.tab`)은 모두 불변입니다. 설정의 플러그인 탭은 `dsh-client-ui-settings-plugins`로
+- 선택적 수동 glyph 패치(`patches/add-permissive-glyph.patch`)는 계속 적용 가능합니다:
+  composer의 `permissionGlyphs` map은 0.1.5-rc.2에서도 구조적으로 불변이지만 15559줄로 이동했으므로,
+  적용 시 hunk 줄 번호를 다시 맞춰야 합니다.
+    옮겼지만 계약은 호환됩니다.
+- `test/patch-presets.spec.ts`에 예약어 `custom` 가드를 추가하고, `scripts/verify-line.mjs`에 이
+  브랜치용 `015` 라인을 추가했습니다.
+
 ## [2.0.0] - 2026-09-11
 
 ### 수정
