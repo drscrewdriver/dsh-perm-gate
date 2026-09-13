@@ -69,4 +69,24 @@ describe('apply() session sweep wiring', () => {
     expect(readdirSync(snapshotsDir).sort()).toEqual(['1.json'])
     expect(() => dispose()).not.toThrow()
   })
+
+  it('starts no timer and sweeps nothing when sessionSweep is false', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'perm-gate-apply-off-'))
+    dirs.push(dir)
+    const eventsFile = join(dir, 'events.jsonl')
+    writeFileSync(eventsFile, JSON.stringify({ id: 1, sessionId: 'session-old', tool: 'shell', kind: 'auto', reason: 'r' }) + '\n')
+    const store = join(dir, 'workspace.json')
+    writeFileSync(store, JSON.stringify({
+      global: { archivedSessionIds: ['session-old'] },
+      tables: { workspaces: {} },
+    }))
+
+    const { ctx, dispose } = mockCtx()
+    apply(ctx, { dshHome: dir, eventsFile, workspaceStoreFile: store, sessionSweep: false } as never)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    // The stale line is still there: no first sweep ran, so no timer exists.
+    expect(readFileSync(eventsFile, 'utf8')).toContain('session-old')
+    expect(() => dispose()).not.toThrow()
+  })
 })
