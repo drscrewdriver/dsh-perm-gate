@@ -88,7 +88,18 @@ dsh plugin --profile web add dsh-perm-gate
     dshHome: $DSH_HOME
     defaultAction: ask
     gatePresets: [permissive]       # 门禁生效的档位（默认值）
+    sessionSweep: true              # 每小时清理已归档/已删除会话的门禁数据
 ```
+
+### 会话清扫（session sweep）
+
+插件启动时及每小时读取 DSH 的工作区存储（`$DSH_HOME/storages/workspace.json`，只读），
+对门禁持有授权链数据的每个会话做归类。已被 DSH 归档（`global.archivedSessionIds`）
+或彻底不存在的会话，其决策事件会从 `$DSH_HOME/perm-gate/events.jsonl` 中移除，
+其决策前文件快照会从 `$DSH_HOME/perm-gate/snapshots/` 中删除——宿主已视为消失的数据，
+审查页也不再保留其历史。活跃会话不受影响；无法归属的行（空 sessionId）永不删除；
+任何失败都 fail-open：本轮跳过，一小时后重试。设 `sessionSweep: false` 关闭；
+`workspaceStoreFile` 可覆盖存储路径。恢复归档会话不会找回已被清扫的历史。
 
 规则示例：见 [examples/permissions.example.yaml](./examples/permissions.example.yaml)。
 

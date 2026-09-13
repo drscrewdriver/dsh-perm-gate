@@ -126,7 +126,22 @@ Add the plugin to `cordis.yml`:
     dshHome: $DSH_HOME              # root pinned for protected-target checks
     defaultAction: ask              # allow | ask | deny
     gatePresets: [permissive]       # tiers where the gate is active at all (default)
+    sessionSweep: true              # hourly cleanup of archived/dead sessions' gate data
 ```
+
+### Session sweep
+
+On startup and every hour the gate reads DSH's workspace store
+(`$DSH_HOME/storages/workspace.json`, read-only) and classifies every session it
+holds authorization-chain data for. Sessions DSH has archived (`global.archivedSessionIds`)
+or no longer tracks at all have their decision events dropped from
+`$DSH_HOME/perm-gate/events.jsonl` and their pre-change snapshot files deleted
+from `$DSH_HOME/perm-gate/snapshots/` — history the review page can no longer
+reach, for data the harness itself considers gone. Live sessions are untouched,
+unattributable rows (empty session id) are never deleted, and any failure is
+fail-open: the round is skipped and retried an hour later. Set `sessionSweep: false`
+to disable; `workspaceStoreFile` overrides the store path. Restoring an archived
+session does not restore its swept history.
 
 ### Rules file
 

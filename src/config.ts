@@ -119,6 +119,14 @@ export interface PermGateConfig {
    * never widen authority for a destructive or credential-bearing call.
    */
   readonly autoAllowTools?: string[]
+  /**
+   * Session-lifecycle sweep: on startup and hourly, drop the authorization
+   * chain's decision events and pre-change snapshots of sessions DSH has
+   * archived or no longer tracks. Fail-open, best-effort. Default true.
+   */
+  readonly sessionSweep?: boolean
+  /** Path to DSH's workspace store; defaults to `<dshHome>/storages/workspace.json`. Read-only to the gate. */
+  readonly workspaceStoreFile?: string
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -209,6 +217,8 @@ export const Config: z<PermGateConfig> = z.object({
   allowlist: z.array(z.string()),
   denyKeywords: z.array(z.string()),
   autoAllowTools: z.array(z.string()),
+  sessionSweep: z.boolean().default(true),
+  workspaceStoreFile: z.string(),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
