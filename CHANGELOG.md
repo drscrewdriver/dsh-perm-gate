@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Session sweep — the authorization chain now follows the session lifecycle.** On plugin startup
+  and every hour, the gate reads DSH's workspace store (`$DSH_HOME/storages/workspace.json`,
+  read-only) and classifies every session it holds gate data for. Sessions DSH has archived
+  (`global.archivedSessionIds`) or no longer tracks at all have their decision events dropped from
+  `$DSH_HOME/perm-gate/events.jsonl` (atomic tmp+rename rewrite, only when something is removed)
+  and their pre-change snapshot files deleted from `$DSH_HOME/perm-gate/snapshots/`. Live sessions
+  are untouched; unattributable rows (empty session id, unparsable line/file) are never deleted;
+  every I/O failure is fail-open (the round is skipped and retried an hour later); the hourly
+  timer is `unref`'d and disposed with the plugin. New config: `sessionSweep` (default `true`),
+  `workspaceStoreFile` (default `<dshHome>/storages/workspace.json`). Note that restoring an
+  archived session does not restore its swept history. Covered by `test/session-sweep.spec.ts`
+  (13 unit cases) and `test/session-sweep-apply.spec.ts` (end-to-end wiring).
+
 ## [2.0.0] - 2026-09-11
 
 ### Fixed
