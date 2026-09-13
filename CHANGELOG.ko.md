@@ -5,6 +5,18 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [Unreleased]
+
+### 추가
+
+- **세션 스윕 — 인가 체인이 세션 수명 주기를 따르게 됩니다.** 플러그인 시작 시와 매시간 게이트는 DSH의
+  워크스페이스 저장소(`$DSH_HOME/storages/workspace.json`, 읽기 전용)를 읽어 게이트가 데이터를 보유한 모든
+  세션을 분류합니다. DSH가 아카이브했거나(`global.archivedSessionIds`) 더 이상 추적하지 않는 세션의 판정
+  이벤트는 `$DSH_HOME/perm-gate/events.jsonl`에서 제거되고 변경 전 스냅샷은 `$DSH_HOME/perm-gate/snapshots/`에서
+  삭제됩니다. 활성 세션은 건드리지 않으며, 귀속할 수 없는 행(빈 sessionId, 파싱 불가한 행/파일)은 절대
+  삭제하지 않습니다. 모든 I/O 오류는 fail-open(해당 라운드는 건너뛰고 1시간 후 재시도)이며 타이머는
+  `unref` 처리되어 플러그인과 함께 해제됩니다. 새 설정: `sessionSweep`(기본값 `true`), `workspaceStoreFile`.
+  아카이브된 세션을 복원해도 스윕된 기록은 돌아오지 않습니다.
 ## [3.0.0] - 2026-09-13
 
 ### 변경

@@ -5,6 +5,19 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠します。
 
+## [Unreleased]
+
+### 追加
+
+- **セッションスイープ — 認可チェーンがセッションライフサイクルに追従するようになりました。** プラグイン起動時および
+  1 時間ごとに、ゲートは DSH のワークスペースストア（`$DSH_HOME/storages/workspace.json`、読み取り専用）を読み、
+  ゲートがデータを保持しているすべてのセッションを分類します。DSH がアーカイブ済み（`global.archivedSessionIds`）、
+  またはまったく追跡していないセッションの判定イベントは `$DSH_HOME/perm-gate/events.jsonl` から削除され、
+  変更前スナップショットは `$DSH_HOME/perm-gate/snapshots/` から削除されます。ライブセッションには触れず、
+  帰属できない行（空の sessionId、解析不能な行/ファイル）は決して削除しません。I/O エラーはすべて
+  fail-open（そのラウンドはスキップされ、1 時間後に再試行）で、タイマーは `unref` 済みでプラグインとともに破棄されます。
+  新しい設定: `sessionSweep`（デフォルト `true`）、`workspaceStoreFile`。アーカイブ済みセッションを復元しても、
+  スイープされた履歴は戻りません。
 ## [3.0.0] - 2026-09-13
 
 ### 変更

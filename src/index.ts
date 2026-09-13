@@ -6,12 +6,14 @@
  * and a stray default would discard the metadata).
  */
 import type { Context } from '@deepseek-ai/cordis'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Config, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
+import { classifySessions, sweepSessionData } from './session-sweep.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -376,6 +378,40 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       ? config.snapshotsDir
       : join(dataDir, 'snapshots'),
   } as never)
+
+  // Session-lifecycle sweep: on startup and hourly, classify every session the
+  // gate holds data for against DSH's workspace store, and drop the
+  // authorization-chain data (decision events + pre-change snapshots) of
+  // sessions that were archived or no longer exist. The store is read-only
+  // here and every failure is fail-open (a skipped round retries in an hour);
+  // the timers are unref'd so cleanup never holds the process open.
+  if (config.sessionSweep !== false) {
+    const storeFile = typeof config.workspaceStoreFile === 'string' && config.workspaceStoreFile !== ''
+      ? config.workspaceStoreFile
+      : join(resolveDshHome(typeof config.dshHome === 'string' ? config.dshHome : undefined), 'storages', 'workspace.json')
+    const sweepEventsFile = typeof config.eventsFile === 'string' && config.eventsFile !== ''
+      ? config.eventsFile
+      : join(dataDir, 'events.jsonl')
+    const sweepSnapshotsDir = typeof config.snapshotsDir === 'string' && config.snapshotsDir !== ''
+      ? config.snapshotsDir
+      : join(dataDir, 'snapshots')
+    const sweepOnce = (): void => {
+      try {
+        const cls = classifySessions(readFileSync(storeFile, 'utf8'))
+        if (cls === null) return // torn read / format change — retry next round
+        sweepSessionData({ classification: cls, eventsFile: sweepEventsFile, snapshotsDir: sweepSnapshotsDir })
+      } catch (e) {
+        console.warn('[dsh-perm-gate] session sweep skipped:', e instanceof Error ? e.message : e)
+      }
+    }
+    const first = setTimeout(sweepOnce, 0)
+    const hourly = setInterval(sweepOnce, 60 * 60 * 1000)
+    hourly.unref?.()
+    ctx.effect(() => () => {
+      clearTimeout(first)
+      clearInterval(hourly)
+    }, 'dsh-perm-gate: session sweep')
+  }
 
   installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
     setSource: (source) => {
