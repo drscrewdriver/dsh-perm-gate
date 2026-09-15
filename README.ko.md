@@ -144,6 +144,54 @@ permissions:
 
 전체 예시: [examples/permissions.example.yaml](./examples/permissions.example.yaml)
 
+### 네트워크 정책(선택적 활성화)
+
+로컬 HTTP/CONNECT 프록시입니다. **동일한 규칙 파일**로 **shell 서브프로세스**의 아웃바운드
+트래픽을 심사하고, 어떤 규칙에도 해당하지 않는 대상에는 승인 경로를 제공합니다. **기본값은
+비활성** —— 활성화하면 루프백 포트를 바인딩하고 자식 프로세스의 프록시 환경 변수를 다시 쓰기
+때문에 암묵적으로 켜지지 않습니다.
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # 마스터 스위치(기본 false)
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny —— 미등록 대상 처리
+    networkUnattributed: allow     # allow | deny —— shell 귀속 없는 트래픽
+    networkInjectEnv: true         # 자식 프로세스에 HTTP(S)_PROXY / ALL_PROXY 주입
+    networkAskTimeoutMs: 120000    # 승인 대기 상한, 초과 시 거부
+    networkGrantTtlMs: 1800000     # 승인 1회가 유효한 세션 기간
+```
+
+**단계적 동작**: 허용 규칙이 없으면 어떤 대상도 나갈 수 없습니다. 미등록 대상은 해당 연결을
+연 shell 명령의 세션에 대해 대화형 승인으로 에스컬레이션되고, 승인하면 그 대상이 해당
+세션에서 허용됩니다. **`deny` 규칙은 승인으로 올라가지 않습니다** —— 승인은 "어떤 규칙도
+금지하지 않은 대상"의 도달 범위를 넓힐 수 있지만, 금지하는 규칙을 뒤집을 수는 없습니다.
+
+**경계 —— 의존하기 전에 반드시 읽으십시오**: 이 프록시는 **협조형** 정책 계층이며 강제
+경계가 아닙니다. 프록시 환경 변수를 **읽는** 클라이언트의 트래픽만 볼 수 있습니다.
+
+| 클라이언트 | 차단 가능? |
+|------------|------------|
+| `curl`, `wget`, `git`, Go `net/http`, Python `requests` | ✅ |
+| **Node.js `http` / `https` / `fetch`** | ❌ **직접 연결. 프록시가 보지 못함** |
+| Java(`-D` 프록시 미지정), .NET `HttpClient` | ❌ |
+| 원시 소켓, 직접 구현한 TCP | ❌ |
+| DNS, QUIC/HTTP3, 비 HTTP 프로토콜 | ❌ |
+| 리터럴 IP 연결 | ❌ |
+
+따라서 `node -e "require('http').get('http://host/')"` 같은 명령은 **차단되지 않습니다**.
+이것을 "실수를 막는 가드레일이자 의도를 선언하는 지점"으로 보십시오. 밀폐된 샌드박스가
+아닙니다.
+
+DSH **자신**의 트래픽 —— 내장 네트워크 도구와 LLM 전송 —— 은 의도적으로 대상에서 제외됩니다.
+이 연결들은 shell 귀속이 없고, `networkUnattributed: allow`(기본값)가 그대로 통과시킵니다.
+심사하면 호스트가 **스스로를 차단**하게 되며, 이는 놓치는 것보다 훨씬 나쁜 장애입니다.
+호스트의 클라이언트가 프록시 환경 변수를 읽지 않는다고 확신할 때만 `deny`로 바꾸십시오.
+
+실시간 상태 조회: `GET /api/dsh-perm-gate/network`(모드 / 바인드 / 포트 / 프록시 활성 /
+환경 주입 상태 / 차단 카운터 / 최근 차단).
+
 ## 自动审查 티어(머신 값 `permissive`)
 
 自动审查는 권한 선택기에서 읽기 전용 / 워크스페이스 내 수정 / 완전 권한 / 허용 목록과

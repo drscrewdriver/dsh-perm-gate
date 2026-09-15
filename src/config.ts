@@ -162,11 +162,21 @@ export interface PermGateConfig {
    *              approve to let THIS target through for this session.
    *
    * A `deny` rule always wins: approval can widen reach for a target no rule
-   * allows, but it can never override a rule that says no. With no in-flight
-   * shell to attribute the connection to, `'ask'` degrades to a block — there
-   * is nobody to ask.
+   * allows, but it can never override a rule that says no.
    */
   readonly networkUnlisted?: import('./network.js').UnlistedAction
+  /**
+   * How traffic with **no shell attribution** is handled. Default `'allow'`.
+   *
+   * A connection that cannot be tied to an in-flight shell execution did not
+   * come from a subprocess this gate manages — it is DSH's own client (a
+   * built-in network tool, the LLM transport). The proxy is a *subprocess*
+   * policy surface, so reviewing the host's own traffic risks the host
+   * blocking itself, which is far worse than a missed block. `'deny'` reviews
+   * it anyway, and would break DSH if a built-in client ever honors the proxy
+   * environment (e.g. Node 24+ with `NODE_USE_ENV_PROXY=1`).
+   */
+  readonly networkUnattributed?: import('./network.js').UnattributedAction
   /** Loopback handling: 'allow' short-circuits before rules; 'policy' evaluates normally. Default 'allow'. */
   readonly networkLoopback?: 'allow' | 'policy'
   /** Proxy bind address. Default '127.0.0.1'. */
@@ -303,6 +313,7 @@ export const Config: z<PermGateConfig> = z.object({
   networkEnabled: z.boolean().default(false),
   networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
   networkUnlisted: z.union(['ask', 'deny'] as const).default('ask'),
+  networkUnattributed: z.union(['allow', 'deny'] as const).default('allow'),
   networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
   networkBind: z.string().default('127.0.0.1'),
   networkPort: z.number().min(0).max(65535).default(0),

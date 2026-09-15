@@ -147,6 +147,56 @@ permissions:
 
 完全な例: [examples/permissions.example.yaml](./examples/permissions.example.yaml)
 
+### ネットワークポリシー（任意で有効化）
+
+ローカル HTTP/CONNECT プロキシです。**同じルールファイル**で **shell サブプロセス**の
+外向き通信を審査し、どのルールにも該当しない宛先には承認経路を提供します。**既定は無効** ——
+有効にするとループバックポートを確保し、子プロセスのプロキシ環境変数を書き換えるため、
+暗黙に有効化されることはありません。
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # マスタースイッチ（既定 false）
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny —— 未登録の宛先の扱い
+    networkUnattributed: allow     # allow | deny —— shell 帰属のない通信
+    networkInjectEnv: true         # 子プロセスに HTTP(S)_PROXY / ALL_PROXY を注入
+    networkAskTimeoutMs: 120000    # 承認待ちの上限。超過時は拒否
+    networkGrantTtlMs: 1800000     # 1 回の承認が有効なセッション期間
+```
+
+**段階的な動作**：許可ルールがなければ、どの宛先にも到達できません。未登録の宛先は、
+その接続を開いた shell コマンドのセッションに対して対話的承認へエスカレートし、承認すると
+その宛先が当該セッションで許可されます。**`deny` ルールが承認に回ることはありません** ——
+承認は「どのルールも禁止していない宛先」の到達性を広げられますが、禁止しているルールを
+覆すことはできません。
+
+**境界 —— 依存する前に必ず読んでください**：このプロキシは**協調型**のポリシー層であり、
+強制境界ではありません。プロキシ環境変数を**読む**クライアントの通信しか見えません。
+
+| クライアント | 遮断できるか |
+|--------------|--------------|
+| `curl`、`wget`、`git`、Go `net/http`、Python `requests` | ✅ |
+| **Node.js `http` / `https` / `fetch`** | ❌ **直接接続。プロキシから見えない** |
+| Java（`-D` プロキシ指定なし）、.NET `HttpClient` | ❌ |
+| 生ソケット、独自 TCP | ❌ |
+| DNS、QUIC/HTTP3、非 HTTP プロトコル | ❌ |
+| リテラル IP への接続 | ❌ |
+
+したがって `node -e "require('http').get('http://host/')"` のようなコマンドは**遮断されません**。
+これは「誤操作を防ぐガードレールであり、意図を宣言する場所」と考えてください。密閉された
+サンドボックスではありません。
+
+DSH **自身**の通信 —— 組み込みネットワークツールと LLM トランスポート —— は意図的に対象外
+です。これらの接続には shell 帰属がなく、`networkUnattributed: allow`（既定）がそのまま
+通します。審査するとホストが**自分自身を遮断**してしまい、取り逃すよりはるかに悪い障害に
+なります。ホストのクライアントがプロキシ環境変数を読まないと確信できる場合のみ `deny` に
+してください。
+
+稼働状態の照会：`GET /api/dsh-perm-gate/network`（モード / バインド / ポート / プロキシ稼働 /
+環境注入状態 / 遮断カウンタ / 直近の遮断）。
+
 ## 自动审查ティア（マシン値 `permissive`）
 
 自动审查は権限ピッカーの中で 読み取り専用 / ワークスペース内変更 / 完全権限 /

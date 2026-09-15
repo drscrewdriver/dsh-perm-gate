@@ -103,6 +103,50 @@ dsh plugin --profile web add dsh-perm-gate
 
 规则示例：见 [examples/permissions.example.yaml](./examples/permissions.example.yaml)。
 
+### 网络策略（可选开启）
+
+本地 HTTP/CONNECT 代理，用**同一份规则文件**审查 **shell 子进程**的出站流量，并对无规则
+覆盖的目标提供审批通道。**默认关闭** —— 开启后会绑定回环端口并改写子进程的代理环境变量，
+因此绝不隐式启用。
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # 总开关（默认 false）
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny —— 未列出目标的处理方式
+    networkUnattributed: allow     # allow | deny —— 无 shell 归属的流量
+    networkInjectEnv: true         # 为子进程改写 HTTP(S)_PROXY / ALL_PROXY
+    networkAskTimeoutMs: 120000    # 审批等待上限，超时按拒绝处理
+    networkGrantTtlMs: 1800000     # 一次批准的会话有效期
+```
+
+**分层行为**：没有 allow 规则，任何目标都出不去。未列出的目标会升级到交互审批，挂在该
+shell 命令的会话上；批准后该目标在本次会话内放行。**`deny` 规则永不升级为审批** —— 审批
+只能为「无规则禁止的目标」拓宽可达性，永远不能推翻一条说「不」的规则。
+
+**边界 —— 依赖它之前请先读这段**：代理是**协作式**策略层，不是强制边界。它只能看到
+**愿意读代理环境变量**的客户端的流量。
+
+| 客户端 | 能拦吗 |
+|--------|--------|
+| `curl`、`wget`、`git`、Go `net/http`、Python `requests` | ✅ |
+| **Node.js `http` / `https` / `fetch`** | ❌ **直连，代理看不到** |
+| Java（未加 `-D` 代理参数）、.NET `HttpClient` | ❌ |
+| 原始 socket、自写 TCP | ❌ |
+| DNS、QUIC/HTTP3、非 HTTP 协议 | ❌ |
+| 连接字面 IP | ❌ |
+
+因此 `node -e "require('http').get('http://host/')"` 这类命令**不会被拦截**。请把它当作
+「防误操作的护栏 + 声明意图的地方」，而不是密闭沙箱。
+
+DSH **自身**的网络流量 —— 内建网络工具与 LLM 传输 —— 刻意不管：这些连接不带 shell 归属，
+而 `networkUnattributed: allow`（默认）会直接放行。审查它们会导致宿主**把自己拦死**，
+那比漏拦严重得多。只有在你确定宿主的客户端不读代理环境变量时，才考虑改成 `deny`。
+
+实时状态查询：`GET /api/dsh-perm-gate/network`（模式 / 绑定 / 端口 / 代理存活 / 环境注入
+状态 / 阻断计数 / 最近阻断）。
+
 ## 自动审查档位（机器值 `permissive`）
 
 自动审查是权限下拉框里一个**独立审批档**，与只读 / 工作区内修改 / 完全权限 / 白名单平行。

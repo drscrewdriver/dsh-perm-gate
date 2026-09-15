@@ -675,6 +675,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       enabled: bool('networkEnabled', false),
       mode: str('networkMode', 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all',
       unlisted: str('networkUnlisted', 'ask') as 'ask' | 'deny',
+      unattributed: str('networkUnattributed', 'allow') as 'allow' | 'deny',
       loopback: str('networkLoopback', 'allow') as 'allow' | 'policy',
       bind: str('networkBind', '127.0.0.1'),
       port: num('networkPort', 0),
@@ -688,11 +689,18 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   const networkLifecycle = new NetworkLifecycle({
     effect: (disposeFactory, label) => { ctx.effect(disposeFactory, label) },
     readConfig: readNetworkConfig,
-    decide: (target: NetworkTarget) => decideNetworkTarget(runtime.compiledRuleset, target, {
-      mode: readNetworkConfig().mode,
-      unlisted: readNetworkConfig().unlisted,
-      loopback: readNetworkConfig().loopback,
-    }),
+    decide: (target: NetworkTarget) => {
+      const cfg = readNetworkConfig()
+      return decideNetworkTarget(runtime.compiledRuleset, target, {
+        mode: cfg.mode,
+        unlisted: cfg.unlisted,
+        loopback: cfg.loopback,
+        // Attribution decides whether this connection is a shell subprocess
+        // (the gate's business) or DSH's own client (left alone by default).
+        attributed: runtime.currentAttribution() !== undefined,
+        unattributed: cfg.unattributed,
+      })
+    },
     attribution: () => runtime.currentAttribution(),
     // An `ask` verdict escalates to the interactive approval seam, raised on
     // behalf of the shell command that opened the connection. A `deny` verdict

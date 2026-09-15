@@ -211,3 +211,70 @@ describe('parseUrlTarget', () => {
     expect(parseUrlTarget('not-a-url')).toBeUndefined()
   })
 })
+
+/**
+ * Unattributed traffic is DSH's own client, not a shell subprocess. Reviewing
+ * it risks the host blocking itself, so it is exempt by default.
+ */
+describe('unattributed exemption', () => {
+  const RULES_WITH_DENY = `defaultAction: ask
+deny:
+  - network:
+      domains: ["blocked.example"]
+allow:
+  - network:
+      domains: ["allowed.example"]
+`
+
+  it('exempts unattributed traffic by default (even a deny rule does not apply)', () => {
+    const ruleset = makeRuleset(RULES_WITH_DENY)
+    const decision = decideNetworkTarget(ruleset, { host: 'blocked.example', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'policy', attributed: false,
+    })
+    expect(decision.action).toBe('allow')
+    expect(decision.unattributed).toBe(true)
+    expect(decision.matched).toBe(false)
+  })
+
+  it('reviews unattributed traffic when networkUnattributed=deny', () => {
+    const ruleset = makeRuleset(RULES_WITH_DENY)
+    const decision = decideNetworkTarget(ruleset, { host: 'blocked.example', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'policy',
+      attributed: false, unattributed: 'deny',
+    })
+    expect(decision.action).toBe('deny')
+    expect(decision.unattributed).toBeUndefined()
+  })
+
+  it('still reviews attributed traffic normally', () => {
+    const ruleset = makeRuleset(RULES_WITH_DENY)
+    const denied = decideNetworkTarget(ruleset, { host: 'blocked.example', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'policy', attributed: true,
+    })
+    expect(denied.action).toBe('deny')
+
+    const allowed = decideNetworkTarget(ruleset, { host: 'allowed.example', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'policy', attributed: true,
+    })
+    expect(allowed.action).toBe('allow')
+    expect(allowed.matched).toBe(true)
+  })
+
+  it('treats an omitted `attributed` flag as attributed (backward compatible)', () => {
+    const ruleset = makeRuleset(RULES_WITH_DENY)
+    const decision = decideNetworkTarget(ruleset, { host: 'blocked.example', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'policy',
+    })
+    expect(decision.action).toBe('deny')
+    expect(decision.unattributed).toBeUndefined()
+  })
+
+  it('does not exempt loopback twice — loopback still short-circuits first', () => {
+    const ruleset = makeRuleset(RULES_WITH_DENY)
+    const decision = decideNetworkTarget(ruleset, { host: 'localhost', ips: [] }, {
+      mode: 'whitelist', unlisted: 'deny', loopback: 'allow', attributed: true,
+    })
+    expect(decision.action).toBe('allow')
+    expect(decision.unattributed).toBeUndefined()
+  })
+})

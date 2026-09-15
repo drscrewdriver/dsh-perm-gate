@@ -23,13 +23,15 @@
  *   surface through the optional logger.
  */
 import { NetworkProxy, injectProxyEnv, type NetworkBlockRecord, type ProxyAttribution } from './proxy.js'
-import type { NetworkDecision, NetworkMode, NetworkTarget, UnlistedAction } from './network.js'
+import type { NetworkDecision, NetworkMode, NetworkTarget, UnattributedAction, UnlistedAction } from './network.js'
 
 /** The live network configuration (read fresh on every operation). */
 export interface NetworkConfigSnapshot {
   readonly enabled: boolean
   readonly mode: NetworkMode
   readonly unlisted: UnlistedAction
+  /** Handling for traffic with no shell attribution. Default `'allow'`. */
+  readonly unattributed: UnattributedAction
   readonly loopback: 'allow' | 'policy'
   readonly bind: string
   readonly port: number

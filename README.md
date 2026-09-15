@@ -169,6 +169,59 @@ permissions:
 A command entry `word#flag` matches the command word (`word`) with the modifier `recursive` or
 `force` — so `rm#recursive` matches `rm -rf`, `env rm -rf`, and `sh -c "rm -rf /"`.
 
+### Network policy (opt-in)
+
+A local HTTP/CONNECT proxy that adjudicates the outbound traffic of **shell
+subprocesses** against the same rules file, plus an approval path for targets no
+rule covers. **Off by default** — enabling it binds a loopback port and rewrites
+the proxy environment for child processes, so it is never turned on implicitly.
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # master switch (default false)
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny  — unlisted target handling
+    networkUnattributed: allow     # allow | deny — traffic with no shell attribution
+    networkInjectEnv: true         # rewrite HTTP(S)_PROXY/ALL_PROXY for children
+    networkAskTimeoutMs: 120000    # approval wait before failing closed
+    networkGrantTtlMs: 1800000     # how long one approval covers its target
+```
+
+**Tiered behaviour.** Nothing reaches the network without an allow rule.
+An unlisted target is escalated to the interactive approval seam, raised on
+behalf of the shell command that opened the connection; approving widens reach
+for that target for the session. A `deny` rule is **never** escalated —
+approval can widen what an unlisted target may reach, but it can never override
+a rule that says no.
+
+**The boundary — read this before relying on it.** The proxy is a *cooperative*
+policy layer, not an enforcement boundary. It only sees traffic from clients
+that read the proxy environment:
+
+| Client | Covered? |
+|--------|----------|
+| `curl`, `wget`, `git`, Go `net/http`, Python `requests` | yes |
+| **Node.js `http`/`https`/`fetch`** | **no — connects directly** |
+| Java (without `-D` proxy flags), .NET `HttpClient` | no |
+| Raw sockets, custom TCP | no |
+| DNS, QUIC/HTTP3, non-HTTP protocols | no |
+| Connections to a literal IP | no |
+
+So a shell command like `node -e "require('http').get('http://host/')"` is not
+intercepted. Treat this as a guardrail against accidents and a place to state
+intent, not as a hermetic sandbox.
+
+DSH's **own** network traffic — the built-in network tools and the LLM
+transport — is deliberately left alone. Those connections carry no shell
+attribution, and `networkUnattributed: allow` (the default) passes them
+through unreviewed: reviewing them would let the host block *itself*, which is
+a worse failure than a missed block. Set `networkUnattributed: deny` only if
+you know your host's clients ignore the proxy environment.
+
+Query the live state at `GET /api/dsh-perm-gate/network` (mode, bind, port,
+proxy liveness, env-injection state, block counters, recent blocks).
+
 ## The 自动审查 tier (machine value `permissive`)
 
 自动审查 is an **independent approval tier** in the DSH permission picker, parallel to

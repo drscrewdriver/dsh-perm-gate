@@ -23,8 +23,13 @@ const DESTRUCTIVE_TOOL = /(?:^|[_-])(?:delete|remove|rm|destroy|erase|purge|wipe
  */
 const READ_TOOLS = new Set([
   'read', 'read_image', 'grep', 'glob', 'ls', 'lsp',
-  // Read-only network / media queries: no write, no exec.
+  // Search / lookup: every one of these only READS. `web_search` and
+  // `modlens_read_image` also reach the network, but through DSH's own client
+  // rather than a subprocess — see the network note below.
   'web_search', 'modlens_read_image',
+  'advanced_search', 'platform_search', 'free_search_test',
+  // Session-scoped reads: they disclose already-recorded state, never mutate.
+  'context_compression_retrieve', 'memory_search_graph', 'memory_expand_graph_node',
 ])
 /** DSH internal coordination / management tools — not workspace-modifying. */
 const INTERNAL_TOOLS = new Set([
@@ -35,9 +40,11 @@ const INTERNAL_TOOLS = new Set([
   'agent_teams_approve', 'agent_teams_resume',
   // AgentTeams status reads
   'agent_teams_status', 'agent_teams_update_task',
-  // DSH session/memory/goal/taskboard management
+  // DSH session/memory/goal/taskboard management. The memory store is the
+  // agent's own state, not the workspace: writing it is not a workspace write.
   'conversation_search',
   'memory_add', 'memory_delete', 'memory_read_scene', 'memory_search',
+  'memory_import', 'memory_ruminate', 'memory_ruminate_cancel', 'memory_ruminate_status',
   'get_goal', 'update_goal', 'create_goal',
   'taskboard_get', 'taskboard_list', 'taskboard_claim', 'taskboard_block',
   'taskboard_comment', 'taskboard_release_claim', 'taskboard_submit_review',

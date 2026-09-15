@@ -29,6 +29,21 @@ export type SandboxModeName = 'read-only' | 'workspace-write' | 'danger-full-acc
 /** How a whitelist-mode unlisted target is handled. */
 export type UnlistedAction = 'ask' | 'deny'
 
+/**
+ * How traffic with **no in-flight shell attribution** is handled.
+ *
+ * - `'allow'` (default) — pass through unreviewed. Such traffic is not a shell
+ *   subprocess: it is DSH's own client (a built-in network tool, the LLM
+ *   transport). The proxy is a *subprocess* policy surface, so reviewing the
+ *   host's own traffic risks the host blocking itself — a far worse failure
+ *   than a missed block. This is what keeps the built-in network tools working.
+ * - `'deny'` — review it like any other connection. Stricter, but if a
+ *   built-in client ever honors the proxy environment (e.g. Node 24+ with
+ *   `NODE_USE_ENV_PROXY=1`), DSH's own calls would be blocked and the harness
+ *   would stop working.
+ */
+export type UnattributedAction = 'allow' | 'deny'
+
 /** A parsed network target for one connection/URL. */
 export interface NetworkTarget {
   readonly host: string
@@ -48,6 +63,8 @@ export interface NetworkDecision {
   readonly rule?: CompiledRuleEntry
   /** Source file path for audit attribution. */
   readonly source?: string
+  /** True when the connection carried no shell attribution and was exempted. */
+  readonly unattributed?: true
 }
 
 /** Proxy-layer evaluation options. */
@@ -56,6 +73,14 @@ export interface NetworkDecisionOptions {
   readonly unlisted: UnlistedAction
   /** `allow` short-circuits loopback targets before rules; `policy` evaluates them normally. */
   readonly loopback: 'allow' | 'policy'
+  /**
+   * Whether an in-flight shell execution can be attributed to this
+   * connection. `false` means the connection did not come from a subprocess
+   * the gate is tracking. Omitted = treat as attributed (pre-change behavior).
+   */
+  readonly attributed?: boolean
+  /** Handling for unattributed traffic. Default `'allow'`. */
+  readonly unattributed?: UnattributedAction
 }
 
 // ─── Mode mapping ──────────────────────────────────────────────────────────
@@ -95,6 +120,11 @@ export function defaultDecision(mode: NetworkMode, unlisted: UnlistedAction): Ne
  * Proxy-layer tool attribution: shell subprocess connections carry
  * `bash`/`pwsh` identity; rules scoped to other tools never fire.
  * Agent identity is unknown at the proxy → agent-scoped rules fail-closed.
+ *
+ * **Unattributed traffic is exempt by default.** A connection that cannot be
+ * tied to an in-flight shell execution did not come from a subprocess the gate
+ * manages — it is DSH's own client. Reviewing it would let the host block
+ * itself, so it passes through (see {@link UnattributedAction}).
  */
 export function decideNetworkTarget(
   ruleset: CompiledRuleset,
@@ -103,6 +133,10 @@ export function decideNetworkTarget(
 ): NetworkDecision {
   if (options.loopback === 'allow' && isLoopbackTarget(target)) {
     return { action: 'allow', matched: false, mode: options.mode }
+  }
+  // Not from a shell subprocess → not this surface's to police.
+  if (options.attributed === false && (options.unattributed ?? 'allow') === 'allow') {
+    return { action: 'allow', matched: false, mode: options.mode, unattributed: true }
   }
 
   // Scan deny → allow → ask (deny-first).
