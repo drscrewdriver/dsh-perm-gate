@@ -36,6 +36,8 @@ export interface NetworkConfigSnapshot {
   readonly noProxy: 'clear' | 'preserve'
   /** Rewrite `HTTP(S)_PROXY`/`ALL_PROXY` for subprocesses. Default true. */
   readonly injectEnv: boolean
+  /** How long an unlisted-target approval may wait for a human (ms). */
+  readonly askTimeoutMs: number
 }
 
 /** The network state the settings page and HTTP route render. */
@@ -58,7 +60,12 @@ export interface NetworkLifecycleOptions {
   /** Read the live network config (settings-aware). */
   readonly readConfig: () => NetworkConfigSnapshot
   /** The decision function (reads the live ruleset). */
-  readonly decide: (target: NetworkTarget) => NetworkDecision
+  readonly decide: (target: NetworkTarget) => NetworkDecision | Promise<NetworkDecision>
+  /**
+   * Escalate an `ask` verdict to the interactive approval seam. Never called
+   * for a `deny` — the rule review stays authoritative.
+   */
+  readonly escalate?: (target: NetworkTarget, decision: NetworkDecision) => Promise<'allow' | 'deny'>
   /** Attribution for block records. */
   readonly attribution: () => ProxyAttribution | undefined
   /** Extra block observer (audit/event feed). */
@@ -156,6 +163,7 @@ export class NetworkLifecycle {
       port: cfg.port,
       maxRecent: 100,
       decide: this.options.decide,
+      ...(this.options.escalate !== undefined ? { escalate: this.options.escalate } : {}),
       attribution: this.options.attribution,
       ...(this.options.onBlock !== undefined ? { onBlock: this.options.onBlock } : {}),
       logger: this.options.logger,

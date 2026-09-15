@@ -89,7 +89,16 @@ export interface NetworkProxyOptions {
   /** Cap on recent-block records kept in memory. */
   readonly maxRecent: number
   /** Decision function supplied by the runtime. */
-  readonly decide: (target: NetworkTarget) => NetworkDecision
+  readonly decide: (target: NetworkTarget) => NetworkDecision | Promise<NetworkDecision>
+  /**
+   * Escalate an `ask` decision to the interactive approval seam. Called ONLY
+   * when {@link decide} returns `ask` — a `deny` is never escalated, so the
+   * rule review cannot be bypassed by approving a connection.
+   *
+   * Absent, throwing, or timing out all mean "not allowed": the connection is
+   * blocked exactly as it would have been.
+   */
+  readonly escalate?: (target: NetworkTarget, decision: NetworkDecision) => Promise<'allow' | 'deny'>
   /** Current attribution (newest in-flight shell execution). */
   readonly attribution?: () => ProxyAttribution | undefined
   /** Called for every blocked connection. */
@@ -373,7 +382,7 @@ export class NetworkProxy {
       socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
       return
     }
-    const decision = await this.decideWithResolution(target)
+    const decision = await this.resolveDecision(target)
     if (decision.action !== 'allow') {
       this.recordBlock(decision, target)
       const body = blockMessage(decision)
@@ -405,7 +414,7 @@ export class NetworkProxy {
   // ─── Decision pipeline ───────────────────────────────────────────────
 
   private async forwardOrBlock(res: ServerResponse, target: NetworkTarget, forward: () => void): Promise<void> {
-    const decision = await this.decideWithResolution(target)
+    const decision = await this.resolveDecision(target)
     if (decision.action !== 'allow') {
       this.recordBlock(decision, target)
       const body = blockMessage(decision)
@@ -434,13 +443,42 @@ export class NetworkProxy {
         )
         const resolved = addresses.map((entry) => entry.address)
         if (resolved.length > 0) {
-          return this.options.decide({ ...target, ips: [...target.ips, ...resolved] })
+          return await this.options.decide({ ...target, ips: [...target.ips, ...resolved] })
         }
       } catch {
         // Unresolvable or too slow: decide on the literal name.
       }
     }
-    return this.options.decide(target)
+    return await this.options.decide(target)
+  }
+
+  /**
+   * The final decision for one target: the rule/mode verdict, then — only for
+   * an `ask` — the interactive approval seam.
+   *
+   * Escalation is deliberately narrow:
+   * - A `deny` verdict is NEVER escalated. Approving a connection can widen
+   *   reach for a target no rule allows, but it can never override a rule that
+   *   says no. The rule review stays authoritative.
+   * - An escalation that throws, is absent, or returns anything but `allow`
+   *   leaves the verdict blocked.
+   */
+  private async resolveDecision(target: NetworkTarget): Promise<NetworkDecision> {
+    const decision = await this.decideWithResolution(target)
+    if (decision.action !== 'ask') return decision
+    const escalate = this.options.escalate
+    if (escalate === undefined) return decision
+    let verdict: 'allow' | 'deny' = 'deny'
+    try {
+      verdict = await escalate(target, decision)
+    } catch (error: unknown) {
+      this.safeWarn(`[dsh-perm-gate] network escalation failed: ${String(error)}`)
+      verdict = 'deny'
+    }
+    if (verdict !== 'allow') return decision
+    // Approved: the connection proceeds, and the audit keeps the rule context
+    // that produced the ask (`matched` / `ruleIndex` are preserved).
+    return { ...decision, action: 'allow' }
   }
 
   // ─── Block recording ─────────────────────────────────────────────────

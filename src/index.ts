@@ -12,7 +12,7 @@ import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePerm
 import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
+import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
 import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
@@ -29,6 +29,9 @@ export const name = 'dsh-perm-gate'
 export const inject = ['tools', 'webServer', 'llm', 'agentDefaultModel']
 
 export { Config }
+
+/** The closed approval-outcome vocabulary (anything else is normalized to `unavailable`). */
+const APPROVAL_OUTCOMES: ReadonlySet<string> = new Set(['allowed-once', 'rejected', 'cancelled', 'unavailable'])
 
 /** Runtime settings namespace: `permissive` + `permissiveStrategies` (editable in the UI). */
 export const PERMISSIVE_NAMESPACE = 'dsh-perm-gate'
@@ -223,13 +226,18 @@ export function makeApprovalAnswerer(
  * (fail-closed).
  */
 export function makePreExecuteListener(
-  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk'>,
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'>,
 ): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
   return async (exec, next) => {
     const decision = runtime.decideExecution(exec)
     // Passthrough (allow / stand-down) and a hard-deny need no grading.
-    if (decision === undefined) return next()
-    if (decision.kind !== 'ask') return decision
+    if (decision === undefined) {
+      // The call proceeds: register it so a network connection made by its
+      // child process can be attributed back to this session.
+      runtime.beginShellExecution(exec)
+      return next()
+    }
+    if (decision.kind !== 'ask') return decision // deny: it never runs
     // A cancelled call is never worth a model round-trip; the registry rechecks
     // cancellation after this gate settles.
     if (exec.signal?.aborted === true) return decision
@@ -239,7 +247,14 @@ export function makePreExecuteListener(
     } catch {
       return decision // fail-closed: keep the human ask
     }
-    return refined ?? next()
+    if (refined === undefined) {
+      runtime.beginShellExecution(exec)
+      return next()
+    }
+    // Still an ask: the human decides. Register optimistically so a call they
+    // approve is attributable; a rejection is dropped by the abort/settle path.
+    if (refined.kind === 'ask') runtime.beginShellExecution(exec)
+    return refined
   }
 }
 
@@ -302,11 +317,39 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // (a throw would be normalized by the approval seam into a rejection on the
   // human's behalf). The public fallback is the `agents.get(id).followup(...)`
   // channel in buildSessionSender.
-  let approvalService: { effectivePolicy?: (session: unknown) => unknown } | undefined
+  let approvalService: {
+    effectivePolicy?: (session: unknown) => unknown
+    /** Ask the composed answerers to decide one readonly request. */
+    request?: (req: unknown) => Promise<unknown>
+  } | undefined
 
   const runtime = new PermGateRuntime({
     ...config,
     hostLlm,
+    // Raise a network approval through the DSH approval seam. The service
+    // applies the session policy, routes the prompt to the agent, and appends
+    // the `approval/asked`/`approval/decided` audit pair. Everything that is
+    // not an explicit `allowed-once` fails closed to `unavailable`, and the
+    // gate turns that into a block.
+    requestApproval: async (req: NetworkApprovalRequest) => {
+      const svc = approvalService
+      if (svc === undefined || typeof svc.request !== 'function') return 'unavailable'
+      try {
+        const outcome = await svc.request({
+          agent: req.agent,
+          toolName: req.toolName,
+          ...(req.callId !== undefined ? { callId: req.callId } : {}),
+          reason: req.reason,
+          ...(req.signal !== undefined ? { signal: req.signal } : {}),
+        })
+        return APPROVAL_OUTCOMES.has(String(outcome))
+          ? outcome as 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+          : 'unavailable'
+      } catch {
+        // No open turn, a missing answerer, or a seam failure: never an allow.
+        return 'unavailable'
+      }
+    },
     // Read the Permissive tier live so the UI card's switches take effect on
     // the next tool call (no reload). Falls back to the composition entry.
     readPermissive: (): PermissiveState => {
@@ -579,7 +622,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // Fallback terminal-answer channel: settle the ask from the call's result,
   // and settle a pending learning candidate (a result for one means the human
   // approved it and it executed — one confirmation).
-  host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => { runtime.settleExecution(exec, result) }) as never)
+  host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => {
+    // The call settled: it is no longer in flight, so a later connection must
+    // not be attributed to it.
+    runtime.endShellExecution(exec)
+    runtime.settleExecution(exec, result)
+  }) as never)
 
   // Approval channel: answer an escalation the gate already cleared, and settle
   // the outcome of an ask the gate did raise. Registered `prepend` so it sits at
@@ -626,12 +674,13 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     return {
       enabled: bool('networkEnabled', false),
       mode: str('networkMode', 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all',
-      unlisted: str('networkUnlisted', 'deny') as 'ask' | 'deny',
+      unlisted: str('networkUnlisted', 'ask') as 'ask' | 'deny',
       loopback: str('networkLoopback', 'allow') as 'allow' | 'policy',
       bind: str('networkBind', '127.0.0.1'),
       port: num('networkPort', 0),
       noProxy: str('networkNoProxy', 'clear') as 'clear' | 'preserve',
       injectEnv: bool('networkInjectEnv', true),
+      askTimeoutMs: num('networkAskTimeoutMs', 120_000),
     }
   }
   const networkLogger: { warn(message: string): void; info?(message: string): void } =
@@ -645,6 +694,20 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       loopback: readNetworkConfig().loopback,
     }),
     attribution: () => runtime.currentAttribution(),
+    // An `ask` verdict escalates to the interactive approval seam, raised on
+    // behalf of the shell command that opened the connection. A `deny` verdict
+    // never reaches here — approval widens reach but cannot override a rule.
+    escalate: async (target: NetworkTarget, decision) => {
+      const where = `${target.scheme ?? 'https'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''}`
+      const why = decision.matched && decision.ruleIndex !== undefined
+        ? `rule #${decision.ruleIndex + 1} asks about it`
+        : `${decision.mode} mode has no allow rule for it`
+      return runtime.askNetwork(
+        target,
+        `a shell subprocess wants to reach ${where} — ${why}. Approve to let this command use the network for this target.`,
+        readNetworkConfig().askTimeoutMs,
+      )
+    },
     logger: networkLogger,
   })
   // Never awaited at apply(): a slow or failing bind must not block plugin

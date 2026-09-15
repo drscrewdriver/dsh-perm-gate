@@ -155,7 +155,17 @@ export interface PermGateConfig {
   readonly networkEnabled?: boolean
   /** Network policy mode when auto-mapping from sandbox is not used. Default 'whitelist'. */
   readonly networkMode?: import('./network.js').NetworkMode
-  /** How unlisted targets are handled in whitelist mode. Default 'deny'. */
+  /** How unlisted targets are handled in whitelist mode.
+   *
+   * - `'deny'` — block outright, never prompt.
+   * - `'ask'`  — raise an interactive approval for the attributed shell command;
+   *              approve to let THIS target through for this session.
+   *
+   * A `deny` rule always wins: approval can widen reach for a target no rule
+   * allows, but it can never override a rule that says no. With no in-flight
+   * shell to attribute the connection to, `'ask'` degrades to a block — there
+   * is nobody to ask.
+   */
   readonly networkUnlisted?: import('./network.js').UnlistedAction
   /** Loopback handling: 'allow' short-circuits before rules; 'policy' evaluates normally. Default 'allow'. */
   readonly networkLoopback?: 'allow' | 'policy'
@@ -175,6 +185,18 @@ export interface PermGateConfig {
    * elsewhere or when verifying the proxy in isolation.
    */
   readonly networkInjectEnv?: boolean
+  /**
+   * How long an unlisted-target approval waits for a human before failing
+   * closed to a block (ms). Default 120000 (2 min).
+   */
+  readonly networkAskTimeoutMs?: number
+  /**
+   * How long one approved network target stays approved for the session (ms).
+   * One shell command routinely opens many connections to the same host, so
+   * without this the human would be prompted once per connection.
+   * Default 1800000 (30 min).
+   */
+  readonly networkGrantTtlMs?: number
   // ─── Hot reload (Phase 3) ──────────────────────────────────────────
   /** Enable file watching for rule hot-reload. Default true. */
   readonly watch?: boolean
@@ -280,12 +302,14 @@ export const Config: z<PermGateConfig> = z.object({
   // Network (Phase 2)
   networkEnabled: z.boolean().default(false),
   networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
-  networkUnlisted: z.union(['ask', 'deny'] as const).default('deny'),
+  networkUnlisted: z.union(['ask', 'deny'] as const).default('ask'),
   networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
   networkBind: z.string().default('127.0.0.1'),
   networkPort: z.number().min(0).max(65535).default(0),
   networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
   networkInjectEnv: z.boolean().default(true),
+  networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000),
+  networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000),
   // Hot reload (Phase 3)
   watch: z.boolean().default(true),
   watchDebounceMs: z.number().min(50).max(5000).default(300),

@@ -24,6 +24,7 @@ import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSe
 import { chatCompletion } from './classifier.js'
 import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
 import { decomposeShellCommand } from './shell.js'
+import type { NetworkTarget } from './network.js'
 import { extractAgentCandidates } from './agent-identity.js'
 import { resolveRuleChain } from './rule-chain.js'
 import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
@@ -206,6 +207,25 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * review page's diff/revert data plane (events are still recorded).
    */
   readonly snapshotsDir?: string
+  // ─── Network approval seam ──────────────────────────────────────────
+  /**
+   * Raise one interactive approval request on behalf of a subprocess network
+   * connection. Wired by `apply` to the DSH `approval` service
+   * (`approval.request`), which routes the prompt to the agent, appends the
+   * `approval/asked` + `approval/decided` audit pair, and applies the session
+   * policy before any answerer runs.
+   *
+   * Absent (or throwing) means the connection cannot ride the seam and the
+   * gate fails closed to `deny`. Only `'allowed-once'` is treated as an allow.
+   */
+  readonly requestApproval?: (req: NetworkApprovalRequest) => Promise<ApprovalOutcomeLike>
+  /**
+   * How long one approved network target stays approved for the session (ms).
+   * A single shell command routinely opens many connections to the same host;
+   * without this the human would be prompted once per connection.
+   * Default 30 minutes.
+   */
+  readonly networkGrantTtlMs?: number
 }
 
 export type CallDecision = 'allow' | 'deny' | 'ask'
@@ -330,6 +350,59 @@ export interface ApprovalRequestLike {
 export type ApprovalOutcomeLike = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
 /**
+ * One approval ask the gate raises on behalf of a subprocess network
+ * connection. Structurally the subset of the DSH `ApprovalRequest` the gate
+ * supplies — the host service adds the borrowed session/log handling.
+ */
+export interface NetworkApprovalRequest {
+  /** The host agent the question is asked on behalf of (routes the prompt). */
+  readonly agent: unknown
+  /** The tool whose subprocess opened the connection. */
+  readonly toolName: string
+  /** The exact tool call, when the host gave one — lets the UI attach the prompt. */
+  readonly callId?: string
+  readonly reason: string
+  readonly signal?: AbortSignal
+}
+
+/** The attribution the proxy layer receives for one connection. */
+export interface ShellAttribution {
+  readonly tool: string
+  readonly callId?: string
+  /** The host agent, needed to route an approval request. */
+  readonly agent?: unknown
+  readonly sessionId: string
+  readonly signal?: AbortSignal
+}
+
+/** One in-flight shell execution, retained for proxy-layer attribution. */
+interface InFlightShell {
+  readonly key: string
+  readonly tool: string
+  readonly callId?: string
+  readonly agent?: unknown
+  readonly sessionId: string
+  readonly signal?: AbortSignal
+  readonly at: number
+}
+
+/** A shell whose result never arrived is dropped after this long (ms). */
+const IN_FLIGHT_SHELL_TTL_MS = 30 * 60_000
+
+/** Tool names that execute a command string (mirrors evaluate's shell roster). */
+const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['shell', 'terminal', 'bash', 'pwsh', 'sh', 'cmd', 'powershell'])
+
+/** Whether a tool name runs a shell command. */
+function isShellToolName(name: string): boolean {
+  return SHELL_TOOL_NAMES.has(name)
+}
+
+/** The session-grant key for one network target (scheme/host/port). */
+function networkGrantKey(sessionId: string, target: NetworkTarget): string {
+  return `${sessionId}|${target.scheme ?? ''}|${target.host}|${target.port ?? ''}`
+}
+
+/**
  * One call the gate positively allowed, retained so an approval raised from inside
  * that same call (the sandbox escalation) can be answered from the verdict that
  * already cleared it. Keyed by the host's execution id, which the approval request
@@ -361,8 +434,14 @@ export class PermGateRuntime {
   /** Extra tool names the user classified as safe (config `autoAllowTools`). */
   private readonly autoAllowExtra: ReadonlySet<string>
   // ─── Network seam (T2.11) ───────────────────────────────────────────
-  /** In-flight shell executions for network attribution. */
-  private readonly inFlightShells = new Map<string, { tool: string; callId?: string }>()
+  /** In-flight shell executions, for proxy-layer network attribution. */
+  private readonly inFlightShells = new Map<string, InFlightShell>()
+  /** Stable key per execution object (the host call id is not always present). */
+  private readonly shellKeys = new WeakMap<object, string>()
+  private shellSeq = 0
+  /** Session-scoped network grants: grantKey -> expiry epoch ms. */
+  private readonly networkGrants = new Map<string, number>()
+  private readonly networkGrantTtlMs: number
   /**
    * Cache of the permission-preset fold. The key is the log's length plus the
    * identity of its LAST event: a session's log only appends, so "same length
@@ -401,6 +480,7 @@ export class PermGateRuntime {
       (options.autoAllowTools ?? []).filter((name) => typeof name === 'string' && name !== ''),
     )
     this.strategies = resolvePermissiveStrategies(options.permissiveStrategies)
+    this.networkGrantTtlMs = options.networkGrantTtlMs ?? 30 * 60_000
     this.learning = new RiskLearning(options.learningFile, {
       threshold: () => this.liveRiskLearning().threshold,
       now: options.now,
@@ -536,30 +616,185 @@ export class PermGateRuntime {
   // ─── Network seam (T2.11) ───────────────────────────────────────────
 
   /**
-   * Record a shell execution as in-flight for network attribution.
-   * Called from the pre-execute listener when a shell tool is about to run.
+   * Register a shell execution as in-flight so a proxy-layer block made by its
+   * child process can be attributed back to the session — and therefore ride
+   * the interactive approval seam. Called when the gate lets a shell call run;
+   * {@link endShellExecution} removes it.
    */
-  trackShellExecution(key: string, tool: string, callId?: string): void {
-    this.inFlightShells.set(key, { tool, callId })
+  beginShellExecution(exec: ToolExecutionLike): void {
+    if (!isShellToolName(exec.name)) return
+    const key = this.shellKeyOf(exec)
+    this.inFlightShells.set(key, {
+      key,
+      tool: exec.name,
+      callId: exec.callId,
+      agent: exec.agent,
+      sessionId: sessionIdOf(exec),
+      signal: exec.signal,
+      at: Date.now(),
+    })
+  }
+
+  /** Remove a shell execution from the in-flight table (its tool call settled). */
+  endShellExecution(exec: ToolExecutionLike): void {
+    if (!isShellToolName(exec.name)) return
+    this.inFlightShells.delete(this.shellKeyOf(exec))
+  }
+
+  /** Drop every in-flight entry (dispose / session teardown). */
+  clearShellExecutions(): void {
+    this.inFlightShells.clear()
   }
 
   /**
-   * Remove a shell execution from the in-flight table.
+   * The newest live in-flight shell execution, for proxy-layer attribution.
+   * Stale entries (a shell that never reported a result) are expired here so a
+   * long-dead call can never authorize a later connection.
    */
-  untrackShellExecution(key: string): void {
-    this.inFlightShells.delete(key)
-  }
-
-  /**
-   * Get the current attribution for proxy-layer decisions.
-   * Returns the most recent in-flight shell execution, or undefined.
-   */
-  currentAttribution(): { tool: string; callId?: string } | undefined {
-    // Return the most recently added entry (last value in map iteration order).
-    for (const value of this.inFlightShells.values()) {
-      return value
+  currentAttribution(): ShellAttribution | undefined {
+    const now = Date.now()
+    let newest: InFlightShell | undefined
+    for (const entry of this.inFlightShells.values()) {
+      if (now - entry.at > IN_FLIGHT_SHELL_TTL_MS) {
+        this.inFlightShells.delete(entry.key)
+        continue
+      }
+      // An aborted call was cancelled or rejected: it will never run, so it
+      // must not authorize a connection made by some later command.
+      if (entry.signal?.aborted === true) {
+        this.inFlightShells.delete(entry.key)
+        continue
+      }
+      if (newest === undefined || entry.at >= newest.at) newest = entry
     }
-    return undefined
+    if (newest === undefined) return undefined
+    return {
+      tool: newest.tool,
+      ...(newest.callId !== undefined ? { callId: newest.callId } : {}),
+      ...(newest.agent !== undefined ? { agent: newest.agent } : {}),
+      sessionId: newest.sessionId,
+      ...(newest.signal !== undefined ? { signal: newest.signal } : {}),
+    }
+  }
+
+  /** A stable per-execution key: the host call id, else an object-keyed fallback. */
+  private shellKeyOf(exec: ToolExecutionLike): string {
+    const cached = this.shellKeys.get(exec as object)
+    if (cached !== undefined) return cached
+    const key = typeof exec.callId === 'string' && exec.callId !== ''
+      ? `call:${exec.callId}`
+      : `exec:${sessionIdOf(exec)}:${exec.name}:${++this.shellSeq}`
+    this.shellKeys.set(exec as object, key)
+    return key
+  }
+
+  /**
+   * Ask the human to allow one network target, on behalf of the attributed
+   * shell execution. Returns `'allow'` only for an explicit `allowed-once`;
+   * every other outcome (rejection, cancellation, timeout, no answerer)
+   * fails closed to `'deny'`.
+   *
+   * The approval seam requires an open turn — the durable audit pair must be
+   * enclosed by the log's commit boundary — which holds here because the ask
+   * happens *while* the shell tool call is executing.
+   */
+  async askNetwork(target: NetworkTarget, reason: string, timeoutMs: number): Promise<'allow' | 'deny'> {
+    const attribution = this.currentAttribution()
+    if (attribution === undefined || attribution.agent === undefined) {
+      // Unattributable traffic cannot ride the approval seam — fail closed.
+      this.auditNetworkAsk(target, 'deny', 'no in-flight shell to attribute the connection to', undefined)
+      return 'deny'
+    }
+
+    // A session already allowed this exact target: honour it without asking.
+    const grantKey = networkGrantKey(attribution.sessionId, target)
+    if (this.networkGrants.has(grantKey)) {
+      return 'allow'
+    }
+
+    const requester = this.options.requestApproval
+    if (requester === undefined) {
+      this.auditNetworkAsk(target, 'deny', 'no approval service available', attribution)
+      return 'deny'
+    }
+
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The timeout is raced, not merely signalled. `abort()` only *asks* the
+    // callee to withdraw the question; a callee that ignores the signal would
+    // otherwise leave this await pending forever and hang the CONNECT. The
+    // race guarantees the wait settles no matter what the seam does.
+    const timedOut = new Promise<ApprovalOutcomeLike>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        resolve('unavailable')
+      }, Math.max(1, timeoutMs))
+    })
+    let outcome: ApprovalOutcomeLike = 'unavailable'
+    try {
+      outcome = await Promise.race([
+        requester({
+          agent: attribution.agent,
+          toolName: attribution.tool,
+          ...(attribution.callId !== undefined ? { callId: attribution.callId } : {}),
+          reason,
+          signal: controller.signal,
+        }),
+        timedOut,
+      ])
+    } catch {
+      // A seam failure (e.g. no open turn) is never an allow.
+      outcome = 'unavailable'
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+
+    if (outcome === 'allowed-once') {
+      // Remember it for this session so one command making many connections
+      // does not prompt once per connection.
+      this.networkGrants.set(grantKey, Date.now() + this.networkGrantTtlMs)
+      this.auditNetworkAsk(target, 'allow', 'approved by the human (session grant)', attribution)
+      return 'allow'
+    }
+    this.auditNetworkAsk(target, 'deny', `approval seam returned ${outcome}`, attribution)
+    return 'deny'
+  }
+
+  /** Record one network escalation outcome in the audit mirror + event feed. */
+  private auditNetworkAsk(
+    target: NetworkTarget,
+    verdict: 'allow' | 'deny',
+    reason: string,
+    attribution: ShellAttribution | undefined,
+  ): void {
+    const now = Date.now()
+    const tool = attribution?.tool ?? 'subprocess'
+    const detail = `network ${verdict === 'allow' ? 'allowed' : 'denied'} ${target.scheme ?? '?'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''} — ${reason}`
+    try {
+      this.audit.append(makeEntry({
+        callId: randomId(),
+        tool,
+        outcome: verdict === 'allow' ? 'allow' : 'deny',
+        source: 'rule',
+        reason: detail,
+        at: now,
+      }))
+    } catch {
+      // Auditing must never influence the verdict.
+    }
+    if (this.events !== undefined && attribution?.sessionId !== undefined) {
+      try {
+        this.events.append({
+          sessionId: attribution.sessionId,
+          tool,
+          kind: verdict === 'allow' ? 'auto' : 'deny',
+          reason: detail,
+          verdict: 'network-ask',
+        })
+      } catch {
+        // Same: the feed is best-effort.
+      }
+    }
   }
 
   /** The compiled ruleset (read-only view for network module). */
