@@ -159,12 +159,12 @@ P0 硬拒绝始终单调且不可协商。
 | 下拉框名称 | 机器值 | sandbox | approval |
 |-----------|--------|---------|----------|
 | 自动审查 | `permissive` | `workspace-write` | `ask` |
-| 自动审查（完全权限） | `permissive-full` | `danger-full-access` | `ask` |
+| 自动审查（网络权限） | `permissive-full` | `danger-full-access` | `ask` |
 
 普通档保留内置文件沙箱。而那个沙箱**同时**拒绝子进程启动所需的命名管道 —— 所以 `git clone`、
 MSYS2/Cygwin 的 `sh.exe`、ConPTY 都会以 `Win32 error 5` / `couldn't create signal pipe` 失败。
 又因为门禁**只在 `gatePresets` 列出的档位里生效**，想用门禁就必须接受这个限制。
-「自动审查（完全权限）」解开了这个耦合：**审批行为完全相同，但不限制文件沙箱**。两者都在默认
+「自动审查（网络权限）」解开了这个耦合：**审批行为完全相同，但不限制文件沙箱**。两者都在默认
 `gatePresets` 里，任选其一都能获得完整的 P0–P4 链路 —— 门禁只读预设的**名字**，从不读 sandbox 模式。
 
 下拉框里的名字是**宿主提供的产品名**，不是逐语言的字典项：DSH 0.1.2 对插件档位在**两个**权限界面上

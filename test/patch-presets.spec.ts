@@ -56,7 +56,7 @@ describe('cordis.patch.yml permission presets', () => {
     expect(presets['permissive-full']).toMatchObject({
       sandbox: 'danger-full-access',
       approval: 'ask',
-      name: '自动审查（完全权限）',
+      name: '自动审查（网络权限）',
     })
     expect(presets['permissive-full']?.description).toBeTruthy()
   })

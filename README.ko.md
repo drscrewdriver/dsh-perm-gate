@@ -205,12 +205,12 @@ DSH **자신**의 트래픽 —— 내장 네트워크 도구와 LLM 전송 —�
 | 선택기 표시 이름 | 머신 값 | sandbox | approval |
 |------------------|---------|---------|----------|
 | 自动审查 | `permissive` | `workspace-write` | `ask` |
-| 自动审查(완전 권한) | `permissive-full` | `danger-full-access` | `ask` |
+| 自动审查(네트워크 권한) | `permissive-full` | `danger-full-access` | `ask` |
 
 일반 티어는 내장 파일 샌드박스를 유지합니다. 그 샌드박스는 자식 프로세스 시작에 필요한 이름 있는
 파이프도 거부하므로 `git clone`, MSYS2/Cygwin의 `sh.exe`, ConPTY가 `Win32 error 5` /
 `couldn't create signal pipe`로 실패합니다. 게다가 게이트는 **`gatePresets`에 나열한 티어에서만
-동작**하므로, 게이트를 쓰려면 이 제한을 받아들여야 했습니다. 「自动审查(완전 권한)」는 이 결합을
+동작**하므로, 게이트를 쓰려면 이 제한을 받아들여야 했습니다. 「自动审查(네트워크 권한)」는 이 결합을
 풉니다 —— **승인 동작은 동일하게 유지하고 파일 샌드박스 제한만 해제합니다**. 둘 다 기본
 `gatePresets`에 포함되므로 어느 쪽을 선택해도 P0–P4 전체 체인이 동작합니다. 게이트는 프리셋의
 **이름**만 읽고 sandbox 모드는 읽지 않습니다.

@@ -67,8 +67,8 @@
       permissive-full:
         sandbox: danger-full-access
         approval: ask
-        name: 自动审查（完全权限）
-        description: 与「自动审查」完全相同的审批策略，但不限制文件沙箱 —— 供需要 git / 子进程 / Cygwin 工具（sh.exe、ConPTY）的场景使用。
+        name: 自动审查（网络权限）
+        description: 与「自动审查」相同的审批策略，但不限制文件沙箱 —— 子进程（git clone、sh.exe、ConPTY）必须先能启动，其出站流量才谈得上经过网络审查。
       danger-full-access:
         sandbox: danger-full-access
         approval: never
