@@ -7,6 +7,7 @@
     "lib",
     "scripts/patch-permission-glyph.mjs",
     "cordis.patch.yml",
+    "dsh.plugin.json",
     "assets",
     "examples",
     "README.md",
