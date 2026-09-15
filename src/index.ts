@@ -551,8 +551,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   })
 
   // ─── Network proxy (Phase 2, T2.12) ─────────────────────────────────
-  // T2.10: network.enabled=false → zero behavior change (no proxy, no env injection).
-  const networkEnabled = typeof config.networkEnabled === 'boolean' ? config.networkEnabled : true
+  // T2.10 escape hatch: default OFF. The network proxy is opt-in — enabling
+  // it binds a loopback port and rewrites proxy env vars, so it must never
+  // be turned on implicitly. Set `networkEnabled: true` in the composition
+  // entry or flip the settings-card switch, then reload the plugin.
+  const networkEnabled = config.networkEnabled === true
   if (networkEnabled) {
     const proxyBind = typeof config.networkBind === 'string' ? config.networkBind : '127.0.0.1'
     const proxyPort = typeof config.networkPort === 'number' ? config.networkPort : 0

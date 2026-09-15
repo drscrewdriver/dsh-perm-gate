@@ -848,11 +848,11 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
                       <input
                         type="checkbox"
-                        checked={value.networkEnabled !== false}
+                        checked={value.networkEnabled === true}
                         disabled={readonly}
                         onChange={(event) => { void scope.set('networkEnabled', event.currentTarget.checked) }}
                       />
-                      <span style={{ fontSize: '13px' }}>{value.networkEnabled !== false ? 'ON' : 'OFF'}</span>
+                      <span style={{ fontSize: '13px' }}>{value.networkEnabled === true ? 'ON' : 'OFF'}</span>
                     </div>
                   </section>
 

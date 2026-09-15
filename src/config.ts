@@ -141,9 +141,16 @@ export interface PermGateConfig {
   readonly maxChainLength?: number
   // ─── Network (Phase 2) ───────────────────────────────────────────────
   /**
-   * Master network switch. When false, no proxy is started, no environment
-   * variables are injected, and no network interception occurs — zero
-   * behavior change from pre-network baseline. Default true.
+   * Master network switch. **Default false** — the network proxy is an
+   * opt-in capability, not part of the baseline gate.
+   *
+   * When false: no proxy is started, no environment variables are injected,
+   * and no network interception occurs — zero behavior change from the
+   * pre-network baseline.
+   *
+   * Enable it from the settings card only after verifying it in your
+   * environment. The proxy binds a loopback port and rewrites proxy env
+   * vars for subprocesses, so it must never be enabled implicitly.
    */
   readonly networkEnabled?: boolean
   /** Network policy mode when auto-mapping from sandbox is not used. Default 'whitelist'. */
@@ -261,7 +268,7 @@ export const Config: z<PermGateConfig> = z.object({
   badFilePolicy: z.union(['fail', 'warn'] as const).default('fail'),
   maxChainLength: z.number().min(1).max(50).default(10),
   // Network (Phase 2)
-  networkEnabled: z.boolean().default(true),
+  networkEnabled: z.boolean().default(false),
   networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
   networkUnlisted: z.union(['ask', 'deny'] as const).default('deny'),
   networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
