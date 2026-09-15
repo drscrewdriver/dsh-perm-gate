@@ -17,7 +17,7 @@
  */
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar'
 import { dirname, resolve } from 'node:path'
-import { existsSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

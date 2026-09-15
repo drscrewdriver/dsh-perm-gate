@@ -12,7 +12,7 @@ import {
   type RuleAction,
 } from './rule.js'
 import { decomposeShellCommand, isForceDeletion, isRecursiveDeletion, type SimpleCommand } from './shell.js'
-import { compileParamPatterns, compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
+import { compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
 import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
 
 export interface ToolCallContext {

@@ -68,6 +68,14 @@ export interface PermissiveCardValue {
   allowlist?: string[]
   /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
   denyKeywords?: string[]
+  // ─── Network (Phase 2) ─────────────────────────────────────────────
+  /** Master network switch. When false, no proxy is started. */
+  networkEnabled?: boolean
+  /** Network policy mode. */
+  networkMode?: 'deny-all' | 'whitelist' | 'allow-all'
+  // ─── Hot reload (Phase 3) ──────────────────────────────────────────
+  /** Enable file watching for rule hot-reload. */
+  watch?: boolean
 }
 
 /** One injected face: the plugin's own settings scope. */
@@ -832,6 +840,37 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         )
                         : null}
                   </section>
+
+                  {/* ─── Network master switch (Phase 2) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.networkEnabled')}</p>
+                    <p style={hintStyle}>{t('card.networkEnabledHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.networkEnabled !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('networkEnabled', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.networkEnabled !== false ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </section>
+
+                  {/* ─── Hot reload switch (Phase 3) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.watch')}</p>
+                    <p style={hintStyle}>{t('card.watchHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.watch !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('watch', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.watch !== false ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </section>
+
                   {!snapshot.writable
                     && <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('card.readonly')}</p>}
                 </>

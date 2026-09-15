@@ -174,8 +174,8 @@ function mergeChain(
 
   for (const entry of entries) {
     try {
-      // Each entry is already parsed; compile it to validate patterns.
-      const compiled = compileDocument(entry.doc, opts)
+      // Compile to validate patterns (throws on malformed input).
+      compileDocument(entry.doc, opts)
       // We use the raw doc lists for the merge (CompiledRuleset structure
       // expects flat lists with source tracking).
       denyDocs.push(entry.doc)
