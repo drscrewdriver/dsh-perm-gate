@@ -10,6 +10,20 @@
  */
 import { parse } from 'yaml'
 import { compileGlob, hashText, type CompiledPattern } from './compiler.js'
+import {
+  parseParamsDimension,
+  parseAbsentDimension,
+  parseAgentsDimension,
+  parseWhenDimension,
+  parseArgvDimension,
+  parseNetworkDimension,
+  type ParamsDimension,
+  type AbsentDimension,
+  type AgentsDimension,
+  type WhenDimension,
+  type ArgvDimension,
+  type NetworkDimension,
+} from './rule-dims.js'
 
 export type RuleAction = 'allow' | 'ask' | 'deny'
 
@@ -34,6 +48,18 @@ export interface RuleEntryDoc {
   readonly args: string[]
   /** Workspace-relative path globs; empty = no constraint. */
   readonly paths: string[]
+  /** Parameter key→value matching (AND over keys, `!` prefix negates). */
+  readonly params: ParamsDimension
+  /** Parameter keys that must NOT be present. */
+  readonly absent: AbsentDimension
+  /** Agent identity candidates (main / subagent / preset:<name>). */
+  readonly agents: AgentsDimension
+  /** Environment / platform conditions. */
+  readonly when: WhenDimension | undefined
+  /** Extra argv patterns (pipeline etc.). */
+  readonly argv: ArgvDimension | undefined
+  /** Network dimension (domain / IP / port / scheme). */
+  readonly network: NetworkDimension | undefined
   readonly action: RuleAction
   readonly reason: string
   readonly enabled: boolean
@@ -49,6 +75,18 @@ export interface CompiledRuleEntry {
   readonly command: readonly CommandSpec[]
   readonly args: readonly CompiledPattern[]
   readonly paths: readonly CompiledPattern[]
+  /** Parsed params dimension (raw patterns; compiled on match). */
+  readonly params: ParamsDimension
+  /** Parsed absent dimension (raw key names). */
+  readonly absent: AbsentDimension
+  /** Parsed agents dimension (raw patterns). */
+  readonly agents: AgentsDimension
+  /** Parsed when dimension (raw conditions). */
+  readonly when: WhenDimension | undefined
+  /** Parsed argv dimension (raw patterns). */
+  readonly argv: ArgvDimension | undefined
+  /** Parsed network dimension (raw patterns). */
+  readonly network: NetworkDimension | undefined
   readonly source: RuleEntryDoc
 }
 
@@ -140,7 +178,8 @@ export function parsePermissionsDocument(text: string): PermissionsDoc {
 
 function parseRuleEntry(raw: unknown, action: RuleAction, at: string): RuleEntryDoc {
   if (!isRecord(raw)) throw new RuleError(`${at} must be a mapping`)
-  const unknown = Object.keys(raw).filter((k) => !['tools', 'command', 'args', 'paths', 'action', 'reason', 'enabled'].includes(k))
+  const VALID_KEYS = ['tools', 'command', 'args', 'paths', 'params', 'absent', 'agents', 'when', 'argv', 'network', 'action', 'reason', 'enabled']
+  const unknown = Object.keys(raw).filter((k) => !VALID_KEYS.includes(k))
   if (unknown.length > 0) {
     throw new RuleError(`${at} unknown field${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => JSON.stringify(k)).join(', ')}`)
   }
@@ -156,6 +195,12 @@ function parseRuleEntry(raw: unknown, action: RuleAction, at: string): RuleEntry
     command: stringList(raw.command, `${at}.command`),
     args: stringList(raw.args, `${at}.args`),
     paths: stringList(raw.paths, `${at}.paths`),
+    params: parseParamsDimension(raw.params, `${at}.params`),
+    absent: parseAbsentDimension(raw.absent, `${at}.absent`),
+    agents: parseAgentsDimension(raw.agents, `${at}.agents`),
+    when: parseWhenDimension(raw.when, `${at}.when`),
+    argv: parseArgvDimension(raw.argv, `${at}.argv`),
+    network: parseNetworkDimension(raw.network, `${at}.network`),
     action,
     reason: reason === undefined ? `${action}` : reason,
     enabled: raw.enabled === undefined ? true : typeof raw.enabled === 'boolean' ? raw.enabled : (() => { throw new RuleError(`${at}.enabled must be a boolean`) })(),
@@ -204,6 +249,12 @@ export function compileDocument(doc: PermissionsDoc, opts: CompileOptions = {}):
       command: entry.command.map((c) => compileCommand(c, opts)),
       args: compilePatternList(entry.args, 'args', opts),
       paths: compilePatternList(entry.paths, 'paths', opts),
+      params: entry.params,
+      absent: entry.absent,
+      agents: entry.agents,
+      when: entry.when,
+      argv: entry.argv,
+      network: entry.network,
       source: entry,
     }))
   return {

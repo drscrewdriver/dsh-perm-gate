@@ -127,6 +127,18 @@ export interface PermGateConfig {
   readonly sessionSweep?: boolean
   /** Path to DSH's workspace store; defaults to `<dshHome>/storages/workspace.json`. Read-only to the gate. */
   readonly workspaceStoreFile?: string
+  // ─── Rule chain (T1.9) ──────────────────────────────────────────────
+  /**
+   * Whether to enable multi-file rule chain resolution. When true, the gate
+   * searches up directory ancestors for the rules file. Default false.
+   */
+  readonly searchUp?: boolean
+  /** Fallback rules file path when no file is found in the chain search. */
+  readonly fallbackPath?: string
+  /** Error policy for malformed files in the chain: `fail` (throw) or `warn` (skip). Default fail. */
+  readonly badFilePolicy?: 'fail' | 'warn'
+  /** Maximum number of files in the rule chain. Default 10. */
+  readonly maxChainLength?: number
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -219,6 +231,11 @@ export const Config: z<PermGateConfig> = z.object({
   autoAllowTools: z.array(z.string()),
   sessionSweep: z.boolean().default(true),
   workspaceStoreFile: z.string(),
+  // Rule chain (T1.9)
+  searchUp: z.boolean().default(false),
+  fallbackPath: z.string(),
+  badFilePolicy: z.union(['fail', 'warn'] as const).default('fail'),
+  maxChainLength: z.number().min(1).max(50).default(10),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>

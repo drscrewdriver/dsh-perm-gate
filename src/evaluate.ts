@@ -12,6 +12,8 @@ import {
   type RuleAction,
 } from './rule.js'
 import { decomposeShellCommand, isForceDeletion, isRecursiveDeletion, type SimpleCommand } from './shell.js'
+import { compileParamPatterns, compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
+import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
 
 export interface ToolCallContext {
   readonly tool: string
@@ -22,6 +24,15 @@ export interface ToolCallContext {
   readonly home?: string
   readonly dshHome?: string
   readonly caseInsensitive?: boolean
+  /** Agent identity candidates from session context. */
+  readonly agentCandidates?: readonly string[]
+  /** Network request info (for network dimension matching). */
+  readonly network?: {
+    readonly domain?: string
+    readonly ip?: string
+    readonly port?: number
+    readonly scheme?: string
+  }
 }
 
 export interface Decision {
@@ -76,6 +87,38 @@ export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, comma
       .filter((p) => p.length > 0)
     if (rel.length === 0) return false
     if (!rel.some((p) => rule.paths.some((g) => g.re.test(p)))) return false
+  }
+  // ─── New dimensions ────────────────────────────────────────────────────
+  // params dimension: AND over keys; each key's value must match at least one pattern (OR).
+  if (rule.params.length > 0) {
+    if (!matchParams(rule.params, ctx.args)) return false
+  }
+  // absent dimension: all listed keys must be absent from args.
+  if (rule.absent.length > 0) {
+    for (const key of rule.absent) {
+      if (key in ctx.args) return false
+    }
+  }
+  // agents dimension: at least one candidate must match an entry.
+  if (rule.agents.length > 0) {
+    const candidates = ctx.agentCandidates ?? []
+    if (candidates.length === 0) return false // fail-closed
+    if (!candidates.some((c) => rule.agents.some((a) => a === c || matchAgentPattern(a, c)))) return false
+  }
+  // when dimension: all conditions must be satisfied.
+  if (rule.when !== undefined) {
+    if (!matchWhen(rule.when)) return false
+  }
+  // argv dimension: pipeline patterns.
+  if (rule.argv?.pipeline !== undefined && rule.argv.pipeline.length > 0) {
+    if (commands.length === 0) return false
+    const pipelineText = commands.map((c) => c.command).join('|')
+    const compiled = rule.argv.pipeline.map((p) => compileGlobForMatch(p))
+    if (!compiled.some((g) => g.test(pipelineText))) return false
+  }
+  // network dimension: all present sub-dimensions must match.
+  if (rule.network !== undefined) {
+    if (!matchNetwork(rule.network, ctx.network)) return false
   }
   return true
 }
@@ -204,4 +247,131 @@ function decomposeSafe(text: string): readonly SimpleCommand[] {
   } catch {
     return []
   }
+}
+
+// ─── New dimension matchers ────────────────────────────────────────────────
+
+/** Import compileGlob locally to avoid circular dependency with compiler.ts. */
+import { compileGlob } from './compiler.js'
+
+/** Compile a glob pattern to a RegExp for ad-hoc matching. */
+function compileGlobForMatch(pattern: string): RegExp {
+  return compileGlob(pattern, { segments: false }).re
+}
+
+/**
+ * Match the params dimension: AND over keys, OR within each key's patterns.
+ * A negated pattern means the value must NOT match.
+ */
+function matchParams(params: readonly ParamCondition[], args: Record<string, unknown>): boolean {
+  for (const cond of params) {
+    const value = resolveNestedKey(args, cond.key)
+    if (cond.patterns.length === 0) {
+      // No patterns → key must exist (any value).
+      if (value === undefined) return false
+      continue
+    }
+    if (value === undefined) return false
+    const strValue = typeof value === 'string' ? value : JSON.stringify(value)
+    const compiled = cond.patterns.map((p) => {
+      if (p.startsWith('!') && p.length > 1) {
+        return { negated: true, re: compileGlobForMatch(p.slice(1)) }
+      }
+      return { negated: false, re: compileGlobForMatch(p) }
+    })
+    if (cond.negated) {
+      // Negated: value must NOT match the sole pattern.
+      if (compiled[0].re.test(strValue)) return false
+    } else {
+      // Normal: value must match at least one pattern (OR).
+      if (!compiled.some((c) => !c.negated && c.re.test(strValue))) return false
+    }
+  }
+  return true
+}
+
+/**
+ * Resolve a dotted key path from a nested object.
+ * e.g. `resolveNestedKey({flags: {mode: 'prod'}}, 'flags.mode')` → `'prod'`
+ */
+function resolveNestedKey(obj: Record<string, unknown>, key: string): unknown {
+  const parts = key.split('.')
+  let current: unknown = obj
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined
+    current = (current as Record<string, unknown>)[part]
+  }
+  return current
+}
+
+/**
+ * Match an agent pattern against an identity candidate.
+ * Supports exact match and glob patterns.
+ */
+function matchAgentPattern(pattern: string, candidate: string): boolean {
+  if (pattern === candidate) return true
+  // Glob patterns: compile and test.
+  if (/[*?[\]]/.test(pattern)) {
+    return compileGlobForMatch(pattern).test(candidate)
+  }
+  return false
+}
+
+/**
+ * Match the when dimension: all conditions must be satisfied.
+ */
+function matchWhen(when: WhenDimension): boolean {
+  // Platform check.
+  if (when.platform !== undefined && when.platform.length > 0) {
+    if (!when.platform.includes(process.platform)) return false
+  }
+  // Env var checks.
+  if (when.env !== undefined) {
+    for (const [varName, allowed] of Object.entries(when.env)) {
+      const actual = process.env[varName]
+      if (actual === undefined) return false
+      if (!allowed.includes(actual)) return false
+    }
+  }
+  // Node version (reserved — skip for now).
+  return true
+}
+
+/**
+ * Match the network dimension: all present sub-dimensions must match.
+ * Within a sub-dimension, entries are OR.
+ */
+function matchNetwork(network: NetworkDimension, ctx?: { domain?: string; ip?: string; port?: number; scheme?: string }): boolean {
+  if (ctx === undefined) return false
+  // domains
+  if (network.domains !== undefined && network.domains.length > 0) {
+    if (ctx.domain === undefined) return false
+    const matchers = network.domains.map((d) => compileDomainPattern(d))
+    if (!matchers.some((m) => m.re.test(ctx.domain!))) return false
+  }
+  // ips
+  if (network.ips !== undefined && network.ips.length > 0) {
+    if (ctx.ip === undefined) return false
+    const isCidr = (s: string) => s.includes('/')
+    const cidrs = network.ips.filter(isCidr)
+    const literals = network.ips.filter((s) => !isCidr(s))
+    const ipMatch = literals.includes(ctx.ip) || cidrs.some((c) => {
+      try { return compileCidr(c)(ctx.ip!) } catch { return false }
+    })
+    if (!ipMatch) return false
+  }
+  // ports
+  if (network.ports !== undefined && network.ports.length > 0) {
+    if (ctx.port === undefined) return false
+    const matchers = network.ports.map((p) => {
+      try { return compilePortSpec(p) } catch { return (_: number) => false }
+    })
+    if (!matchers.some((m) => m(ctx.port!))) return false
+  }
+  // schemes
+  if (network.schemes !== undefined && network.schemes.length > 0) {
+    if (ctx.scheme === undefined) return false
+    if (!network.schemes.includes(ctx.scheme)) return false
+  }
+  return true
 }

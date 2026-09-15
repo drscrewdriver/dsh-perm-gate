@@ -128,3 +128,114 @@ function escapeRegexChar(ch: string): string {
 export function hashText(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
+
+// ─── Extended matchers for new dimensions ──────────────────────────────────
+
+/**
+ * Compile a CIDR notation string (e.g. `10.0.0.0/8`) into a matcher that
+ * tests whether an IPv4 address falls within the range.
+ *
+ * Returns a pure function `(ip: string) => boolean`. Non-IPv4 inputs always
+ * return false. Invalid CIDR throws at compile time (fail-loud).
+ */
+export function compileCidr(cidr: string): (ip: string) => boolean {
+  const slash = cidr.indexOf('/')
+  if (slash <= 0 || slash >= cidr.length - 1) {
+    throw new PatternError(`CIDR "${cidr}" must be in address/prefix format`)
+  }
+  const addrStr = cidr.slice(0, slash)
+  const prefixStr = cidr.slice(slash + 1)
+  const prefix = Number.parseInt(prefixStr, 10)
+  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) {
+    throw new PatternError(`CIDR "${cidr}" prefix must be 0–32`)
+  }
+  const addr = ipv4ToNumber(addrStr)
+  if (addr === undefined) {
+    throw new PatternError(`CIDR "${cidr}" has invalid IPv4 address`)
+  }
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0
+  const network = (addr & mask) >>> 0
+  return (ip: string): boolean => {
+    const n = ipv4ToNumber(ip)
+    if (n === undefined) return false
+    return ((n & mask) >>> 0) === network
+  }
+}
+
+/** Parse an IPv4 dotted-decimal string to a 32-bit unsigned integer, or undefined. */
+function ipv4ToNumber(addr: string): number | undefined {
+  const parts = addr.split('.')
+  if (parts.length !== 4) return undefined
+  let result = 0
+  for (const part of parts) {
+    const n = Number.parseInt(part, 10)
+    if (!Number.isFinite(n) || n < 0 || n > 255) return undefined
+    if (part.length > 1 && part.startsWith('0')) return undefined // no leading zeros
+    result = (result * 256 + n) >>> 0
+  }
+  return result
+}
+
+/**
+ * Compile a port specification into a matcher function.
+ *
+ * Accepts:
+ *   - A single port: `"443"` → matches exactly 443
+ *   - A port range: `"8000-9000"` → matches 8000–9000 inclusive
+ *
+ * Returns `(port: number) => boolean`. Invalid specs throw at compile time.
+ */
+export function compilePortSpec(spec: string): (port: number) => boolean {
+  const dash = spec.indexOf('-')
+  if (dash === -1) {
+    const n = Number.parseInt(spec, 10)
+    if (!Number.isFinite(n) || n < 0 || n > 65535) {
+      throw new PatternError(`port "${spec}" must be 0–65535`)
+    }
+    return (port: number) => port === n
+  }
+  const lo = Number.parseInt(spec.slice(0, dash), 10)
+  const hi = Number.parseInt(spec.slice(dash + 1), 10)
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo < 0 || hi > 65535 || lo > hi) {
+    throw new PatternError(`port range "${spec}" must be low–high within 0–65535`)
+  }
+  return (port: number) => port >= lo && port <= hi
+}
+
+/**
+ * Compile a domain pattern into a matcher that supports subdomain inclusion.
+ *
+ * - `"github.com"` matches `github.com` AND any subdomain (`api.github.com`)
+ * - `"*.example.com"` matches only subdomains, not `example.com` itself
+ * - Glob characters (`*`, `?`, `[...]`) are handled by {@link compileGlob}.
+ *
+ * Returns a {@link CompiledPattern} whose `.re` is the anchored RegExp.
+ */
+export function compileDomainPattern(pattern: string): CompiledPattern {
+  // If the pattern already contains glob chars, use glob compilation.
+  if (/[*?[\]]/.test(pattern)) {
+    return compileGlob(pattern, { segments: false, maxStars: DEFAULT_MAX_STARS })
+  }
+  // Literal domain: match exactly OR as a parent of a subdomain.
+  // e.g. "github.com" matches "github.com" and "api.github.com"
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`^(?:.*\\.)?${escaped}$`, 'u')
+  return { source: pattern, re }
+}
+
+/**
+ * Compile a list of patterns (possibly `!`-prefixed) into param matchers.
+ * Returns `{ pattern, negated, compiled }` entries for the params dimension.
+ */
+export function compileParamPatterns(
+  patterns: readonly string[],
+  opts: { maxStars?: number } = {},
+): Array<{ readonly pattern: string; readonly negated: boolean; readonly compiled: CompiledPattern }> {
+  const maxStars = opts.maxStars ?? DEFAULT_MAX_STARS
+  return patterns.map((p) => {
+    if (p.startsWith('!') && p.length > 1) {
+      return { pattern: p, negated: true, compiled: compileGlob(p.slice(1), { segments: false, maxStars }) }
+    }
+    return { pattern: p, negated: false, compiled: compileGlob(p, { segments: false, maxStars }) }
+  })
+}

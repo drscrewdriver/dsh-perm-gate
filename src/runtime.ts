@@ -24,6 +24,8 @@ import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSe
 import { chatCompletion } from './classifier.js'
 import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
 import { decomposeShellCommand } from './shell.js'
+import { extractAgentCandidates } from './agent-identity.js'
+import { resolveRuleChain } from './rule-chain.js'
 import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
 import { permissionPresetOf, presetInScope, type SessionEventLike } from './preset.js'
 import { resolveGatePresets } from './config.js'
@@ -143,6 +145,8 @@ interface PendingAsk {
 }
 
 export interface PermGateRuntimeOptions extends PermGateConfig {
+  /** Workspace root for chain resolution. Defaults to process.cwd(). */
+  readonly cwd?: string
   readonly onRulesChanged?: (ruleset: CompiledRuleset) => void
   readonly now?: () => number
   /**
@@ -405,12 +409,34 @@ export class PermGateRuntime {
   }
 
   private compileInline(options: PermGateRuntimeOptions): CompiledRuleset {
-    const text = options.rulesFile !== undefined ? readFileSafe(options.rulesFile) : ''
     const empty: CompiledRuleset = {
       defaultAction: options.defaultAction ?? 'ask',
       deny: [], allow: [], ask: [],
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
     }
+
+    // Chain mode: when searchUp is enabled, use the multi-file chain resolver.
+    if (options.searchUp === true) {
+      const cwd = options.cwd ?? process.cwd()
+      const rulesFile = options.rulesFile !== undefined ? options.rulesFile : 'rules.yml'
+      try {
+        return resolveRuleChain(cwd, {
+          rulesFile,
+          searchUp: true,
+          fallbackPath: options.fallbackPath,
+          badFilePolicy: options.badFilePolicy ?? 'fail',
+          maxChainLength: options.maxChainLength ?? 10,
+        }, {
+          maxGlobStars: 2,
+          caseInsensitivePaths: options.caseInsensitivePaths ?? true,
+        })
+      } catch {
+        return empty
+      }
+    }
+
+    // Single-file mode (legacy): read and compile one rules file.
+    const text = options.rulesFile !== undefined ? readFileSafe(options.rulesFile) : ''
     if (text === '') return empty
     const hash = documentHash(text)
     const hit = this.cache.get(hash)
@@ -500,6 +526,7 @@ export class PermGateRuntime {
       home: cwdOf(exec),
       caseInsensitive: this.options.caseInsensitivePaths ?? true,
       dshHome: this.options.dshHome,
+      agentCandidates: extractAgentCandidates(exec),
     }
   }
 
