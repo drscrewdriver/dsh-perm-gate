@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **2.0.0**。裁决链、规则文件格式与自动审查档位请见
+`dsh-perm-gate` 版本 **2.1.1**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件
@@ -85,6 +85,42 @@ dsh plugin --profile web update dsh-perm-gate
 dsh profile reload --profile web
 ```
 
+## **DSH** 升级后：重打输入区图标补丁
+
+「自动审查（高权限）」之所以和「自动审查」一样显示盾+眼图标，只是因为
+`scripts/patch-permission-glyph.mjs` 把这一项加进了 **DSH 宿主包里的一张封闭 Map**。
+DSH 对插件档位**设计上就不给图标** —— 那张表自己的注释写着 *"host-configured
+names outside the design set get none"*；而插件能影响的 option 对象只携带
+`{value, name, description}`，所以插件侧没有可用的接缝。
+
+该补丁改的是**宿主**文件，因此 **DSH 升级或重装会把它抹掉**。升级*本插件*不会：
+图标从来不属于插件，而插件自己的贡献（`cordis.patch.yml` 里的 `name:` /
+`description:`）随包发布。
+
+```sh
+node scripts/patch-permission-glyph.mjs
+dsh profile reload --profile web
+```
+
+脚本是幂等的（重复执行是 no-op），只备份一次，且拒绝写坏切片 —— 它会对结果跑
+`node --check`，失败即还原备份 —— 所以每次 DSH 升级后无条件重跑都是安全的。
+它从运行中的 `node` 二进制反推包路径，因此 nvm 换版本或安装软链重指都不会让它失效。
+
+**重装插件并不会恢复图标。**`dsh plugin --profile web add …` 只是把参数转发给
+profile 目录里的 pnpm，只写 profile 自己的 `node_modules`；`-w`
+（`--workspace-root`，而本 profile 的 workspace 就是 `packages: ['.']`）对此没有
+任何改变。图标住在 DSH 安装里。在标准安装上，下面三条路径不是三份副本，而是
+**同一个物理文件**：
+
+| 路径 | 实际是什么 |
+|------|-----------|
+| `dirname(node)/node_modules/@deepseek-ai/dsh` | DSH 安装位（可能是软链） |
+| `<profile>/node_modules/@deepseek-ai/dsh-client-ui-conversation` | 指向它的**目录联接（junction）** |
+| `<dsh>/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js` | 被补丁的那个文件 |
+
+要观察的现象：档位依然工作、门禁依然生效，但它在输入区下拉里那一行没有图标，
+收起后的触发器显示纯文字，而同排其他档位是图标+文字。
+
 ## 从分裂的插件迁移
 
 `dsh-perm-gate` 把原先散落在 `dsh-permission-rules`、`dsh-auto-mode`、
@@ -137,6 +173,11 @@ dsh profile reload --profile web
 DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key 合并。
 请重载 profile 让 `cordis.patch.yml` 重新生效，并确认没有更晚加载的插件覆盖了
 `presets`。
+
+**「自动审查（高权限）」在输入区丢了图标。**
+DSH 升级或重装替换了被打了补丁的宿主 bundle；重装插件不会把它带回来。执行
+`node scripts/patch-permission-glyph.mjs` 后重载即可。档位本身不受影响 ——
+没有补丁，它的标签与门禁照常工作。
 
 **规则文件存在但 `--list` 显示 `ruleCount: 0`。**
 `rulesFile` 按 harness 进程的 CWD 解析，而不是插件目录。建议使用绝对路径，

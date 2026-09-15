@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` version **2.0.0**. Continue with the [README](./README.md) for the
+`dsh-perm-gate` version **2.1.1**. Continue with the [README](./README.md) for the
 decision chain, the rules file format and the 自动审查 tier.
 
 ## Requirements
@@ -88,6 +88,46 @@ Then re-apply the profile so the patch file is re-read:
 dsh profile reload --profile web
 ```
 
+## After a **DSH** upgrade: re-apply the composer glyph patch
+
+The 自动审查（高权限） tier shows the same shield+eye glyph as 自动审查 only because
+`scripts/patch-permission-glyph.mjs` added it to a **closed map inside a DSH host
+package**. DSH gives host-configured tiers no glyph by design — the map's own
+comment reads *"host-configured names outside the design set get none"* — and the
+option objects a plugin can influence carry only `{value, name, description}`, so
+there is no plugin-side seam to use instead.
+
+That patch edits a **host** file, so a DSH upgrade or reinstall erases it. Upgrading
+*this plugin* does not: the plugin never owned the glyph, and its own contribution
+(`name:` / `description:` in `cordis.patch.yml`) ships inside the package.
+
+```sh
+node scripts/patch-permission-glyph.mjs
+dsh profile reload --profile web
+```
+
+It is idempotent (a second run is a no-op), backs the bundle up once, and refuses to
+write a mis-sliced bundle — it runs `node --check` on the result and restores the
+backup if that fails — so it is safe to run unconditionally after every DSH upgrade.
+It locates the bundle from the running `node` binary, so an nvm version change or a
+re-pointed install symlink does not break it.
+
+**Reinstalling the plugin does not restore the glyph.** `dsh plugin --profile web
+add …` forwards to pnpm inside the profile directory and writes the profile's own
+`node_modules` only; `-w` (`--workspace-root`, and this profile's workspace is just
+`packages: ['.']`) changes nothing about that. The glyph lives in the DSH install.
+On a stock install these are not three copies but **one physical file**:
+
+| Path | What it is |
+|------|------------|
+| `dirname(node)/node_modules/@deepseek-ai/dsh` | the DSH install (may be a symlink) |
+| `<profile>/node_modules/@deepseek-ai/dsh-client-ui-conversation` | a **junction** into it |
+| `<dsh>/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js` | the patched file |
+
+Symptom to look for: the tier still works and still gates correctly, but its row in
+the composer dropdown has no icon and the collapsed trigger renders plain text
+where the other tiers render glyph + text.
+
 ## Migrate from the split plugins
 
 `dsh-perm-gate` merges the gate, the approval seam and the (optional) classifier
@@ -144,6 +184,12 @@ disappears from the session permission picker again.
 The DSH bundle patch replaces the whole `permission.config.presets` map instead of
 merging per key. Reload the profile so `cordis.patch.yml` is re-applied, and make
 sure no later plugin overwrites `presets`.
+
+**自动审查（高权限） lost its icon in the composer.**
+A DSH upgrade or reinstall replaced the host bundle the glyph was patched into;
+re-running the plugin install will not bring it back. Run
+`node scripts/patch-permission-glyph.mjs` and reload. The tier itself is
+unaffected — its label and its gating keep working without the patch.
 
 **`--list` reports `ruleCount: 0` although my rules file exists.**
 `rulesFile` is resolved against the process CWD of the harness, not the plugin

@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection-setup phase is bounded, concurrent connections are capped, and a throwing logger can
   no longer escalate into a crash. Proxy teardown is registered before the bind is awaited, so an
   early dispose cannot leak a bound port or a rewritten `process.env`.
+- **`permissive-full` had no icon in the composer picker.** The picker's glyph map is closed and,
+  by its own comment, gives host-configured names none, so 自动审查（高权限）rendered text-only
+  while 自动审查 showed shield+eye. `scripts/patch-permission-glyph.mjs` adds the missing entry to
+  that **host** map: idempotent, bracket-depth slicing, and it `node --check`s its own output and
+  restores the backup on failure. It patches a host package, so it must be re-run after every DSH
+  upgrade — reinstalling the plugin does **not** restore it, because `dsh plugin … add` only writes
+  the profile's own `node_modules`. Documented in all four INSTALL guides.
 
 ### Changed
 

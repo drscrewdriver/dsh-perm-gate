@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 버전 **2.0.0**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
+`dsh-perm-gate` 버전 **2.1.1**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
 
 ## 요구 사항
@@ -88,6 +88,46 @@ dsh plugin --profile web update dsh-perm-gate
 dsh profile reload --profile web
 ```
 
+## **DSH** 업그레이드 후: 입력창 아이콘 패치 재적용
+
+「自动审查（高权限）」가 「自动审查」와 같은 방패+눈 아이콘을 보여 주는 것은
+`scripts/patch-permission-glyph.mjs`가 **DSH 호스트 패키지 안의 닫힌 Map**에 그 항목을
+추가했기 때문일 뿐입니다. DSH는 플러그인이 제공한 티어에 **설계상 아이콘을 주지
+않습니다** —— 그 Map 자체의 주석이 *"host-configured names outside the design set get
+none"*이라고 말합니다. 플러그인이 영향을 줄 수 있는 option 객체는
+`{value, name, description}`만 나르므로, 대신 쓸 수 있는 플러그인 측 이음새가 없습니다.
+
+이 패치는 **호스트** 파일을 고치므로 **DSH 업그레이드나 재설치에서 사라집니다**.
+*이 플러그인*을 업그레이드할 때는 사라지지 않습니다. 아이콘은 애초에 플러그인 소유가
+아니었고, 플러그인 자신의 기여(`cordis.patch.yml`의 `name:` / `description:`)는
+패키지에 함께 실려 나갑니다.
+
+```sh
+node scripts/patch-permission-glyph.mjs
+dsh profile reload --profile web
+```
+
+이 스크립트는 멱등이며(두 번째 실행은 no-op), 백업은 한 번만 뜨고, 잘못 잘린 조각을
+쓰지 않습니다 —— 결과에 `node --check`를 돌려 실패하면 백업을 복원합니다 —— 따라서
+DSH 업그레이드 때마다 무조건 다시 실행해도 안전합니다. 실행 중인 `node` 바이너리에서
+패키지를 역산하므로 nvm 버전 변경이나 설치 symlink 재지정에도 깨지지 않습니다.
+
+**플러그인을 재설치해도 아이콘은 돌아오지 않습니다.**
+`dsh plugin --profile web add …`는 profile 디렉터리 안의 pnpm으로 인자를 넘기고
+profile 자신의 `node_modules`만 씁니다(`-w` = `--workspace-root`인데, 이 profile의
+workspace는 `packages: ['.']` 그 자체이므로 달라지는 것이 없습니다). 아이콘은 DSH
+설치 쪽에 있습니다. 표준 설치에서 아래 세 경로는 사본 세 개가 아니라
+**하나의 물리 파일**입니다:
+
+| 경로 | 실체 |
+|------|------|
+| `dirname(node)/node_modules/@deepseek-ai/dsh` | DSH 설치 위치(symlink일 수 있음) |
+| `<profile>/node_modules/@deepseek-ai/dsh-client-ui-conversation` | 그곳을 가리키는 **정션(junction)** |
+| `<dsh>/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js` | 패치 대상 파일 |
+
+관찰할 증상: 티어는 여전히 동작하고 게이트도 그대로지만, 입력창 드롭다운의 그 행에
+아이콘이 없고 접힌 트리거가 다른 티어의 아이콘+텍스트와 달리 텍스트만 표시됩니다.
+
 ## 분리된 플러그인에서 이전하기
 
 `dsh-perm-gate`는 `dsh-permission-rules`, `dsh-auto-mode`, `dsh-auto-review`,
@@ -142,6 +182,12 @@ dsh profile reload --profile web
 DSH 번들 패치는 `permission.config.presets`를 key 단위로 병합하지 않고 **전체 교체**
 합니다. profile을 다시 불러와 `cordis.patch.yml`을 재적용하고, 더 늦게 로드되는
 플러그인이 `presets`를 덮어쓰지 않는지 확인하세요.
+
+**「自动审查（高权限）」의 입력창 아이콘이 사라졌습니다.**
+DSH 업그레이드나 재설치가 패치해 둔 호스트 번들을 교체했습니다. 플러그인을
+재설치해도 되돌아오지 않습니다. `node scripts/patch-permission-glyph.mjs`를 실행하고
+다시 불러오세요. 티어 자체는 영향받지 않습니다 —— 패치가 없어도 라벨과 게이트는
+정상 동작합니다.
 
 **규칙 파일이 있는데 `--list`가 `ruleCount: 0`을 표시합니다.**
 `rulesFile`은 플러그인 디렉터리가 아니라 Harness 프로세스의 CWD에서 해석됩니다.

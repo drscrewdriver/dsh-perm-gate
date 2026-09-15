@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.0.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.1.1** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -250,10 +250,16 @@ default `gatePresets`, so either one gives you the full P0–P4 chain — the ga
 **name** only, never the sandbox mode.
 
 The picker label is a **host-supplied product string**, not a per-locale dictionary entry: DSH
-0.1.2 renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
+renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
 default row and the composer picker) and only supplies its own localized labels for the three
-built-in values, so `cordis.patch.yml` ships the Chinese label for every session. The tier draws
-**no icon** — the composer renders glyphs only for the built-in values.
+built-in values, so `cordis.patch.yml` ships the Chinese label for every session.
+
+The **icon** is a different story. The composer's glyph map is closed, and its own comment states
+the rule: *host-configured names outside the design set get none.* `permissive` is a built-in
+value, so 自动审查 already has a shield+eye glyph; `permissive-full` gets the same glyph only
+because `scripts/patch-permission-glyph.mjs` adds it to that map. That patch edits a **host**
+package, so it is lost on every DSH upgrade — see
+[After a DSH upgrade](./INSTALL.md#after-a-dsh-upgrade-re-apply-the-composer-glyph-patch).
 
 In `cordis.yml`:
 
@@ -353,8 +359,9 @@ channel existed), with `tools/result` settling the same ask as a fallback when t
 correlate it. Approvals report the post-approval learning progress (`n`/threshold), and the notice
 strip labels all three terminal states.
 
-The tier draws no icon in the permission picker: the composer's glyphs are keyed to the three
-built-in values, so a plugin-contributed tier is text-only on every surface.
+自动审查 and 自动审查（高权限） both draw the shield+eye glyph in the picker — the first from DSH's
+built-in map, the second from the host patch the installation guide describes. Without that patch
+the second tier is text-only on every surface; its label and its gating are unaffected.
 
 ### A selectable session tier
 
