@@ -360,6 +360,9 @@ export class PermGateRuntime {
   private readonly gatePresets: readonly string[]
   /** Extra tool names the user classified as safe (config `autoAllowTools`). */
   private readonly autoAllowExtra: ReadonlySet<string>
+  // ─── Network seam (T2.11) ───────────────────────────────────────────
+  /** In-flight shell executions for network attribution. */
+  private readonly inFlightShells = new Map<string, { tool: string; callId?: string }>()
   /**
    * Cache of the permission-preset fold. The key is the log's length plus the
    * identity of its LAST event: a session's log only appends, so "same length
@@ -528,6 +531,40 @@ export class PermGateRuntime {
       dshHome: this.options.dshHome,
       agentCandidates: extractAgentCandidates(exec),
     }
+  }
+
+  // ─── Network seam (T2.11) ───────────────────────────────────────────
+
+  /**
+   * Record a shell execution as in-flight for network attribution.
+   * Called from the pre-execute listener when a shell tool is about to run.
+   */
+  trackShellExecution(key: string, tool: string, callId?: string): void {
+    this.inFlightShells.set(key, { tool, callId })
+  }
+
+  /**
+   * Remove a shell execution from the in-flight table.
+   */
+  untrackShellExecution(key: string): void {
+    this.inFlightShells.delete(key)
+  }
+
+  /**
+   * Get the current attribution for proxy-layer decisions.
+   * Returns the most recent in-flight shell execution, or undefined.
+   */
+  currentAttribution(): { tool: string; callId?: string } | undefined {
+    // Return the most recently added entry (last value in map iteration order).
+    for (const value of this.inFlightShells.values()) {
+      return value
+    }
+    return undefined
+  }
+
+  /** The compiled ruleset (read-only view for network module). */
+  get compiledRuleset(): CompiledRuleset {
+    return this.ruleset
   }
 
   private liveRiskLearning(): RiskLearningState {

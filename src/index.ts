@@ -14,6 +14,8 @@ import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
+import { NetworkProxy, injectProxyEnv } from './proxy.js'
+import { decideNetworkTarget, type NetworkTarget } from './network.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -546,6 +548,42 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       approvalService = undefined
     }, 'dsh-perm-gate: approval answerer')
   })
+
+  // ─── Network proxy (Phase 2, T2.12) ─────────────────────────────────
+  // T2.10: network.enabled=false → zero behavior change (no proxy, no env injection).
+  const networkEnabled = typeof config.networkEnabled === 'boolean' ? config.networkEnabled : true
+  if (networkEnabled) {
+    const proxyBind = typeof config.networkBind === 'string' ? config.networkBind : '127.0.0.1'
+    const proxyPort = typeof config.networkPort === 'number' ? config.networkPort : 0
+    const networkMode = (typeof config.networkMode === 'string' ? config.networkMode : 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all'
+    const networkUnlisted = (typeof config.networkUnlisted === 'string' ? config.networkUnlisted : 'deny') as 'ask' | 'deny'
+    const networkLoopback = (typeof config.networkLoopback === 'string' ? config.networkLoopback : 'allow') as 'allow' | 'policy'
+    const networkNoProxy = (typeof config.networkNoProxy === 'string' ? config.networkNoProxy : 'clear') as 'clear' | 'preserve'
+
+    const proxy = new NetworkProxy({
+      bind: proxyBind,
+      port: proxyPort,
+      maxRecent: 100,
+      decide: (target: NetworkTarget) => decideNetworkTarget(runtime.compiledRuleset, target, {
+        mode: networkMode,
+        unlisted: networkUnlisted,
+        loopback: networkLoopback,
+      }),
+      attribution: () => runtime.currentAttribution(),
+      logger: { warn: (msg: string) => console.warn(msg) },
+    })
+
+    // Start proxy + inject env. Bind failure degrades gracefully (T2.9).
+    proxy.start().then((port) => {
+      if (port > 0) {
+        const disposeEnv = injectProxyEnv(port, networkNoProxy)
+        ctx.effect(() => () => {
+          void proxy.close()
+          disposeEnv()
+        }, 'dsh-perm-gate: network proxy')
+      }
+    }).catch(() => { /* already handled inside proxy.start() */ })
+  }
 
   return runtime
 }

@@ -139,6 +139,25 @@ export interface PermGateConfig {
   readonly badFilePolicy?: 'fail' | 'warn'
   /** Maximum number of files in the rule chain. Default 10. */
   readonly maxChainLength?: number
+  // ─── Network (Phase 2) ───────────────────────────────────────────────
+  /**
+   * Master network switch. When false, no proxy is started, no environment
+   * variables are injected, and no network interception occurs — zero
+   * behavior change from pre-network baseline. Default true.
+   */
+  readonly networkEnabled?: boolean
+  /** Network policy mode when auto-mapping from sandbox is not used. Default 'whitelist'. */
+  readonly networkMode?: import('./network.js').NetworkMode
+  /** How unlisted targets are handled in whitelist mode. Default 'deny'. */
+  readonly networkUnlisted?: import('./network.js').UnlistedAction
+  /** Loopback handling: 'allow' short-circuits before rules; 'policy' evaluates normally. Default 'allow'. */
+  readonly networkLoopback?: 'allow' | 'policy'
+  /** Proxy bind address. Default '127.0.0.1'. */
+  readonly networkBind?: string
+  /** Proxy bind port. Default 0 (ephemeral). */
+  readonly networkPort?: number
+  /** NO_PROXY handling: 'clear' empties it so policy cannot be bypassed; 'preserve' keeps ambient values. Default 'clear'. */
+  readonly networkNoProxy?: 'clear' | 'preserve'
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -236,6 +255,14 @@ export const Config: z<PermGateConfig> = z.object({
   fallbackPath: z.string(),
   badFilePolicy: z.union(['fail', 'warn'] as const).default('fail'),
   maxChainLength: z.number().min(1).max(50).default(10),
+  // Network (Phase 2)
+  networkEnabled: z.boolean().default(true),
+  networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
+  networkUnlisted: z.union(['ask', 'deny'] as const).default('deny'),
+  networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
+  networkBind: z.string().default('127.0.0.1'),
+  networkPort: z.number().min(0).max(65535).default(0),
+  networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
