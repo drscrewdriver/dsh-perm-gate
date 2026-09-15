@@ -165,6 +165,16 @@ export interface PermGateConfig {
   readonly networkPort?: number
   /** NO_PROXY handling: 'clear' empties it so policy cannot be bypassed; 'preserve' keeps ambient values. Default 'clear'. */
   readonly networkNoProxy?: 'clear' | 'preserve'
+  /**
+   * Rewrite `HTTP(S)_PROXY` / `ALL_PROXY` for subprocesses so their traffic
+   * reaches the proxy. Default true.
+   *
+   * Turn it off to run the proxy WITHOUT touching `process.env` — the
+   * listener still adjudicates whatever is explicitly pointed at it, but no
+   * ambient state is rewritten. Useful when the environment is managed
+   * elsewhere or when verifying the proxy in isolation.
+   */
+  readonly networkInjectEnv?: boolean
   // ─── Hot reload (Phase 3) ──────────────────────────────────────────
   /** Enable file watching for rule hot-reload. Default true. */
   readonly watch?: boolean
@@ -275,6 +285,7 @@ export const Config: z<PermGateConfig> = z.object({
   networkBind: z.string().default('127.0.0.1'),
   networkPort: z.number().min(0).max(65535).default(0),
   networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
+  networkInjectEnv: z.boolean().default(true),
   // Hot reload (Phase 3)
   watch: z.boolean().default(true),
   watchDebounceMs: z.number().min(50).max(5000).default(300),

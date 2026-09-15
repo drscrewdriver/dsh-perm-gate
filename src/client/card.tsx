@@ -73,6 +73,8 @@ export interface PermissiveCardValue {
   networkEnabled?: boolean
   /** Network policy mode. */
   networkMode?: 'deny-all' | 'whitelist' | 'allow-all'
+  /** Rewrite HTTP(S)_PROXY / ALL_PROXY for subprocesses. Default true. */
+  networkInjectEnv?: boolean
   // ─── Hot reload (Phase 3) ──────────────────────────────────────────
   /** Enable file watching for rule hot-reload. */
   watch?: boolean
@@ -853,6 +855,22 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         onChange={(event) => { void scope.set('networkEnabled', event.currentTarget.checked) }}
                       />
                       <span style={{ fontSize: '13px' }}>{value.networkEnabled === true ? 'ON' : 'OFF'}</span>
+                    </div>
+                    <p style={hintStyle}>{t('card.networkRebindNote')}</p>
+                  </section>
+
+                  {/* ─── Network env injection (Phase 2) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
+                    <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.networkInjectEnv !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('networkInjectEnv', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.networkInjectEnv !== false ? 'ON' : 'OFF'}</span>
                     </div>
                   </section>
 

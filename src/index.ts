@@ -9,13 +9,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
-import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
+import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
-import { NetworkProxy, injectProxyEnv } from './proxy.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
+import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
 import { RuleWatcher } from './watch.js'
 
 export const name = 'dsh-perm-gate'
@@ -435,6 +435,27 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }, 'dsh-perm-gate: session sweep')
   }
 
+  /**
+   * The network-relevant slice of a settings surface, as a comparison key.
+   * Used to decide whether a settings edit needs a proxy rebind at all — an
+   * unrelated edit (say, the allowlist) must not close and reopen the proxy.
+   */
+  const networkKeyOf = (source: unknown): string => {
+    const s = (source ?? {}) as Record<string, unknown>
+    return JSON.stringify([
+      s.networkEnabled, s.networkMode, s.networkUnlisted, s.networkLoopback,
+      s.networkBind, s.networkPort, s.networkNoProxy, s.networkInjectEnv,
+    ])
+  }
+  // Forward references, resolved during apply before any UI edit can fire:
+  // the settings watch only ever runs on a later user action. Held in an
+  // object so the mutable slots stay lint-clean and the intent is explicit.
+  const networkRefs: {
+    rebind?: () => void
+    snapshot?: () => unknown
+    appliedKey?: string
+  } = {}
+
   installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
     setSource: (source) => {
       current = source
@@ -453,6 +474,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         const next = asSurface(scope.get())
         if (next !== undefined && Array.isArray(next.allowlist)) {
           runtime.setAllowlist(next.allowlist.filter((x): x is string => typeof x === 'string'))
+        }
+        // A network knob changed: re-mount the proxy so the card's switches
+        // take effect without a plugin reload. Only a rebind-relevant edit
+        // triggers it.
+        const key = networkKeyOf(next)
+        if (networkRefs.appliedKey !== undefined && networkRefs.appliedKey !== key) {
+          networkRefs.appliedKey = key
+          networkRefs.rebind?.()
+        } else if (networkRefs.appliedKey === undefined) {
+          networkRefs.appliedKey = key
         }
       })
     },
@@ -494,6 +525,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       if (offLearning !== undefined) ctx.effect(() => () => { offLearning() }, 'dsh-perm-gate: learning route')
       const offHealth = registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
       if (offHealth !== undefined) ctx.effect(() => () => { offHealth() }, 'dsh-perm-gate: health route')
+      // Network diagnostics: mode, bind, port, proxy liveness, env injection,
+      // block counters and recent blocks. Read-only.
+      const offNetwork = registerNetworkRoute(webServer, {
+        snapshot: () => networkRefs.snapshot?.() ?? { enabled: false, proxyActive: false },
+      })
+      if (offNetwork !== undefined) ctx.effect(() => () => { offNetwork() }, 'dsh-perm-gate: network route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null
@@ -570,61 +607,60 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }, 'dsh-perm-gate: approval answerer')
   })
 
-  // ─── Network proxy (Phase 2, T2.12) ─────────────────────────────────
+  // ─── Network proxy (Phase 2, T2.12 + rebind) ────────────────────────
   // T2.10 escape hatch: default OFF. The network proxy is opt-in — enabling
   // it binds a loopback port and rewrites proxy env vars, so it must never
-  // be turned on implicitly. Set `networkEnabled: true` in the composition
-  // entry or flip the settings-card switch, then reload the plugin.
-  const networkEnabled = config.networkEnabled === true
-  if (networkEnabled) {
-    const proxyBind = typeof config.networkBind === 'string' ? config.networkBind : '127.0.0.1'
-    const proxyPort = typeof config.networkPort === 'number' ? config.networkPort : 0
-    const networkMode = (typeof config.networkMode === 'string' ? config.networkMode : 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all'
-    const networkUnlisted = (typeof config.networkUnlisted === 'string' ? config.networkUnlisted : 'deny') as 'ask' | 'deny'
-    const networkLoopback = (typeof config.networkLoopback === 'string' ? config.networkLoopback : 'allow') as 'allow' | 'policy'
-    const networkNoProxy = (typeof config.networkNoProxy === 'string' ? config.networkNoProxy : 'clear') as 'clear' | 'preserve'
-
-    const proxy = new NetworkProxy({
-      bind: proxyBind,
-      port: proxyPort,
-      maxRecent: 100,
-      decide: (target: NetworkTarget) => decideNetworkTarget(runtime.compiledRuleset, target, {
-        mode: networkMode,
-        unlisted: networkUnlisted,
-        loopback: networkLoopback,
-      }),
-      attribution: () => runtime.currentAttribution(),
-      // Surface proxy failures through the host's log channel when available
-      // (console is the fallback; both are guarded by the proxy's safeWarn).
-      logger: ctxLogger ?? { warn: (msg: string) => console.warn(msg) },
-    })
-
-    // Teardown is registered BEFORE awaiting the bind. A dispose that races
-    // the bind must still close the proxy and restore the environment —
-    // registering the effect inside `.then()` would leak a bound port and a
-    // rewritten process.env whenever the plugin unloads during startup.
-    let disposeEnv: (() => void) | undefined
-    let disposed = false
-    ctx.effect(() => () => {
-      disposed = true
-      void proxy.close()
-      disposeEnv?.()
-      disposeEnv = undefined
-    }, 'dsh-perm-gate: network proxy')
-
-    // Bind failure and start rejection both degrade to "no proxy" (T2.9).
-    void proxy.start().then((port) => {
-      // close() won the race: `proxy.close()` already restored everything,
-      // and injecting now would leak a rewritten environment.
-      if (disposed) return
-      if (port > 0) {
-        disposeEnv = injectProxyEnv(port, networkNoProxy)
-      }
-    }).catch((error: unknown) => {
-      loggerWarn(`[dsh-perm-gate] network proxy start failed: ${String(error)}`)
+  // be turned on implicitly.
+  //
+  // The lifecycle lives in NetworkLifecycle: one persistent teardown effect,
+  // serialized (re)binds, and a diagnostics snapshot. A settings change calls
+  // rebind(), so the card's switches take effect without a plugin reload.
+  const readNetworkConfig = (): NetworkConfigSnapshot => {
+    const live = current() as Record<string, unknown>
+    const str = (key: string, fallback: string): string =>
+      typeof live[key] === 'string' && live[key] !== '' ? live[key] as string : fallback
+    const num = (key: string, fallback: number): number =>
+      typeof live[key] === 'number' ? live[key] as number : fallback
+    const bool = (key: string, fallback: boolean): boolean =>
+      typeof live[key] === 'boolean' ? live[key] as boolean : fallback
+    return {
+      enabled: bool('networkEnabled', false),
+      mode: str('networkMode', 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all',
+      unlisted: str('networkUnlisted', 'deny') as 'ask' | 'deny',
+      loopback: str('networkLoopback', 'allow') as 'allow' | 'policy',
+      bind: str('networkBind', '127.0.0.1'),
+      port: num('networkPort', 0),
+      noProxy: str('networkNoProxy', 'clear') as 'clear' | 'preserve',
+      injectEnv: bool('networkInjectEnv', true),
+    }
+  }
+  const networkLogger: { warn(message: string): void; info?(message: string): void } =
+    ctxLogger !== undefined ? ctxLogger : { warn: (msg: string) => console.warn(msg) }
+  const networkLifecycle = new NetworkLifecycle({
+    effect: (disposeFactory, label) => { ctx.effect(disposeFactory, label) },
+    readConfig: readNetworkConfig,
+    decide: (target: NetworkTarget) => decideNetworkTarget(runtime.compiledRuleset, target, {
+      mode: readNetworkConfig().mode,
+      unlisted: readNetworkConfig().unlisted,
+      loopback: readNetworkConfig().loopback,
+    }),
+    attribution: () => runtime.currentAttribution(),
+    logger: networkLogger,
+  })
+  // Never awaited at apply(): a slow or failing bind must not block plugin
+  // load. attach() degrades to "no proxy" internally.
+  void networkLifecycle.attach().catch((error: unknown) => {
+    loggerWarn(`[dsh-perm-gate] network proxy attach failed: ${String(error)}`)
+  })
+  // Resolve the forward reference and seed the change-detection key from the
+  // config actually applied, so the first UI edit is compared against it.
+  networkRefs.rebind = () => {
+    void networkLifecycle.rebind().catch((error: unknown) => {
+      loggerWarn(`[dsh-perm-gate] network proxy rebind failed: ${String(error)}`)
     })
   }
-
+  networkRefs.snapshot = () => networkLifecycle.snapshot()
+  if (networkRefs.appliedKey === undefined) networkRefs.appliedKey = networkKeyOf(current())
   // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────
   const watchEnabled = typeof config.watch === 'boolean' ? config.watch : true
   if (watchEnabled) {

@@ -446,6 +446,7 @@ function readBody(req: RouteReq, limit = 1024 * 1024): Promise<Record<string, un
 export const EVENTS_ROUTE = '/api/dsh-perm-gate/events'
 export const LEARNING_ROUTE = '/api/dsh-perm-gate/learning'
 export const HEALTH_ROUTE = '/api/dsh-perm-gate/health'
+export const NETWORK_ROUTE = '/api/dsh-perm-gate/network'
 export const RECEIVER_ROUTE = '/api/dsh-perm-gate/receiver'
 export const DIFF_ROUTE = '/api/dsh-perm-gate/diff'
 export const REVERT_ROUTE = '/api/dsh-perm-gate/revert'
@@ -748,6 +749,40 @@ export function registerHealthRoute(server: unknown, provider: { check(): Promis
         (result) => json(res, 200, { ...result, ok: true }),
         (e: unknown) => json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) }),
       )
+    },
+  })
+}
+
+/** The network-state face the settings UI's network section needs. */
+export interface NetworkRouteProvider {
+  snapshot(): unknown
+}
+
+/**
+ * Register the network diagnostics route: `GET /api/dsh-perm-gate/network`
+ * returns the live network state (mode, bind, port, proxy liveness, env
+ * injection, block counters, recent blocks). Read-only — a policy change goes
+ * through the settings namespace, never through HTTP.
+ * Returns whether the route was registered.
+ */
+export function registerNetworkRoute(server: unknown, provider: NetworkRouteProvider): (() => void) | undefined {
+  const ws = routeServer(server)
+  if (ws === undefined) return undefined
+  return ws.register({
+    kind: 'exact',
+    path: NETWORK_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as RouteReq
+      const res = rawRes as RouteRes
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        json(res, 405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      try {
+        json(res, 200, { ok: true, ...(provider.snapshot() as object) })
+      } catch (e: unknown) {
+        json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) })
+      }
     },
   })
 }
