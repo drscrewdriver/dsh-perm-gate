@@ -114,7 +114,7 @@ dsh plugin --profile web add dsh-perm-gate
     rulesFile: ./permissions.yaml   # 선택. 기본값은 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 보호 대상 검사의 고정 루트
     defaultAction: ask              # allow | ask | deny
-    gatePresets: [permissive]       # 게이트가 활성화되는 티어(기본)
+    gatePresets: [permissive, permissive-full]   # 게이트가 활성화되는 티어(기본)
 ```
 
 ### 규칙 파일
@@ -199,6 +199,22 @@ DSH **자신**의 트래픽 —— 내장 네트워크 도구와 LLM 전송 —�
 사람/LLM 심 **이전에** 판정을 좁히거나 넓힐 뿐이고, P0 하드 거부는 단조롭고 협상
 불가능하게 유지됩니다.
 
+**두 가지 변형을 함께 제공합니다.** 프리셋의 `sandbox`와 `approval`은 **독립된** 노브이며, 둘을
+묶으면 나쁜 트레이드오프를 강요받기 때문입니다.
+
+| 선택기 표시 이름 | 머신 값 | sandbox | approval |
+|------------------|---------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查(완전 권한) | `permissive-full` | `danger-full-access` | `ask` |
+
+일반 티어는 내장 파일 샌드박스를 유지합니다. 그 샌드박스는 자식 프로세스 시작에 필요한 이름 있는
+파이프도 거부하므로 `git clone`, MSYS2/Cygwin의 `sh.exe`, ConPTY가 `Win32 error 5` /
+`couldn't create signal pipe`로 실패합니다. 게다가 게이트는 **`gatePresets`에 나열한 티어에서만
+동작**하므로, 게이트를 쓰려면 이 제한을 받아들여야 했습니다. 「自动审查(완전 권한)」는 이 결합을
+풉니다 —— **승인 동작은 동일하게 유지하고 파일 샌드박스 제한만 해제합니다**. 둘 다 기본
+`gatePresets`에 포함되므로 어느 쪽을 선택해도 P0–P4 전체 체인이 동작합니다. 게이트는 프리셋의
+**이름**만 읽고 sandbox 모드는 읽지 않습니다.
+
 선택기의 표시 이름은 **호스트가 공급하는 제품명**이며 언어별 사전 항목이 아닙니다. DSH 0.1.2는
 플러그인 티어의 `name:`을 두 권한 화면(일반 설정 기본 행과 입력창 선택기)에 그대로 렌더링하고
 자체 지역화 라벨은 세 가지 내장 값에만 부여하므로, `cordis.patch.yml`이 모든 세션에 중국어
@@ -269,8 +285,8 @@ never` 패스스루 — 는 사람에 그대로 위임되므로 향후 DSH 변�
 선택기에는 "auto-approval"이 아니라 **독립적으로 선택 가능한 승인 티어**인
 「自动审查」가 놓입니다.
 
-게이트가 동작하는 범위는 **`gatePresets`에 나열한 티어 안뿐**입니다(기본 `['permissive']`,
-이 플러그인이 추가하는 티어). 그 밖의 티어(Read Only / Workspace Write / Full access /
+게이트가 동작하는 범위는 **`gatePresets`에 나열한 티어 안뿐**입니다(기본
+`['permissive', 'permissive-full']`, 이 플러그인이 추가하는 두 티어). 그 밖의 티어(Read Only / Workspace Write / Full access /
 `custom`)에서는 게이트의 판정 흐름이 **전혀 실행되지 않습니다** — 허용도, ask도, 거부도,
 P0 하드 거부도, 거부 키워드 차단도, 감사 이벤트 기록도 하지 않습니다. 선택한 티어의 자체 정책이
 호출을 결정합니다. `danger-full-access`의 정의는 "승인 프롬프트 없는 전체 접근"이며, 이를 ask로

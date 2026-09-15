@@ -32,6 +32,24 @@
 # lost its implementation with that plugin, and this gate is inactive in it
 # (`gatePresets` defaults to `['permissive']`) — so it only offered a duplicate
 # tier that looked protected while nothing was.
+#
+# TWO tiers ship, because `sandbox` and `approval` are INDEPENDENT knobs and
+# coupling them forced a bad trade:
+#
+#   permissive       sandbox: workspace-write   approval: ask
+#   permissive-full  sandbox: danger-full-access approval: ask
+#
+# `permissive` keeps the built-in file sandbox. That sandbox also denies the
+# named pipes a child process needs to start — `git clone`, MSYS2/Cygwin
+# `sh.exe` and ConPTY all fail with `Win32 error 5` under it. Because this gate
+# is only active in the tiers listed in `gatePresets`, a user who wanted the
+# gate had to accept that restriction to get it. `permissive-full` removes the
+# coupling: same approval behaviour, no file-sandbox restriction.
+#
+# The gate itself only reads the preset NAME (see `src/preset.ts`), never the
+# sandbox mode, so both tiers get the full P0–P4 chain. `approval: ask` is
+# required on both — under `approval: never` the DSH seam rejects every ask
+# before any answerer runs, which would degrade this gate's asks to passthrough.
 - id: permission
   config:
     presets:
@@ -46,6 +64,11 @@
         approval: ask
         name: 自动审查
         description: 独立审批档 —— 作用域内安全操作自动放行，危险/未知越界转人工确认（审批强度可在「设置 → 插件 → 自动审查」调整）。
+      permissive-full:
+        sandbox: danger-full-access
+        approval: ask
+        name: 自动审查（完全权限）
+        description: 与「自动审查」完全相同的审批策略，但不限制文件沙箱 —— 供需要 git / 子进程 / Cygwin 工具（sh.exe、ConPTY）的场景使用。
       danger-full-access:
         sandbox: danger-full-access
         approval: never

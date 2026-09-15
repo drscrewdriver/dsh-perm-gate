@@ -251,10 +251,13 @@ export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
 }
 
 /**
- * Presets in which the gate is active. It owns the `permissive` tier; `'*'`
- * makes it global (every preset, including the hard-deny layer).
+ * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
+ * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
+ * same approval behaviour) — so a user can have the gate without inheriting a
+ * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
+ * preset, including the hard-deny layer).
  */
-export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive']
+export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive', 'permissive-full']
 
 /** Normalize the gate scope: an unset/empty list means the default. */
 export function resolveGatePresets(configured?: readonly string[]): readonly string[] {

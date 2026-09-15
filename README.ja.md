@@ -117,7 +117,7 @@ dsh plugin --profile web add dsh-perm-gate
     rulesFile: ./permissions.yaml   # 任意。既定は $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # 保護対象チェックのルート固定
     defaultAction: ask              # allow | ask | deny
-    gatePresets: [permissive]       # ゲートが有効なティア（既定）
+    gatePresets: [permissive, permissive-full]   # ゲートが有効なティア（既定）
 ```
 
 ### ルール ファイル
@@ -204,6 +204,22 @@ DSH **自身**の通信 —— 組み込みネットワークツールと LLM �
 発行することもありません。人間/LLM のシーム**の前**で判定を狭めたり広めたりする
 だけで、P0 ハード拒否は単調かつ交渉不能のままです。
 
+**2 つのバリアントを同梱します。** プリセットの `sandbox` と `approval` は**独立した**ノブであり、
+両者を結び付けると悪いトレードオフを強いられるためです。
+
+| ピッカーの表示名 | マシン値 | sandbox | approval |
+|------------------|----------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查（完全権限） | `permissive-full` | `danger-full-access` | `ask` |
+
+通常のティアは組み込みのファイルサンドボックスを維持します。そのサンドボックスは子プロセスの
+起動に必要な名前付きパイプも拒否するため、`git clone`、MSYS2/Cygwin の `sh.exe`、ConPTY は
+`Win32 error 5` / `couldn't create signal pipe` で失敗します。しかもゲートは
+**`gatePresets` に列挙したティアでしか動作しない**ため、ゲートを使いたい場合はこの制限を受け入れる
+必要がありました。「自动审查（完全権限）」はこの結合を解きます —— **承認動作は同一のまま、ファイル
+サンドボックスの制限だけを外します**。どちらも既定の `gatePresets` に含まれるため、どちらを選んでも
+P0–P4 の全チェーンが動作します。ゲートはプリセットの**名前**だけを読み、sandbox モードは読みません。
+
 ピッカーの表示名は**ホストが供給する製品名**で、言語別辞書の項目ではありません。DSH 0.1.2 は
 プラグイン提供ティアの `name:` を 2 つの権限サーフェス（一般設定の既定行と入力欄のピッカー）で
 そのまま描画し、自前のローカライズ済みラベルは 3 つの組み込み値にしか与えないため、
@@ -271,8 +287,8 @@ never` パススルー — は人手に変更なく委譲されるため、将�
 セッションの権限ピッカーには「auto-approval」ではなく、**独立して選択できる承認
 ティア**として「自动审查」が並びます。
 
-ゲートが動作するのは **`gatePresets` に列挙したティアの中だけ**です（既定 `['permissive']`、
-このプラグインが追加するティア）。それ以外のティア（Read Only / Workspace Write /
+ゲートが動作するのは **`gatePresets` に列挙したティアの中だけ**です（既定
+`['permissive', 'permissive-full']`、このプラグインが追加する 2 つのティア）。それ以外のティア（Read Only / Workspace Write /
 Full access / `custom`）では、ゲートの判定フローは**一切実行されません**——許可も、ask も、
 拒否も、P0 ハード拒否も、拒否キーワードの遮断も、監査イベントの記録も行いません。選択された
 ティア自身の方針が呼び出しを決めます。`danger-full-access` の定義は「承認プロンプトなしの

@@ -87,7 +87,7 @@ dsh plugin --profile web add dsh-perm-gate
     rulesFile: ./permissions.yaml   # 可选；默认 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME
     defaultAction: ask
-    gatePresets: [permissive]       # 门禁生效的档位（默认值）
+    gatePresets: [permissive, permissive-full]   # 门禁生效的档位（默认值）
     sessionSweep: true              # 每小时清理已归档/已删除会话的门禁数据
 ```
 
@@ -153,6 +153,20 @@ DSH **自身**的网络流量 —— 内建网络工具与 LLM 传输 —— 刻
 它不是泛化的"自动审批"、也不授予泛化权限：只会在人类/LLM 接缝**之前**收窄或放宽决策，
 P0 硬拒绝始终单调且不可协商。
 
+**提供两个变体** —— 因为预设的 `sandbox` 与 `approval` 是两根**独立**旋钮，把它们绑死会逼出
+一个糟糕的取舍：
+
+| 下拉框名称 | 机器值 | sandbox | approval |
+|-----------|--------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查（完全权限） | `permissive-full` | `danger-full-access` | `ask` |
+
+普通档保留内置文件沙箱。而那个沙箱**同时**拒绝子进程启动所需的命名管道 —— 所以 `git clone`、
+MSYS2/Cygwin 的 `sh.exe`、ConPTY 都会以 `Win32 error 5` / `couldn't create signal pipe` 失败。
+又因为门禁**只在 `gatePresets` 列出的档位里生效**，想用门禁就必须接受这个限制。
+「自动审查（完全权限）」解开了这个耦合：**审批行为完全相同，但不限制文件沙箱**。两者都在默认
+`gatePresets` 里，任选其一都能获得完整的 P0–P4 链路 —— 门禁只读预设的**名字**，从不读 sandbox 模式。
+
 下拉框里的名字是**宿主提供的产品名**，不是逐语言的字典项：DSH 0.1.2 对插件档位在**两个**权限界面上
 （通用设置默认档行、输入栏权限选择器）都原样渲染补丁里的 `name:`，只给三个内置档提供自己的本地化
 标签，因此 `cordis.patch.yml` 直接写中文名，对所有会话一致。该档位**不画图标**——选择器的图标只按
@@ -211,7 +225,8 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 `@deepseek-ai/dsh-base/cordis.patch.yml`）；`test/patch-presets.spec.ts` 固定了这份键集合。因此会话权限
 下拉里会出现「自动审查」这个**独立可选审批档**，而不是"auto-approval"档。
 
-门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive']`，即本插件新增的那一档）。在其余任何档位
+门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive', 'permissive-full']`，即本插件新增的
+两个档位）。在其余任何档位
 （Read Only、Workspace Write、Full access、`custom`）里，门禁的判定流程**完全不运行**：不放行、不弹审批、
 不拒绝、不执行 P0 硬拒绝、不做黑名单关键词拦截，也不写审计事件——该档位自己的策略说了算。这正是重点所在：
 `danger-full-access` 的定义就是"全权限、不弹审批"，用 ask 去覆盖它毫无意义（该档 `approval: never` 会让审批接缝

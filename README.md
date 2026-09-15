@@ -77,11 +77,13 @@ cross-plugin version coupling.
   malformed rules, and source-hash compile caching.
 - **Audit** — every decision is logged as an `{ignorable:true}` event with its `callId`; the
   model-visible reason matches the recorded outcome.
-- **自动审查 tier** (`permissive`) — an **independent approval mode** (separate from read-only,
-  full-access and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end
-  exposes a **single switch** (`permissive`); the four backend strategies are **combinable** and
-  driven by plugin settings — still fail-closed against P0. The permission picker and the
-  settings row both show it under the product label 自动审查, with no icon.
+- **自动审查 tier** (`permissive`, plus `permissive-full`) — an **independent approval mode**
+  (separate from read-only, full-access and whitelist tiers) that is neither "auto-approve" nor
+  blanket trust. Front-end exposes a **single switch** (`permissive`); the four backend strategies
+  are **combinable** and driven by plugin settings — still fail-closed against P0. The permission
+  picker and the settings row both show it under the product label 自动审查, with no icon. The
+  `permissive-full` variant keeps the identical approval behaviour but drops the built-in file
+  sandbox, which otherwise denies the named pipes `git clone` / Cygwin / ConPTY need.
 - **Sandbox-escalation auto-answer** (`trustEscalation`) — a sandbox escalation is asked from
   *inside* the shell / pwsh / edit tool body, after `tools/pre-execute`, so the gate never saw
   it and a call it auto-allowed still prompted you to approve the widening. With this strategy
@@ -125,7 +127,7 @@ Add the plugin to `cordis.yml`:
     rulesFile: ./permissions.yaml   # optional; defaults to $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # root pinned for protected-target checks
     defaultAction: ask              # allow | ask | deny
-    gatePresets: [permissive]       # tiers where the gate is active at all (default)
+    gatePresets: [permissive, permissive-full]   # tiers where the gate is active (default)
     sessionSweep: true              # hourly cleanup of archived/dead sessions' gate data
 ```
 
@@ -228,6 +230,22 @@ proxy liveness, env-injection state, block counters, recent blocks).
 Read Only / Workspace Write / Full access / Whitelist. It is **not** generic "auto-approval" and
 never mints blanket authority: it only narrows or widens the seam *before* the human/LLM step
 while P0 hard-deny stays monotonic and non-negotiable.
+
+**Two variants ship**, because a preset's `sandbox` and `approval` are independent knobs and
+coupling them forced a bad trade:
+
+| Picker label | Machine value | sandbox | approval |
+|--------------|---------------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查（完全权限） | `permissive-full` | `danger-full-access` | `ask` |
+
+The plain tier keeps the built-in file sandbox. That sandbox also denies the named pipes a child
+process needs to start, so `git clone`, MSYS2/Cygwin `sh.exe` and ConPTY fail under it with
+`Win32 error 5` / `couldn't create signal pipe`. Because the gate is active **only** in the tiers
+listed in `gatePresets`, wanting the gate meant accepting that restriction. 自动审查（完全权限）
+removes the coupling: identical approval behaviour, no file-sandbox restriction. Both are in the
+default `gatePresets`, so either one gives you the full P0–P4 chain — the gate reads the preset
+**name** only, never the sandbox mode.
 
 The picker label is a **host-supplied product string**, not a per-locale dictionary entry: DSH
 0.1.2 renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
@@ -346,16 +364,17 @@ built-ins (`read-only` / `workspace-write` / `danger-full-access`, from
 session permission picker offers 自动审查 as an independent selectable approval tier, not a
 generic "auto-approval" mode.
 
-The gate is active **only in the tiers listed in `gatePresets`** (default `['permissive']`, the
-tier this plugin adds). In every other tier — Read Only, Workspace Write, Full access,
-`custom` — the gate's decision flow does not run at all: no allow, no ask, no deny, no P0
-hard-deny, no deny-keyword veto, and no audit event. The selected tier's own policy governs the
-call, which is the point: `danger-full-access` is defined as "full access without approval
-prompts", so overruling it with an ask (unanswerable there — the approval seam rejects before any
-answerer runs, producing `the user rejected tool "..."` with no panel) or with a hard-deny would
-silently contradict the tier the user chose. `gatePresets: ['*']` makes the gate global again
-(hard-deny included); inside an active tier an `ask` is still degraded to passthrough when the
-session's effective approval policy is `never`.
+The gate is active **only in the tiers listed in `gatePresets`** (default
+`['permissive', 'permissive-full']`, the two tiers this plugin adds). In every other tier —
+Read Only, Workspace Write, Full access, `custom` — the gate's decision flow does not run at all:
+no allow, no ask, no deny, no P0 hard-deny, no deny-keyword veto, and no audit event. The
+selected tier's own policy governs the call, which is the point: the built-in
+`danger-full-access` is defined as "full access without approval prompts", so overruling it with
+an ask (unanswerable there — the approval seam rejects before any answerer runs, producing
+`the user rejected tool "..."` with no panel) or with a hard-deny would silently contradict the
+tier the user chose. `gatePresets: ['*']` makes the gate global again (hard-deny included);
+inside an active tier an `ask` is still degraded to passthrough when the session's effective
+approval policy is `never` — which is why both 自动审查 tiers declare `approval: ask`.
 
 ### Configurable in the UI
 

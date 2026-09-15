@@ -81,11 +81,22 @@ describe('permission-preset fold', () => {
     expect(presetInScope(undefined, ['*'])).toBe(true)
   })
 
-  it('defaults the product scope to the gate\'s own tier', () => {
-    expect(resolveConfig({}).gatePresets).toEqual(['permissive'])
+  it('defaults the product scope to the gate\'s own tiers', () => {
+    // Both 自动审查 tiers: the file-sandboxed one and the full-access one that
+    // lifts the sandbox restriction (which otherwise breaks git / Cygwin
+    // tools). Same gate, same approval behaviour, no sandbox coupling.
+    expect(resolveConfig({}).gatePresets).toEqual(['permissive', 'permissive-full'])
     expect(resolveConfig({ gatePresets: ['permissive', 'workspace-write'] }).gatePresets)
       .toEqual(['permissive', 'workspace-write'])
-    expect(resolveConfig({ gatePresets: [] }).gatePresets).toEqual(['permissive'])
+    expect(resolveConfig({ gatePresets: [] }).gatePresets).toEqual(['permissive', 'permissive-full'])
+  })
+
+  it('is active in the full-access 自动审查 tier', () => {
+    const exec = execModern('permissive-full', 'snapshotEvents')
+    const runtime = new PermGateRuntime({ rulesFile: undefined })
+    // The gate reads the preset NAME only — never the sandbox mode — so the
+    // P0–P4 chain runs identically in both tiers.
+    expect(runtime.decideExecution(exec.exec())?.kind).toBe('ask')
   })
 
   it('reads the log through whichever accessor this DSH line ships', () => {
