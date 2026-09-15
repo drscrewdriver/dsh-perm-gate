@@ -129,6 +129,14 @@ export class NetworkProxy {
     server.on('error', (error: unknown) => {
       this.options.logger.warn(`[dsh-perm-gate] proxy server error: ${String(error)}`)
     })
+    // T2.9 safety: catch client socket errors that slip through individual
+    // request handlers (ECONNRESET after 403, etc.) — never crash the host.
+    server.on('clientError', (err: Error, socket: Duplex) => {
+      if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+        this.options.logger.warn(`[dsh-perm-gate] proxy clientError: ${String(err)}`)
+      }
+      if (!socket.destroyed) socket.destroy()
+    })
     this.server = server
     try {
       const port = await new Promise<number>((resolve, reject) => {
@@ -193,6 +201,12 @@ export class NetworkProxy {
           res.destroy()
         }
       })
+      // Suppress ECONNRESET from client closing after receiving 403/502.
+      req.on('error', (err: Error) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
+          this.options.logger.warn(`[dsh-perm-gate] proxy req error: ${String(err)}`)
+        }
+      })
       req.pipe(proxyReq)
     })
   }
@@ -200,6 +214,22 @@ export class NetworkProxy {
   // ─── CONNECT tunnel ──────────────────────────────────────────────────
 
   private async handleConnect(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    // T2.8/T2.9 safety: attach error handler IMMEDIATELY to prevent unhandled
+    // errors from crashing the host process. Client may RST at any point
+    // (e.g. after receiving a 403 block), and upstream may fail to connect.
+    let upstream: ReturnType<typeof connect> | undefined
+    const suppressError = (err: Error): void => {
+      // Suppress ECONNRESET / EPIPE after a 403 block — expected behavior.
+      // Only log unexpected errors.
+      if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+        this.options.logger.warn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
+      }
+    }
+    socket.on('error', (err: Error) => {
+      suppressError(err)
+      if (upstream !== undefined) upstream.destroy()
+    })
+
     const target = connectTarget(req.url ?? '')
     if (target === undefined) {
       socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
@@ -212,22 +242,24 @@ export class NetworkProxy {
       socket.end(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
       return
     }
-    const upstream = connect(target.port ?? 443, target.host)
+    upstream = connect(target.port ?? 443, target.host)
     this.sockets.add(socket)
     this.sockets.add(upstream)
     const cleanup = (): void => {
       this.sockets.delete(socket)
-      this.sockets.delete(upstream)
+      this.sockets.delete(upstream!)
     }
     socket.on('close', cleanup)
     upstream.on('close', cleanup)
-    upstream.on('error', () => socket.destroy())
-    socket.on('error', () => upstream.destroy())
+    upstream.on('error', (err: Error) => {
+      suppressError(err)
+      socket.destroy()
+    })
     upstream.once('connect', () => {
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
-      if (head.length > 0) upstream.write(head)
-      upstream.pipe(socket)
-      socket.pipe(upstream)
+      if (head.length > 0) upstream!.write(head)
+      upstream!.pipe(socket)
+      socket.pipe(upstream!)
     })
   }
 
