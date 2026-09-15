@@ -261,3 +261,78 @@ allow:
     expect(proxy.blockStats().denied).toBeGreaterThan(0)
   })
 })
+
+describe('proxy lifecycle robustness', () => {
+  it('concurrent start() calls share one bind', async () => {
+    const proxy = track(blockingProxy())
+    const [a, b, c] = await Promise.all([proxy.start(), proxy.start(), proxy.start()])
+    expect(a).toBeGreaterThan(0)
+    expect(b).toBe(a)
+    expect(c).toBe(a)
+  })
+
+  it('never throws when the logger itself throws', async () => {
+    const proxy = track(blockingProxy({
+      logger: { warn: () => { throw new Error('logger exploded') } },
+    }))
+    const port = await proxy.start()
+    expect(port).toBeGreaterThan(0)
+
+    // The block path logs through the throwing logger; it must not escape.
+    const { socket, response } = await sendConnect(port, '10.0.0.9:443')
+    expect(response).toContain('403')
+    socket.destroy()
+  })
+
+  it('tears the server down when close() races an in-flight bind', async () => {
+    const proxy = blockingProxy()
+    const starting = proxy.start()
+    // close() lands while the bind is still in flight.
+    const closing = proxy.close()
+    const port = await starting
+    await closing
+
+    // Either the bind lost (port 0 / -1) or it won and was torn down — but
+    // the proxy must never end up listening with port > 0 after close().
+    expect(proxy.port).toBeLessThanOrEqual(0)
+    expect(port).toBeLessThanOrEqual(0)
+
+    // And it is genuinely not serving.
+    await expect(proxy.close()).resolves.toBeUndefined()
+  })
+
+  it('decides on the literal name when DNS cannot resolve in time', async () => {
+    const seen: string[] = []
+    const proxy = track(new NetworkProxy({
+      bind: '127.0.0.1',
+      port: 0,
+      maxRecent: 10,
+      dnsTimeoutMs: 1, // force the timeout path
+      decide: (t: NetworkTarget) => {
+        seen.push(t.host)
+        return { action: 'deny', matched: false, mode: 'deny-all' }
+      },
+      logger,
+    }))
+    const port = await proxy.start()
+    const { socket, response } = await sendConnect(port, 'slow.invalid:443', 4000)
+    expect(response).toContain('403')
+    expect(seen).toContain('slow.invalid')
+    socket.destroy()
+  })
+
+  it('bounds the connection-setup phase (slowloris guard)', async () => {
+    const proxy = track(blockingProxy({ headersTimeoutMs: 500 }))
+    const port = await proxy.start()
+
+    // Open a socket and send nothing at all.
+    const idle = connect(port, '127.0.0.1')
+    await new Promise<void>((r) => idle.once('connect', () => r()))
+    const closed = await new Promise<boolean>((resolve) => {
+      idle.on('close', () => resolve(true))
+      setTimeout(() => resolve(false), 2500)
+    })
+    expect(closed).toBe(true)
+    idle.destroy()
+  })
+})

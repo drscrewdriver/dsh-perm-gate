@@ -271,6 +271,26 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     : undefined
   const hostModelService = injected.agentDefaultModel ?? fallbackGet('agentDefaultModel')
 
+  // Host log channel, probed rather than assumed: cordis exposes `ctx.logger`,
+  // but the shape moved between DSH lines. Falls back to console so a warning
+  // is never silently dropped — and never throws, because these calls happen
+  // inside error handlers where a throw would escalate into a host crash.
+  const ctxLogger = (() => {
+    const candidate = (ctx as unknown as { logger?: unknown }).logger
+    if (candidate !== null && typeof candidate === 'object' && typeof (candidate as { warn?: unknown }).warn === 'function') {
+      return candidate as { warn(message: string): void }
+    }
+    return undefined
+  })()
+  const loggerWarn = (message: string): void => {
+    try {
+      if (ctxLogger !== undefined) ctxLogger.warn(message)
+      else console.warn(message)
+    } catch {
+      // A throwing logger must never become an unhandled error.
+    }
+  }
+
   // The live approval service, captured by the optional inject below. Its
   // `effectivePolicy` tells the gate whether an ask can reach a human at all.
   //
@@ -574,19 +594,35 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         loopback: networkLoopback,
       }),
       attribution: () => runtime.currentAttribution(),
-      logger: { warn: (msg: string) => console.warn(msg) },
+      // Surface proxy failures through the host's log channel when available
+      // (console is the fallback; both are guarded by the proxy's safeWarn).
+      logger: ctxLogger ?? { warn: (msg: string) => console.warn(msg) },
     })
 
-    // Start proxy + inject env. Bind failure degrades gracefully (T2.9).
-    proxy.start().then((port) => {
+    // Teardown is registered BEFORE awaiting the bind. A dispose that races
+    // the bind must still close the proxy and restore the environment —
+    // registering the effect inside `.then()` would leak a bound port and a
+    // rewritten process.env whenever the plugin unloads during startup.
+    let disposeEnv: (() => void) | undefined
+    let disposed = false
+    ctx.effect(() => () => {
+      disposed = true
+      void proxy.close()
+      disposeEnv?.()
+      disposeEnv = undefined
+    }, 'dsh-perm-gate: network proxy')
+
+    // Bind failure and start rejection both degrade to "no proxy" (T2.9).
+    void proxy.start().then((port) => {
+      // close() won the race: `proxy.close()` already restored everything,
+      // and injecting now would leak a rewritten environment.
+      if (disposed) return
       if (port > 0) {
-        const disposeEnv = injectProxyEnv(port, networkNoProxy)
-        ctx.effect(() => () => {
-          void proxy.close()
-          disposeEnv()
-        }, 'dsh-perm-gate: network proxy')
+        disposeEnv = injectProxyEnv(port, networkNoProxy)
       }
-    }).catch(() => { /* already handled inside proxy.start() */ })
+    }).catch((error: unknown) => {
+      loggerWarn(`[dsh-perm-gate] network proxy start failed: ${String(error)}`)
+    })
   }
 
   // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────

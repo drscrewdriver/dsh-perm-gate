@@ -30,6 +30,25 @@ export const PROXY_ENV_NAMES: readonly string[] = ['HTTP_PROXY', 'HTTPS_PROXY', 
 /** NO_PROXY env var names cleared by the injector. */
 export const NO_PROXY_ENV_NAMES: readonly string[] = ['NO_PROXY', 'no_proxy']
 
+/** Default DNS lookup bound (ms). A black-holed resolver must not hang a CONNECT. */
+export const DNS_TIMEOUT_MS = 3000
+
+/** Default connection-setup bound (ms) — slowloris guard. */
+export const HEADERS_TIMEOUT_MS = 60_000
+
+/** Default cap on concurrent accepted connections. */
+export const MAX_CONNECTIONS = 256
+
+/** Bound on how long close() waits for a server to finish closing (ms). */
+export const CLOSE_TIMEOUT_MS = 2000
+
+/**
+ * The socket face this proxy needs: stream Duplex methods plus the
+ * idle-timeout setter. Node hands 'connection' / 'connect' a `net.Socket`
+ * at runtime, but the `connect` event is typed as `Duplex`.
+ */
+type ProxySocket = Duplex & { setTimeout(ms: number, callback?: () => void): unknown }
+
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 /** One recorded proxy-layer block. */
@@ -75,6 +94,12 @@ export interface NetworkProxyOptions {
   readonly attribution?: () => ProxyAttribution | undefined
   /** Called for every blocked connection. */
   readonly onBlock?: (record: NetworkBlockRecord, attribution: ProxyAttribution | undefined) => void
+  /** Bind a DNS lookup with this timeout (ms). Default {@link DNS_TIMEOUT_MS}. */
+  readonly dnsTimeoutMs?: number
+  /** Connection-setup bound (ms). Default {@link HEADERS_TIMEOUT_MS}. */
+  readonly headersTimeoutMs?: number
+  /** Cap on concurrent connections. Default {@link MAX_CONNECTIONS}. */
+  readonly maxConnections?: number
   /** Logger sink (proxy failures must never crash the host). */
   readonly logger: { warn(message: string): void }
 }
@@ -92,8 +117,25 @@ export class NetworkProxy {
   private readonly recent: NetworkBlockRecord[] = []
   private readonly stats: NetworkStats = { denied: 0, askBlocked: 0 }
   private actualPort = 0
+  /** In-flight start(); guards against a second concurrent bind. */
+  private starting: Promise<number> | undefined
+  /** Set by close(); a bind resolving afterwards tears itself down. */
+  private closed = false
 
   constructor(private readonly options: NetworkProxyOptions) {}
+
+  /**
+   * Logger sink that can never throw. The logger is called from inside
+   * 'error' handlers, so a throwing logger would itself become an
+   * unhandled error and defeat the whole point of the guard.
+   */
+  private safeWarn(message: string): void {
+    try {
+      this.options.logger.warn(message)
+    } catch {
+      // A logger that throws must never escalate into a host crash.
+    }
+  }
 
   /** The bound port (valid after start resolves). */
   get port(): number {
@@ -118,27 +160,43 @@ export class NetworkProxy {
   /**
    * Bind the server and return the actual port.
    * On bind failure: warns and returns -1 (degraded mode — no proxy).
+   * Concurrent calls share the single in-flight bind.
    */
   async start(): Promise<number> {
+    if (this.starting !== undefined) return this.starting
+    this.starting = this.bind()
+    try {
+      return await this.starting
+    } finally {
+      this.starting = undefined
+    }
+  }
+
+  private async bind(): Promise<number> {
     const server = createServer((req, res) => {
+      // The request arrived: lift the pre-request idle bound.
+      req.socket.setTimeout(0)
       this.handleRequest(req, res).catch((err) => {
-        this.options.logger.warn(`[dsh-perm-gate] proxy request error: ${String(err)}`)
+        this.safeWarn(`[dsh-perm-gate] proxy request error: ${String(err)}`)
       })
     })
     server.on('connect', (req, socket, head) => {
+      // CONNECT parsed: lift the pre-request idle bound so the tunnel may
+      // stay open for as long as the client needs.
+      ;(socket as ProxySocket).setTimeout(0)
       this.handleConnect(req, socket, head).catch((err) => {
-        this.options.logger.warn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
+        this.safeWarn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
         if (!socket.destroyed) socket.destroy()
       })
     })
     server.on('error', (error: unknown) => {
-      this.options.logger.warn(`[dsh-perm-gate] proxy server error: ${String(error)}`)
+      this.safeWarn(`[dsh-perm-gate] proxy server error: ${String(error)}`)
     })
     // T2.9 safety: catch client socket errors that slip through individual
     // request handlers (ECONNRESET after 403, etc.) — never crash the host.
     server.on('clientError', (err: Error, socket: Duplex) => {
       if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
-        this.options.logger.warn(`[dsh-perm-gate] proxy clientError: ${String(err)}`)
+        this.safeWarn(`[dsh-perm-gate] proxy clientError: ${String(err)}`)
       }
       if (!socket.destroyed) socket.destroy()
     })
@@ -150,12 +208,28 @@ export class NetworkProxy {
     server.on('connection', (socket: Duplex) => {
       socket.on('error', (err: Error) => {
         if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
-          this.options.logger.warn(`[dsh-perm-gate] proxy socket error: ${String(err)}`)
+          this.safeWarn(`[dsh-perm-gate] proxy socket error: ${String(err)}`)
         }
         if (!socket.destroyed) socket.destroy()
       })
+      // Pre-request idle bound. `headersTimeout` only bounds a *partially
+      // sent* header block, so a peer that connects and sends nothing would
+      // hold the socket forever. Cleared as soon as the request/CONNECT is
+      // parsed, so long-lived tunnels are unaffected.
+      ;(socket as ProxySocket).setTimeout(this.options.headersTimeoutMs ?? HEADERS_TIMEOUT_MS, () => {
+        socket.destroy()
+      })
     })
     this.server = server
+    // Slowloris guard: bound the connection-setup phase. A peer that opens a
+    // socket and dribbles headers would otherwise hold a connection forever.
+    // CONNECT is emitted as soon as headers parse, so this protects setup
+    // without touching the (legitimately long-lived) tunnel phase.
+    server.headersTimeout = this.options.headersTimeoutMs ?? HEADERS_TIMEOUT_MS
+    // Bounded concurrency: a policy proxy must not accumulate unbounded
+    // sockets. Excess connections are refused by the server rather than
+    // growing the tracked set without limit.
+    server.maxConnections = this.options.maxConnections ?? MAX_CONNECTIONS
     try {
       const port = await new Promise<number>((resolve, reject) => {
         const onError = (error: Error): void => {
@@ -172,26 +246,61 @@ export class NetworkProxy {
         server.listen(this.options.port, this.options.bind)
       })
       this.actualPort = port
+      // close() landed while the bind was in flight: this server is already
+      // orphaned, so tear it down here rather than leaving a listening socket
+      // (and a rewritten environment) behind.
+      if (this.closed) {
+        this.actualPort = 0
+        this.server = undefined
+        try { server.close() } catch { /* never started */ }
+        return -1
+      }
       return port
     } catch (error) {
       // T2.9: Bind failure degradation — warn + continue without proxy.
-      this.options.logger.warn(`[dsh-perm-gate] proxy bind failed (port ${this.options.port}): ${String(error)} — continuing without network proxy`)
+      this.safeWarn(`[dsh-perm-gate] proxy bind failed (port ${this.options.port}): ${String(error)} — continuing without network proxy`)
       this.server = undefined
       this.actualPort = -1
       return -1
     }
   }
 
-  /** Stop the server and destroy every tunnel socket. */
+  /**
+   * Stop the server and destroy every tunnel socket.
+   *
+   * Safe against a concurrent (in-flight) {@link start}: the `closed` flag
+   * makes a bind that resolves after this call tear itself down instead of
+   * leaving an orphaned listening server behind.
+   */
   async close(): Promise<void> {
+    this.closed = true
+    // An in-flight bind owns the server handle. Let it settle first: it sees
+    // `closed` and tears itself down, so we never race a close against a
+    // server that has not finished listening (whose close callback may never
+    // fire).
+    const pending = this.starting
+    if (pending !== undefined) {
+      try { await pending } catch { /* start() reports -1 on failure */ }
+    }
     const server = this.server
     this.server = undefined
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
     this.actualPort = 0
     if (server === undefined) return
-    return new Promise((resolve) => {
-      server.close(() => resolve())
+    await new Promise<void>((resolve) => {
+      let settled = false
+      const done = (): void => { if (!settled) { settled = true; resolve() } }
+      try {
+        server.close(done)
+      } catch {
+        done()
+        return
+      }
+      // Bounded: a server that never started listening can leave the close
+      // callback pending forever, and close() must always resolve.
+      const timer = setTimeout(done, CLOSE_TIMEOUT_MS)
+      timer.unref?.()
     })
   }
 
@@ -203,7 +312,7 @@ export class NetworkProxy {
     // ECONNRESET on req/res must never reach an unhandled 'error' event.
     const suppressStreamError = (err: Error): void => {
       if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
-        this.options.logger.warn(`[dsh-perm-gate] proxy stream error: ${String(err)}`)
+        this.safeWarn(`[dsh-perm-gate] proxy stream error: ${String(err)}`)
       }
     }
     req.on('error', suppressStreamError)
@@ -233,7 +342,7 @@ export class NetworkProxy {
       // Suppress ECONNRESET from client closing after receiving 403/502.
       req.on('error', (err: Error) => {
         if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET') {
-          this.options.logger.warn(`[dsh-perm-gate] proxy req error: ${String(err)}`)
+          this.safeWarn(`[dsh-perm-gate] proxy req error: ${String(err)}`)
         }
       })
       req.pipe(proxyReq)
@@ -251,7 +360,7 @@ export class NetworkProxy {
       // Suppress ECONNRESET / EPIPE after a 403 block — expected behavior.
       // Only log unexpected errors.
       if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
-        this.options.logger.warn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
+        this.safeWarn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
       }
     }
     socket.on('error', (err: Error) => {
@@ -308,19 +417,27 @@ export class NetworkProxy {
   }
 
   /**
-   * DNS-resolve a hostname so `ips`-scoped rules see real addresses,
-   * then decide. Resolution failure → decide on literal name.
+   * DNS-resolve a hostname so `ips`-scoped rules see real addresses, then
+   * decide. Resolution failure → decide on the literal name.
+   *
+   * The lookup is **time-bounded**: an unbounded `lookup()` on a black-holed
+   * resolver would hold the CONNECT socket open indefinitely, so a slow
+   * resolver degrades to literal-name evaluation instead of hanging the
+   * client. `ips`-scoped rules simply cannot fire in that case.
    */
   private async decideWithResolution(target: NetworkTarget): Promise<NetworkDecision> {
     if (!isIpLiteral(target.host)) {
       try {
-        const addresses = await lookup(target.host, { all: true, verbatim: true })
+        const addresses = await withTimeout(
+          lookup(target.host, { all: true, verbatim: true }),
+          this.options.dnsTimeoutMs ?? DNS_TIMEOUT_MS,
+        )
         const resolved = addresses.map((entry) => entry.address)
         if (resolved.length > 0) {
           return this.options.decide({ ...target, ips: [...target.ips, ...resolved] })
         }
       } catch {
-        // Unresolvable: decide on literal name (ip-scoped rules cannot fire).
+        // Unresolvable or too slow: decide on the literal name.
       }
     }
     return this.options.decide(target)
@@ -349,11 +466,11 @@ export class NetworkProxy {
     else this.stats.askBlocked += 1
     this.recent.unshift(record)
     if (this.recent.length > this.options.maxRecent) this.recent.length = this.options.maxRecent
-    this.options.logger.warn(`[dsh-perm-gate] network ${record.action === 'deny' ? 'denied' : 'ask-blocked'} ${target.scheme ?? '?'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''} (mode ${decision.mode}${decision.matched ? `, rule ${(decision.ruleIndex ?? 0) + 1}` : ', mode default'})`)
+    this.safeWarn(`[dsh-perm-gate] network ${record.action === 'deny' ? 'denied' : 'ask-blocked'} ${target.scheme ?? '?'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''} (mode ${decision.mode}${decision.matched ? `, rule ${(decision.ruleIndex ?? 0) + 1}` : ', mode default'})`)
     try {
       this.options.onBlock?.(record, attribution)
     } catch (error: unknown) {
-      this.options.logger.warn(`[dsh-perm-gate] network block hook failed: ${String(error)}`)
+      this.safeWarn(`[dsh-perm-gate] network block hook failed: ${String(error)}`)
     }
   }
 }
@@ -431,4 +548,18 @@ function parseUrlTarget(url: string): NetworkTarget | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * Reject after `ms` if `promise` has not settled. The timer is always
+ * cleared, so a resolved lookup leaves nothing behind.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`DNS lookup exceeded ${ms}ms`)), ms)
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (error: unknown) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
+    )
+  })
 }
