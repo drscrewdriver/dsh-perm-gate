@@ -5,9 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.1] - 2026-09-15
 
 ### Added
+
+- **Network execution surface (opt-in, off by default).** A local HTTP/CONNECT proxy adjudicates
+  the outbound traffic of *shell subprocesses* against the same rules file, plus an interactive
+  approval path for targets no rule covers. A `deny` rule is never escalated — approval widens
+  reach for an unlisted target, but can never override a rule that says no. New config:
+  `networkEnabled` (default `false`), `networkMode`, `networkUnlisted`, `networkUnattributed`,
+  `networkBind`, `networkPort`, `networkNoProxy`, `networkInjectEnv`, `networkAskTimeoutMs`,
+  `networkGrantTtlMs`. Diagnostics at `GET /api/dsh-perm-gate/network`. Covered by
+  `test/network.spec.ts`, `test/proxy-errors.spec.ts`, `test/network-lifecycle.spec.ts` and
+  `test/network-approval.spec.ts`.
+- **Two 自动审查 tiers.** `permissive` keeps the built-in file sandbox; `permissive-full`
+  (label 自动审查（高权限）) pairs the same approval behaviour with `danger-full-access`. A preset's
+  `sandbox` and `approval` are independent knobs, and coupling them forced a trade: the
+  `workspace-write` sandbox also denies the named pipes a child process needs to start, so
+  `git clone`, MSYS2/Cygwin `sh.exe` and ConPTY failed under the only tier the gate was active in.
+  Both tiers are in the default `gatePresets`.
+- **Rule model expansion.** Six new match dimensions (`params` / `absent` / `agents` / `when` /
+  `argv` / `network`), a multi-file rule chain with `searchUp` and a fallback path, and shadow
+  detection for unreachable rules. New config: `searchUp`, `fallbackPath`, `badFilePolicy`,
+  `maxChainLength`.
+- **Rule hot reload.** A chokidar watcher reloads the effective rule files, with debounce, LRU
+  eviction across workspaces, and candidate-file watching through the deepest existing ancestor so
+  a rules file created mid-session is adopted. New config: `watch` (default `true`),
+  `watchDebounceMs`.
+
+### Fixed
+
+- **A blocked connection could kill the host.** When the proxy answered a CONNECT with 403, the
+  client's RST produced an `ECONNRESET` with no handler attached yet, which escalated to an
+  unhandled `'error'` event and terminated the DSH process. Socket error handlers are now attached
+  at connection time, with `clientError` and handler-rejection fallbacks behind them. A policy
+  proxy must never take down its host.
+- **Built-in tools prompted for approval.** The auto-allow roster was hand-maintained, so tools
+  added to DSH since drifted out of it and a read-only call could raise an approval prompt:
+  `advanced_search`, `platform_search`, `free_search_test`, `context_compression_retrieve`,
+  `memory_search_graph`, `memory_expand_graph_node`, `memory_import`, `memory_ruminate`,
+  `memory_ruminate_cancel`, `memory_ruminate_status`.
+- **Proxy lifecycle races.** `close()` now awaits an in-flight bind instead of racing it, is
+  bounded, and concurrent `start()` calls share one bind. DNS lookups are time-bounded, the
+  connection-setup phase is bounded, concurrent connections are capped, and a throwing logger can
+  no longer escalate into a crash. Proxy teardown is registered before the bind is awaited, so an
+  early dispose cannot leak a bound port or a rewritten `process.env`.
+
+### Changed
+
+- `networkUnattributed` defaults to `allow`: traffic with no shell attribution is DSH's own client
+  (a built-in network tool, the LLM transport), and reviewing it would let the host block itself.
+  Set `deny` for the stricter behaviour.
+- `networkUnlisted` defaults to `ask`.
+- `DEFAULT_GATE_PRESETS` is now `['permissive', 'permissive-full']`.
+
+### Documented
+
+- **The network proxy is a cooperative policy layer, not an enforcement boundary.** It only sees
+  clients that read the proxy environment. Measured, not assumed: `curl` routes through it, while
+  `node` `http`/`https`/`fetch` connect directly, as do raw sockets, DNS, QUIC, literal-IP targets
+  and Java/.NET default clients. Stated in all four READMEs.
 
 - **Session sweep — the authorization chain now follows the session lifecycle.** On plugin startup
   and every hour, the gate reads DSH's workspace store (`$DSH_HOME/storages/workspace.json`,

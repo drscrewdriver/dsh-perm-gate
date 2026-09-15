@@ -33,6 +33,36 @@ Old and new versions must never resolve into each other:
 - A `1.x`-range install therefore cannot be dragged onto `2.x` by `dsh plugin update`,
   and installing `latest` on DSH `0.1.1` needs an explicit `@legacy`.
 
+## Local tarball installs: bump the version EVERY time
+
+**Rebuilding a tarball under the same version does not update an install.** The profile's
+`pnpm-lock.yaml` pins the local file dependency by content hash:
+
+```yaml
+dsh-perm-gate@file:.../dsh-perm-gate-2.1.1.tgz:
+  resolution: {integrity: sha512-<hash of THAT build>, tarball: file:...}
+```
+
+Re-running `dsh plugin --profile <p> add <same-path>` is then a no-op: pnpm reports
+`Lockfile is up to date, resolution step is skipped` and restores the **previously stored**
+content. The install keeps whatever was first added, silently, while the working tree and
+the repacked tarball both look correct.
+
+Observed cost: a dozen "successful" reinstalls of a rebuilt `2.1.0` tarball all installed the
+original `2.1.0` content, so new features never appeared on the machine — and the evidence
+had to be found by diffing `node_modules/dsh-perm-gate/cordis.patch.yml` against the source.
+
+Rules:
+
+1. **Bump `package.json` `version` before every `npm pack`.** A new filename is what makes
+   pnpm re-resolve. The version is the cache key, not a cosmetic label.
+2. **Verify the install, not the build.** After adding, check the artifact that actually
+   carries the change, e.g.
+   `Select-String -Path ~/.dsh/profiles/<p>/node_modules/dsh-perm-gate/cordis.patch.yml -Pattern '<new key>'`.
+   A `2.1.x` version string alone proves nothing — it is also what a stale install reports.
+3. **Do not hand-delete `node_modules/<pkg>` and re-add the same tarball.** It looks like a
+   clean reinstall but hits the same locked hash.
+
 ## What differs between the lines
 
 | | `legacy` | `main` |
