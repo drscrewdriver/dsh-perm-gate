@@ -152,9 +152,18 @@ allow:
 
 describe('blockMessage', () => {
   it('generates rule-matched deny message', () => {
+    // Build a real compiled rule instead of a hand-shaped stub.
+    const ruleset = makeRuleset(`defaultAction: allow
+deny:
+  - tools: [bash]
+    reason: "no internal access"
+    network:
+      domains: ["internal.corp"]
+`)
+    const rule = ruleset.deny[0]
     const msg = blockMessage({
-      action: 'deny', matched: true, mode: 'whitelist', ruleIndex: 0,
-      rule: { reason: 'no internal access', index: 0, action: 'deny', enabled: true, tools: [], command: [], args: [], paths: [], params: [], absent: [], agents: [], when: undefined, argv: undefined, network: undefined, source: {} as any },
+      action: 'deny', matched: true, mode: 'whitelist',
+      ruleIndex: rule.index, rule,
     })
     expect(msg).toContain('denied')
     expect(msg).toContain('rule 1')

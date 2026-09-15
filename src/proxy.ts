@@ -121,10 +121,15 @@ export class NetworkProxy {
    */
   async start(): Promise<number> {
     const server = createServer((req, res) => {
-      void this.handleRequest(req, res)
+      this.handleRequest(req, res).catch((err) => {
+        this.options.logger.warn(`[dsh-perm-gate] proxy request error: ${String(err)}`)
+      })
     })
     server.on('connect', (req, socket, head) => {
-      void this.handleConnect(req, socket, head)
+      this.handleConnect(req, socket, head).catch((err) => {
+        this.options.logger.warn(`[dsh-perm-gate] proxy connect error: ${String(err)}`)
+        if (!socket.destroyed) socket.destroy()
+      })
     })
     server.on('error', (error: unknown) => {
       this.options.logger.warn(`[dsh-perm-gate] proxy server error: ${String(error)}`)
@@ -136,6 +141,19 @@ export class NetworkProxy {
         this.options.logger.warn(`[dsh-perm-gate] proxy clientError: ${String(err)}`)
       }
       if (!socket.destroyed) socket.destroy()
+    })
+    // ULTIMATE safety net: every accepted socket gets an error handler the
+    // moment it connects, before any request/CONNECT parsing. Without this,
+    // any socket-level error (ECONNRESET from a client that received a 403
+    // block and hung up) becomes an unhandled 'error' event and kills the
+    // entire DSH process. A policy proxy must NEVER take down its host.
+    server.on('connection', (socket: Duplex) => {
+      socket.on('error', (err: Error) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+          this.options.logger.warn(`[dsh-perm-gate] proxy socket error: ${String(err)}`)
+        }
+        if (!socket.destroyed) socket.destroy()
+      })
     })
     this.server = server
     try {
@@ -180,6 +198,17 @@ export class NetworkProxy {
   // ─── HTTP proxy ──────────────────────────────────────────────────────
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Attach error handlers IMMEDIATELY (before any async work): a client that
+    // receives a 403 block closes its socket with RST, and the resulting
+    // ECONNRESET on req/res must never reach an unhandled 'error' event.
+    const suppressStreamError = (err: Error): void => {
+      if (err && (err as NodeJS.ErrnoException).code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+        this.options.logger.warn(`[dsh-perm-gate] proxy stream error: ${String(err)}`)
+      }
+    }
+    req.on('error', suppressStreamError)
+    res.on('error', suppressStreamError)
+
     const target = parseUrlTarget(req.url ?? '')
     if (target === undefined || target.scheme === undefined) {
       res.writeHead(404, { 'content-type': 'text/plain' })
@@ -217,7 +246,7 @@ export class NetworkProxy {
     // T2.8/T2.9 safety: attach error handler IMMEDIATELY to prevent unhandled
     // errors from crashing the host process. Client may RST at any point
     // (e.g. after receiving a 403 block), and upstream may fail to connect.
-    let upstream: ReturnType<typeof connect> | undefined
+    const tunnel: { upstream?: ReturnType<typeof connect> } = {}
     const suppressError = (err: Error): void => {
       // Suppress ECONNRESET / EPIPE after a 403 block — expected behavior.
       // Only log unexpected errors.
@@ -227,7 +256,7 @@ export class NetworkProxy {
     }
     socket.on('error', (err: Error) => {
       suppressError(err)
-      if (upstream !== undefined) upstream.destroy()
+      tunnel.upstream?.destroy()
     })
 
     const target = connectTarget(req.url ?? '')
@@ -242,12 +271,13 @@ export class NetworkProxy {
       socket.end(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`)
       return
     }
-    upstream = connect(target.port ?? 443, target.host)
+    const upstream = connect(target.port ?? 443, target.host)
+    tunnel.upstream = upstream
     this.sockets.add(socket)
     this.sockets.add(upstream)
     const cleanup = (): void => {
       this.sockets.delete(socket)
-      this.sockets.delete(upstream!)
+      this.sockets.delete(upstream)
     }
     socket.on('close', cleanup)
     upstream.on('close', cleanup)
@@ -257,9 +287,9 @@ export class NetworkProxy {
     })
     upstream.once('connect', () => {
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
-      if (head.length > 0) upstream!.write(head)
-      upstream!.pipe(socket)
-      socket.pipe(upstream!)
+      if (head.length > 0) upstream.write(head)
+      upstream.pipe(socket)
+      socket.pipe(upstream)
     })
   }
 
