@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2026-09-15
+
+### Added
+
+- **The composer glyph patch now ships with the package.** `scripts/patch-permission-glyph.mjs`
+  is whitelisted in `files` and exposed as the **`dsh-perm-gate-patch-glyph`** bin, so re-applying
+  the host-bundle patch after a DSH upgrade no longer needs a source checkout:
+
+  ```sh
+  npx dsh-perm-gate-patch-glyph            # apply
+  npx dsh-perm-gate-patch-glyph --check    # report only; exits 1 if the glyph is missing
+  ```
+
+  In a checkout, `npm run patch:glyph` and `npm run patch:glyph:check` do the same.
+
+  It is deliberately **not** a `postinstall`. The script edits a **host** package, and a plugin
+  must not rewrite the harness it is installed into without being asked. (pnpm 10+ blocks
+  install scripts by default unless they are allowlisted, so a `postinstall` would also have
+  been a promise that silently never runs — worse than an explicit command.)
+
+### Changed
+
+- The script is now testable: its pure parts are exported (`sliceEntry`, `applyGlyphPatch`,
+  `candidateBundles`, `findBundle`) and pinned by `test/glyph-patch.spec.ts` (11 cases). The
+  bracket-balance invariant is the one that matters — the first version of the slicer scanned
+  from the wrong bracket and produced an unparseable bundle, which only the script's own
+  `node --check` guard caught.
+- `candidateBundles` additionally probes the hoisted per-profile scope under `$DSH_HOME`, and the
+  CLI is a no-op when imported (the main block runs only when the file is the entry point).
+
 ## [2.1.1] - 2026-09-15
 
 ### Added

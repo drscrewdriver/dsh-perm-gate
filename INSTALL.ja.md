@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` バージョン **2.1.1**。判定チェーン、ルールファイル形式、自动审查
+`dsh-perm-gate` バージョン **2.1.2**。判定チェーン、ルールファイル形式、自动审查
 ティアについては [日本語 README](./README.ja.md) を参照してください。
 
 ## 必要条件
@@ -103,9 +103,16 @@ set get none"* と述べています。プラグインが影響できる option 
 パッケージに同梱されています。
 
 ```sh
-node scripts/patch-permission-glyph.mjs
+npx dsh-perm-gate-patch-glyph            # パッチを適用
+npx dsh-perm-gate-patch-glyph --check    # 確認のみ。グリフが失われていれば終了コード 1
 dsh profile reload --profile web
 ```
+
+スクリプトは**このパッケージに同梱**されています —— `scripts/patch-permission-glyph.mjs`
+としても、`dsh-perm-gate-patch-glyph` bin としても —— ソースの checkout は不要です。
+**意図的に `postinstall` には接続していません**：これはホストパッケージを書き換えるもので、
+プラグインが許可なく自分の harness を書き換えてよい理由はありません。適用の有無にかかわらず
+DSH の動作に影響はなく、ティア自体はそのまま機能します。
 
 このスクリプトは冪等（2 回目は no-op）で、バックアップは 1 度だけ取り、壊れたスライスを
 書き込もうとしません —— 結果に対して `node --check` を実行し、失敗すればバックアップを
@@ -190,7 +197,7 @@ DSH の bundle patch は `permission.config.presets` を key 単位でマージ�
 **「自动审查（高权限）」の入力欄アイコンが消えた。**
 DSH のアップグレードまたは再インストールが、パッチを当てたホスト bundle を置き換え
 ました。プラグインを再インストールしても戻りません。
-`node scripts/patch-permission-glyph.mjs` を実行して再読込してください。
+`npx dsh-perm-gate-patch-glyph` を実行して再読込してください。
 ティア自体は影響を受けません —— パッチなしでもラベルとゲートは動作します。
 
 **ルールファイルがあるのに `--list` が `ruleCount: 0` を返す。**

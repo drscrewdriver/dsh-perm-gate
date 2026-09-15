@@ -39,7 +39,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **2.1.1** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.1.2** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 
@@ -174,7 +174,7 @@ MSYS2/Cygwin 的 `sh.exe`、ConPTY 都会以 `Win32 error 5` / `couldn't create 
 
 **图标是另一回事。** 输入栏的图标表是闭合的，表自己的注释写明了规则：*host-configured names
 outside the design set get none*。`permissive` 是内置值，所以「自动审查」本来就有盾+眼图标；
-「自动审查（高权限）」能拿到同一个图标，靠的是 `scripts/patch-permission-glyph.mjs` 往那张表里
+「自动审查（高权限）」能拿到同一个图标，靠的是 `npx dsh-perm-gate-patch-glyph` 往那张表里
 加了一项。该补丁改的是**宿主**包，每次 DSH 升级都会丢 —— 见
 [DSH 升级后：重打输入区图标补丁](./INSTALL.zh.md)。
 

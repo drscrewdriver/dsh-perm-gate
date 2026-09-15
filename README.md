@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.1.1** — see the [Changelog](./CHANGELOG.md).
+Version **2.1.2** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -257,7 +257,7 @@ built-in values, so `cordis.patch.yml` ships the Chinese label for every session
 The **icon** is a different story. The composer's glyph map is closed, and its own comment states
 the rule: *host-configured names outside the design set get none.* `permissive` is a built-in
 value, so 自动审查 already has a shield+eye glyph; `permissive-full` gets the same glyph only
-because `scripts/patch-permission-glyph.mjs` adds it to that map. That patch edits a **host**
+because `npx dsh-perm-gate-patch-glyph` adds it to that map. That patch edits a **host**
 package, so it is lost on every DSH upgrade — see
 [After a DSH upgrade](./INSTALL.md#after-a-dsh-upgrade-re-apply-the-composer-glyph-patch).
 

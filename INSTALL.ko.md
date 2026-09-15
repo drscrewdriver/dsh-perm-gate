@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 버전 **2.1.1**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
+`dsh-perm-gate` 버전 **2.1.2**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
 
 ## 요구 사항
@@ -103,9 +103,16 @@ none"*이라고 말합니다. 플러그인이 영향을 줄 수 있는 option �
 패키지에 함께 실려 나갑니다.
 
 ```sh
-node scripts/patch-permission-glyph.mjs
+npx dsh-perm-gate-patch-glyph            # 패치 적용
+npx dsh-perm-gate-patch-glyph --check    # 확인만. 글리프가 사라졌으면 종료 코드 1
 dsh profile reload --profile web
 ```
+
+스크립트는 **이 패키지에 함께 실려 나갑니다** —— `scripts/patch-permission-glyph.mjs`로도,
+`dsh-perm-gate-patch-glyph` bin으로도 —— 소스 checkout이 필요 없습니다.
+**의도적으로 `postinstall`에 연결하지 않았습니다**: 이 스크립트는 호스트 패키지를 고치며,
+플러그인이 허락 없이 자신이 설치된 harness를 다시 쓸 이유는 없습니다. 적용 여부와 무관하게
+DSH 동작에는 영향이 없고 티어 자체는 그대로 기능합니다.
 
 이 스크립트는 멱등이며(두 번째 실행은 no-op), 백업은 한 번만 뜨고, 잘못 잘린 조각을
 쓰지 않습니다 —— 결과에 `node --check`를 돌려 실패하면 백업을 복원합니다 —— 따라서
@@ -185,7 +192,7 @@ DSH 번들 패치는 `permission.config.presets`를 key 단위로 병합하지 �
 
 **「自动审查（高权限）」의 입력창 아이콘이 사라졌습니다.**
 DSH 업그레이드나 재설치가 패치해 둔 호스트 번들을 교체했습니다. 플러그인을
-재설치해도 되돌아오지 않습니다. `node scripts/patch-permission-glyph.mjs`를 실행하고
+재설치해도 되돌아오지 않습니다. `npx dsh-perm-gate-patch-glyph`를 실행하고
 다시 불러오세요. 티어 자체는 영향받지 않습니다 —— 패치가 없어도 라벨과 게이트는
 정상 동작합니다.
 

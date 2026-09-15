@@ -43,7 +43,7 @@
 > 모두에서 user-approval 서비스의 **개인** 메소드이므로 `typeof` 프로브를 통해
 > 읽으며, 누락되거나 예외 발생 시 "정책_unknown"으로 후퇴합니다.
 
-버전 **2.1.1** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+버전 **2.1.2** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 
@@ -223,7 +223,7 @@ DSH **자신**의 트래픽 —— 내장 네트워크 도구와 LLM 전송 —�
 **아이콘은 다른 이야기입니다.** 입력창의 글리프 표는 닫혀 있고, 그 표 자체의 주석이 규칙을
 말합니다: *host-configured names outside the design set get none*. `permissive`는 내장 값이라
 「自动审查」에는 원래부터 방패+눈 아이콘이 있습니다. 「自动审查（高权限）」가 같은 아이콘을
-갖는 것은 `scripts/patch-permission-glyph.mjs`가 그 표에 항목 하나를 추가했기 때문입니다.
+갖는 것은 `npx dsh-perm-gate-patch-glyph`가 그 표에 항목 하나를 추가했기 때문입니다.
 이 패치는 **호스트** 패키지를 고치므로 DSH 업그레이드마다 사라집니다 ——
 [DSH 업그레이드 후: 입력창 아이콘 패치 재적용](./INSTALL.ko.md)을 참고하세요.
 

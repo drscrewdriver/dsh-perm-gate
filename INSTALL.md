@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` version **2.1.1**. Continue with the [README](./README.md) for the
+`dsh-perm-gate` version **2.1.2**. Continue with the [README](./README.md) for the
 decision chain, the rules file format and the 自动审查 tier.
 
 ## Requirements
@@ -102,9 +102,15 @@ That patch edits a **host** file, so a DSH upgrade or reinstall erases it. Upgra
 (`name:` / `description:` in `cordis.patch.yml`) ships inside the package.
 
 ```sh
-node scripts/patch-permission-glyph.mjs
+npx dsh-perm-gate-patch-glyph            # apply the patch
+npx dsh-perm-gate-patch-glyph --check    # report only; exits 1 if the glyph is gone
 dsh profile reload --profile web
 ```
+
+The script **ships inside this package** — as `scripts/patch-permission-glyph.mjs` and as
+the `dsh-perm-gate-patch-glyph` bin — so no source checkout is needed. It is deliberately
+**not** wired to `postinstall`: it edits a host package, and a plugin must not rewrite its
+harness uninvited. Running DSH is unaffected either way; the tier works with or without it.
 
 It is idempotent (a second run is a no-op), backs the bundle up once, and refuses to
 write a mis-sliced bundle — it runs `node --check` on the result and restores the
@@ -188,7 +194,7 @@ sure no later plugin overwrites `presets`.
 **自动审查（高权限） lost its icon in the composer.**
 A DSH upgrade or reinstall replaced the host bundle the glyph was patched into;
 re-running the plugin install will not bring it back. Run
-`node scripts/patch-permission-glyph.mjs` and reload. The tier itself is
+`npx dsh-perm-gate-patch-glyph` and reload. The tier itself is
 unaffected — its label and its gating keep working without the patch.
 
 **`--list` reports `ruleCount: 0` although my rules file exists.**

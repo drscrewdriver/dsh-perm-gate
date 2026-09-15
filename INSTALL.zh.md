@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **2.1.1**。裁决链、规则文件格式与自动审查档位请见
+`dsh-perm-gate` 版本 **2.1.2**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件
@@ -98,9 +98,15 @@ names outside the design set get none"*；而插件能影响的 option 对象只
 `description:`）随包发布。
 
 ```sh
-node scripts/patch-permission-glyph.mjs
+npx dsh-perm-gate-patch-glyph            # 应用补丁
+npx dsh-perm-gate-patch-glyph --check    # 只检查；图标已丢失时退出码为 1
 dsh profile reload --profile web
 ```
+
+脚本**随本包分发** —— 既是 `scripts/patch-permission-glyph.mjs`，也是一个
+`dsh-perm-gate-patch-glyph` bin —— 所以不需要源码 checkout。它**故意没有**挂在
+`postinstall` 上：它改的是宿主包，插件不该未经许可改写自己所在的 harness。有没有它
+都不影响 DSH 运行，档位本身照常工作。
 
 脚本是幂等的（重复执行是 no-op），只备份一次，且拒绝写坏切片 —— 它会对结果跑
 `node --check`，失败即还原备份 —— 所以每次 DSH 升级后无条件重跑都是安全的。
@@ -176,7 +182,7 @@ DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key
 
 **「自动审查（高权限）」在输入区丢了图标。**
 DSH 升级或重装替换了被打了补丁的宿主 bundle；重装插件不会把它带回来。执行
-`node scripts/patch-permission-glyph.mjs` 后重载即可。档位本身不受影响 ——
+`npx dsh-perm-gate-patch-glyph` 后重载即可。档位本身不受影响 ——
 没有补丁，它的标签与门禁照常工作。
 
 **规则文件存在但 `--list` 显示 `ruleCount: 0`。**

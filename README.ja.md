@@ -45,7 +45,7 @@
 > メソッドであるため、`typeof` プロブで読み取り、欠落時やエラー時には「ポリシー
 > 不明」にフォールバックします。
 
-バージョン **2.1.1** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
+バージョン **2.1.2** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
 
@@ -228,7 +228,7 @@ P0–P4 の全チェーンが動作します。ゲートはプリセットの**�
 **アイコンは別の話です。** 入力欄のグリフ表は閉じており、その表自身のコメントが規則を述べています：
 *host-configured names outside the design set get none*。`permissive` は組み込み値なので
 「自动审查」には元から盾＋目のアイコンがあります。「自动审查（高权限）」が同じアイコンを得るのは、
-`scripts/patch-permission-glyph.mjs` がその表に 1 項目を追加したからです。このパッチは
+`npx dsh-perm-gate-patch-glyph` がその表に 1 項目を追加したからです。このパッチは
 **ホスト**パッケージを書き換えるため、DSH アップグレードのたびに失われます ——
 [DSH アップグレード後：入力欄アイコンのパッチを再適用](./INSTALL.ja.md) を参照してください。
 

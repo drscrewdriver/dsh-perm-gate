@@ -26,64 +26,64 @@
  * This script does exactly that: it duplicates the `permissive` entry under the
  * `permissive-full` key, so the two tiers of one plugin look alike.
  *
- * THIS IS A PATCH OVER A HOST PACKAGE. It is lost whenever DSH is reinstalled
- * or upgraded. Re-run it afterwards. The script is idempotent (a second run is
- * a no-op), backs the file up once, and refuses to write if it cannot find the
- * anchor, so it can never half-apply.
+ * VOLUNTARY, NOT AUTOMATIC
+ * ------------------------
+ * This edits a **host** package. It is deliberately NOT wired to `postinstall`:
+ * a plugin must not rewrite the harness it is installed into without being
+ * asked. Run it yourself, and re-run it after every DSH upgrade — a DSH
+ * upgrade replaces the file and the patch is gone. Reinstalling this plugin
+ * does NOT bring it back: `dsh plugin --profile web add …` writes only the
+ * profile's own `node_modules`, and on a stock install the DSH package, the
+ * profile's `node_modules` entry and this bundle are three paths to ONE file
+ * (a symlink and a junction into the same inode).
  *
  * USAGE
- *   node scripts/patch-permission-glyph.mjs [path/to/client.js]
+ *   npx dsh-perm-gate-patch-glyph              # patch the bundle it finds
+ *   npx dsh-perm-gate-patch-glyph --check      # report only; exit 1 if missing
+ *   node scripts/patch-permission-glyph.mjs <path/to/client.js>
  *
- * With no argument it probes the usual global-install locations.
+ * With no argument it probes the usual global-install locations. The script is
+ * idempotent (a second run is a no-op), backs the file up once, and refuses to
+ * write a bundle it cannot slice correctly, so it can never half-apply.
  */
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 /** The map key whose entry is cloned, and the key it is cloned onto. */
-const SOURCE_KEY = 'permissive'
-const TARGET_KEY = 'permissive-full'
+export const SOURCE_KEY = 'permissive'
+export const TARGET_KEY = 'permissive-full'
 
-/** Relative path from a DSH package root to the bundle holding the map. */
+/** Relative path from a package root to the bundle holding the map. */
 const BUNDLE = join('@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')
 
-/** Candidate roots for the DSH install, in probe order. */
-function candidates() {
-  const out = []
-  // 1. Sibling of the running node binary (covers `C:\nodejs\node.exe`).
-  out.push(join(dirname(process.execPath), 'node_modules'))
-  // 2. This package's own node_modules (when DSH is a local dependency).
-  out.push(join(process.cwd(), 'node_modules'))
-  // 3. The dsh package's nested @deepseek-ai scope.
-  out.push(join(dirname(process.execPath), 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai'))
-  return out
-}
+/** Thrown for every refusal; the CLI turns it into an exit code 1. */
+export class GlyphPatchError extends Error {}
 
-/** Resolve the bundle to patch, or exit with an explanation. */
-function findBundle(argv) {
-  const explicit = argv[2]
-  if (explicit !== undefined && explicit !== '') {
-    const p = resolve(explicit)
-    if (!existsSync(p)) fail(`no such file: ${p}`)
-    return p
-  }
-  for (const root of candidates()) {
-    // `root` may be a node_modules dir, or already the @deepseek-ai scope.
-    const direct = join(root, BUNDLE)
-    if (existsSync(direct)) return direct
-    const scoped = join(root, '@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')
-    if (existsSync(scoped)) return scoped
-  }
-  fail(
-    'could not locate @deepseek-ai/dsh-client-ui-conversation.\n' +
-    'Pass the bundle path explicitly:\n' +
-    '  node scripts/patch-permission-glyph.mjs <…>/dsh-client-ui-conversation/lib/client.js',
-  )
-}
-
-function fail(message) {
-  process.stderr.write(`patch-permission-glyph: ${message}\n`)
-  process.exit(1)
+/**
+ * Candidate bundle paths, most specific first. Pure: no filesystem access, so
+ * the probe order is unit-testable.
+ *
+ * `execDir` is `dirname(process.execPath)`. Deriving from the running node
+ * binary — never from a hardcoded nvm version or install path — is what keeps
+ * the script working across node upgrades and re-pointed install symlinks.
+ *
+ * @param {{ execDir: string, cwd: string, dshHome: string }} where
+ * @returns {string[]} absolute candidate paths
+ */
+export function candidateBundles({ execDir, cwd, dshHome }) {
+  return [
+    // 1. `@deepseek-ai` scope hoisted beside the running node binary.
+    join(execDir, 'node_modules', BUNDLE),
+    // 2. The same scope nested inside the `dsh` package itself.
+    join(execDir, 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', BUNDLE),
+    // 3. Whatever profile the caller is standing in.
+    join(cwd, 'node_modules', BUNDLE),
+    // 4. The hoisted scope shared by every profile under DSH_HOME.
+    join(dshHome, 'profiles', 'node_modules', BUNDLE),
+  ]
 }
 
 /**
@@ -96,10 +96,14 @@ function fail(message) {
  *
  * Safe here because the entry's only string literals (svg path `d` attributes)
  * contain no brackets.
+ *
+ * @param {string} source
+ * @param {string} key
+ * @returns {string} the entry, brackets included
  */
-function sliceEntry(source, key) {
+export function sliceEntry(source, key) {
   const start = source.indexOf(`["${key}",`)
-  if (start === -1) fail(`anchor not found: ["${key}",`)
+  if (start === -1) throw new GlyphPatchError(`anchor not found: ["${key}",`)
   let depth = 0
   for (let i = start; i < source.length; i += 1) {
     const ch = source[i]
@@ -109,38 +113,97 @@ function sliceEntry(source, key) {
       if (depth === 0) return source.slice(start, i + 1)
     }
   }
-  fail(`unterminated entry for ["${key}",`)
+  throw new GlyphPatchError(`unterminated entry for ["${key}",`)
 }
 
-const bundle = findBundle(process.argv)
-const original = readFileSync(bundle, 'utf8')
-
-if (original.includes(`["${TARGET_KEY}",`)) {
-  process.stdout.write(`patch-permission-glyph: ["${TARGET_KEY}",] already present — nothing to do.\n`)
-  process.exit(0)
+/**
+ * Clone the `permissive` glyph entry onto the `permissive-full` key.
+ *
+ * @param {string} source the bundle's text
+ * @returns {{ changed: boolean, source: string, entry: string | null }}
+ *   `changed: false` means the target key was already present (idempotent no-op).
+ */
+export function applyGlyphPatch(source) {
+  if (source.includes(`["${TARGET_KEY}",`)) return { changed: false, source, entry: null }
+  const sourceEntry = sliceEntry(source, SOURCE_KEY)
+  if (!sourceEntry.includes('svg')) {
+    throw new GlyphPatchError(`the ["${SOURCE_KEY}",] entry does not look like a glyph`)
+  }
+  const clonedEntry = sourceEntry.replace(`["${SOURCE_KEY}",`, `["${TARGET_KEY}",`)
+  return { changed: true, source: source.replace(sourceEntry, `${sourceEntry},\n\t\t\t${clonedEntry}`), entry: clonedEntry }
 }
 
-const sourceEntry = sliceEntry(original, SOURCE_KEY)
-if (!sourceEntry.includes('svg')) fail(`the ["${SOURCE_KEY}",] entry does not look like a glyph`)
-
-const clonedEntry = sourceEntry.replace(`["${SOURCE_KEY}",`, `["${TARGET_KEY}",`)
-const patched = original.replace(sourceEntry, `${sourceEntry},\n\t\t\t${clonedEntry}`)
-
-// Back up once, then write.
-const backup = `${bundle}.bak-permgate-glyph`
-if (!existsSync(backup)) copyFileSync(bundle, backup)
-writeFileSync(bundle, patched, 'utf8')
-
-// Fail loudly rather than leaving a broken bundle behind.
-try {
-  execFileSync(process.execPath, ['--check', bundle], { stdio: 'pipe' })
-} catch (error) {
-  copyFileSync(backup, bundle)
-  fail(`syntax check failed; restored the backup.\n${String(error?.stderr ?? error)}`)
+/** Resolve the bundle to patch, or throw with an explanation. */
+export function findBundle(argv, where) {
+  const explicit = argv.slice(2).find((arg) => !arg.startsWith('-'))
+  if (explicit !== undefined && explicit !== '') {
+    const p = resolve(explicit)
+    if (!existsSync(p)) throw new GlyphPatchError(`no such file: ${p}`)
+    return p
+  }
+  for (const candidate of candidateBundles(where)) {
+    if (existsSync(candidate)) return candidate
+  }
+  throw new GlyphPatchError(
+    'could not locate @deepseek-ai/dsh-client-ui-conversation.\n' +
+    'Pass the bundle path explicitly:\n' +
+    `  ${argv[1] ?? 'dsh-perm-gate-patch-glyph'} <…>/dsh-client-ui-conversation/lib/client.js`,
+  )
 }
 
-process.stdout.write(
-  `patch-permission-glyph: added ["${TARGET_KEY}",] to ${bundle}\n` +
-  `  backup: ${backup}\n` +
-  '  NOTE: this edits a DSH package — re-run after any DSH upgrade or reinstall.\n',
-)
+function main(argv) {
+  const check = argv.includes('--check')
+  const where = {
+    execDir: dirname(process.execPath),
+    cwd: process.cwd(),
+    dshHome: process.env.DSH_HOME ?? join(homedir(), '.dsh'),
+  }
+
+  const bundle = findBundle(argv, where)
+  const original = readFileSync(bundle, 'utf8')
+  const { changed, source: patched } = applyGlyphPatch(original)
+
+  if (!changed) {
+    process.stdout.write(`patch-permission-glyph: ["${TARGET_KEY}",] already present in\n  ${bundle}\n`)
+    return 0
+  }
+  if (check) {
+    process.stdout.write(
+      `patch-permission-glyph: ["${TARGET_KEY}",] is MISSING from\n  ${bundle}\n` +
+      '  (--check: nothing written; re-run without --check to apply)\n',
+    )
+    return 1
+  }
+
+  // Back up once, then write.
+  const backup = `${bundle}.bak-permgate-glyph`
+  if (!existsSync(backup)) copyFileSync(bundle, backup)
+  writeFileSync(bundle, patched, 'utf8')
+
+  // Fail loudly rather than leaving a broken bundle behind.
+  try {
+    execFileSync(process.execPath, ['--check', bundle], { stdio: 'pipe' })
+  } catch (error) {
+    copyFileSync(backup, bundle)
+    throw new GlyphPatchError(`syntax check failed; restored the backup.\n${String(error?.stderr ?? error)}`)
+  }
+
+  process.stdout.write(
+    `patch-permission-glyph: added ["${TARGET_KEY}",] to\n  ${bundle}\n` +
+    `  backup: ${backup}\n` +
+    '  NOTE: this edits a DSH package — re-run after any DSH upgrade or reinstall.\n',
+  )
+  return 0
+}
+
+const invokedDirectly = process.argv[1] !== undefined
+  && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+
+if (invokedDirectly) {
+  try {
+    process.exitCode = main(process.argv)
+  } catch (error) {
+    process.stderr.write(`patch-permission-glyph: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+  }
+}
