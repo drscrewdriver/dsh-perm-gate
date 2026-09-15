@@ -158,6 +158,11 @@ export interface PermGateConfig {
   readonly networkPort?: number
   /** NO_PROXY handling: 'clear' empties it so policy cannot be bypassed; 'preserve' keeps ambient values. Default 'clear'. */
   readonly networkNoProxy?: 'clear' | 'preserve'
+  // ─── Hot reload (Phase 3) ──────────────────────────────────────────
+  /** Enable file watching for rule hot-reload. Default true. */
+  readonly watch?: boolean
+  /** Debounce interval for rule file changes in ms. Default 300. */
+  readonly watchDebounceMs?: number
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -263,6 +268,9 @@ export const Config: z<PermGateConfig> = z.object({
   networkBind: z.string().default('127.0.0.1'),
   networkPort: z.number().min(0).max(65535).default(0),
   networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
+  // Hot reload (Phase 3)
+  watch: z.boolean().default(true),
+  watchDebounceMs: z.number().min(50).max(5000).default(300),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>

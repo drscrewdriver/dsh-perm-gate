@@ -65,6 +65,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.0",
+    "chokidar": "^5.0.0",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

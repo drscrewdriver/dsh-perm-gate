@@ -16,6 +16,7 @@ import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type P
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { NetworkProxy, injectProxyEnv } from './proxy.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
+import { RuleWatcher } from './watch.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -583,6 +584,28 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         }, 'dsh-perm-gate: network proxy')
       }
     }).catch(() => { /* already handled inside proxy.start() */ })
+  }
+
+  // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────
+  const watchEnabled = typeof config.watch === 'boolean' ? config.watch : true
+  if (watchEnabled) {
+    const watchDebounceMs = typeof config.watchDebounceMs === 'number' ? config.watchDebounceMs : 300
+    const ruleWatcher = new RuleWatcher({
+      debounceMs: watchDebounceMs,
+      logger: { warn: (msg: string) => console.warn(msg) },
+    })
+    // Watch the effective rules file for the current workspace.
+    const rulesFile = resolveRulesFile(
+      typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
+      dataDir,
+    )
+    const cwd = typeof config.cwd === 'string' ? config.cwd : process.cwd()
+    ruleWatcher.watch(cwd, [rulesFile], () => {
+      runtime.reload()
+    })
+    ctx.effect(() => () => {
+      ruleWatcher.closeAll()
+    }, 'dsh-perm-gate: rule watcher')
   }
 
   return runtime
