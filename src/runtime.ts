@@ -23,6 +23,7 @@ import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } fr
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
 import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
+import { decomposeShellCommand } from './shell.js'
 import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
 import { permissionPresetOf, presetInScope, type SessionEventLike } from './preset.js'
 import { resolveGatePresets } from './config.js'

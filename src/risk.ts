@@ -134,8 +134,8 @@ export type RiskSend = (system: string, user: string) => Promise<{ ok: true; con
 export function riskUserText(req: RiskRequest): string {
   // Enrich the prompt with full path context so the LLM can judge
   // whether a deletion targets a temporary/build artifact vs real data.
-  const args = req.args ?? {}
-  const enriched = { ...args }
+  const args = (req.args ?? {}) as Record<string, unknown>
+  const enriched = { ...args } as Record<string, unknown>
   // Surface the working directory if present (helps LLM see temp paths).
   if (typeof enriched.cwd === 'string' && enriched.cwd !== '') {
     enriched.__cwd = enriched.cwd
