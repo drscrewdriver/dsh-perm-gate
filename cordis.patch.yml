@@ -14,9 +14,17 @@
 # stays `permissive`: it is the key `gatePresets` matches and the value the
 # permission projection reports, so only the label text is user-facing.
 #
-# The tier now carries a shield+eye icon in the composer glyph map (patched
-# into dsh-client-ui-conversation).  The permissive glyph sits alongside the
-# three built-in ones so both the trigger button and the dropdown rows show it.
+# The composer's permission picker draws an icon per preset from a CLOSED map
+# inside @deepseek-ai/dsh-client-ui-conversation (`permissionGlyphs`), whose
+# source states the rule: "host-configured names outside the design set get
+# none". DSH ships a shield+eye glyph for `permissive`, so 自动审查 has an icon,
+# but a second plugin tier has none — it falls back to text in the trigger. The
+# map is a closure variable with no plugin-facing seam (the option objects the
+# host supplies carry only {value, name, description}), so the only way to give
+# BOTH tiers the same glyph is to extend that map.
+# `scripts/patch-permission-glyph.mjs` does exactly that, duplicating the
+# `permissive` entry under `permissive-full`. It patches a HOST package, so it
+# must be re-run after any DSH upgrade or reinstall.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should
