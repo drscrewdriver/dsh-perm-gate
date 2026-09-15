@@ -237,15 +237,15 @@ coupling them forced a bad trade:
 | Picker label | Machine value | sandbox | approval |
 |--------------|---------------|---------|----------|
 | 自动审查 | `permissive` | `workspace-write` | `ask` |
-| 自动审查（网络权限） | `permissive-full` | `danger-full-access` | `ask` |
+| 自动审查（高权限） | `permissive-full` | `danger-full-access` | `ask` |
 
 The plain tier keeps the built-in file sandbox. That sandbox also denies the named pipes a child
 process needs to start, so `git clone`, MSYS2/Cygwin `sh.exe` and ConPTY fail under it with
 `Win32 error 5` / `couldn't create signal pipe`. Because the gate is active **only** in the tiers
-listed in `gatePresets`, wanting the gate meant accepting that restriction. 自动审查（网络权限）
-removes the coupling: identical approval behaviour, no file-sandbox restriction. The label names
-the outcome the user is after (a subprocess has to *start* before its traffic can be reviewed at
-all); the mechanism is the lifted file sandbox, stated in the tier's description. Both are in the
+listed in `gatePresets`, wanting the gate meant accepting that restriction. 自动审查（高权限）
+removes the coupling: identical approval behaviour, no file-sandbox restriction. The tier's own
+description states the trade plainly — the workflow is smoother, approvals still apply per call,
+but there is **no system sandbox left as a backstop**. Both are in the
 default `gatePresets`, so either one gives you the full P0–P4 chain — the gate reads the preset
 **name** only, never the sandbox mode.
 
