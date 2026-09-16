@@ -80,6 +80,17 @@ export const LINE_015 = {
    * hand-maintained patch rots silently as the host changes.
    */
   absentPaths: ['spec.md', 'tasks.md', 'checklist.md', 'findings.md', 'patches/add-permissive-glyph.patch'],
+  /**
+   * Tracked files that MIRROR `package.json` and therefore may differ from the
+   * sync point without being a hand edit — the lockfile's `version`, `engines`
+   * and `bin` follow the package manifest by construction.
+   *
+   * They are exempt from the tree rule in `checkLine`, and named here so the
+   * exemption is declared rather than implicit. Nothing in this file keeps a
+   * mirror honest; `npm install` does, which is why the sync procedure ends by
+   * running it.
+   */
+  mirrorPaths: ['package-lock.json'],
 }
 
 /** Read a nested value by `a/b/c` path. */
@@ -132,10 +143,10 @@ export function diffPaths(before, after, prefix = '') {
 /**
  * Every problem with one 0.1.5-line tree, as human-readable strings.
  * An empty array means the tree carries exactly the declared difference.
- * @param {{ pkg: Record<string, unknown> | undefined, mainPkg: Record<string, unknown> | undefined, present: readonly string[], label?: string }} input - the tree under test.
+ * @param {{ pkg: Record<string, unknown> | undefined, mainPkg: Record<string, unknown> | undefined, present: readonly string[], changed: readonly string[], label?: string }} input - the tree under test.
  * @returns {string[]} problems; empty when the tree is correct.
  */
-export function checkLine({ pkg, mainPkg, present, label = LINE_015.branch }) {
+export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.branch }) {
   const problems = []
   if (pkg === undefined) return [`${label}: package.json is missing`]
   if (mainPkg === undefined) return [`${label}: main's package.json is unreadable — cannot compare`]
@@ -163,7 +174,19 @@ export function checkLine({ pkg, mainPkg, present, label = LINE_015.branch }) {
     problems.push(`${label}: package.json ${path} differs from main but is not part of the declared difference`)
   }
 
-  // 3. The repo must not carry the assets that belong outside it.
+  // 3. Nothing else in the TREE may differ from the sync point. Sections 1-2
+  // read `package.json` and nothing else, so without this an edited `src/` file
+  // on the 0.1.5 line passed with "carries exactly the declared difference"
+  // printed over it. `package.json` is always permitted because its contents
+  // were already judged above; mirrors are permitted because they are derived.
+  const permitted = new Set(['package.json', ...LINE_015.mirrorPaths, ...LINE_015.absentPaths])
+  for (const path of changed) {
+    if (!permitted.has(path)) {
+      problems.push(`${label}: ${path} differs from the sync point but is not part of the declared difference`)
+    }
+  }
+
+  // 4. The repo must not carry the assets that belong outside it.
   for (const path of LINE_015.absentPaths) {
     if (present.includes(path)) problems.push(`${label}: ${path} is tracked in the repository but must live outside it`)
   }
@@ -195,6 +218,23 @@ function readPaths(ref, cwd) {
   }
 }
 
+/**
+ * Paths that differ from the sync point — the tree-level fact `readPkg` cannot
+ * see. A ref that does not resolve yields no paths; `checkLine`'s
+ * unreadable-side checks are what fail loudly in that case.
+ */
+function readChanged(baseRef, ref, cwd) {
+  try {
+    const args = ref === undefined
+      ? ['diff', '--name-only', baseRef, '--', '.']
+      : ['diff', '--name-only', baseRef, ref]
+    const out = execFileSync('git', args, { cwd, encoding: 'utf8' })
+    return out.split('\n').map((l) => l.trim()).filter((l) => l !== '')
+  } catch {
+    return []
+  }
+}
+
 /** `check` subcommand. */
 function cmdCheck(argv) {
   const ref = argv.ref ?? LINE_015.branch
@@ -204,6 +244,7 @@ function cmdCheck(argv) {
     pkg: readPkg(ref, ROOT),
     mainPkg: readPkg(baseRef, ROOT),
     present: readPaths(ref, ROOT),
+    changed: readChanged(baseRef, ref, ROOT),
     label: ref,
   })
 

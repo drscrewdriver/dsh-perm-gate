@@ -24,6 +24,7 @@ interface LineDeltaModule {
     fields: readonly (readonly [string, string])[]
     nested: readonly (readonly [string, string])[]
     absentPaths: readonly string[]
+    mirrorPaths: readonly string[]
   }
   applyDelta: (pkg: Record<string, unknown>) => Record<string, unknown>
   diffPaths: (before: unknown, after: unknown) => string[]
@@ -31,6 +32,7 @@ interface LineDeltaModule {
     pkg: Record<string, unknown> | undefined
     mainPkg: Record<string, unknown> | undefined
     present: readonly string[]
+    changed: readonly string[]
     label?: string
   }) => string[]
 }
@@ -67,6 +69,13 @@ describe('LINE_015 declaration', () => {
     expect(LINE_015.absentPaths).toContain('spec.md')
     expect(LINE_015.absentPaths).toContain('patches/add-permissive-glyph.patch')
   })
+
+  it('names the lockfile as a mirror, so its exemption from "nothing else differs" is visible', () => {
+    // package-lock.json tracks package.json's version/engines/bin. It is
+    // derived, never hand-edited — but "derived" has to be declared somewhere,
+    // or the tree check cannot tell it apart from a stray edit.
+    expect(LINE_015.mirrorPaths).toContain('package-lock.json')
+  })
 })
 
 describe('applyDelta', () => {
@@ -89,7 +98,7 @@ describe('applyDelta', () => {
   })
 
   it('produces a tree the checker accepts', () => {
-    expect(checkLine({ pkg: applyDelta(mainPkg()), mainPkg: mainPkg(), present: [] })).toEqual([])
+    expect(checkLine({ pkg: applyDelta(mainPkg()), mainPkg: mainPkg(), present: [], changed: [] })).toEqual([])
   })
 })
 
@@ -109,13 +118,18 @@ describe('diffPaths', () => {
 
 describe('checkLine', () => {
   it('accepts a tree carrying exactly the declaration', () => {
-    expect(checkLine({ pkg: applyDelta(mainPkg()), mainPkg: mainPkg(), present: ['src/index.ts'] })).toEqual([])
+    expect(checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: ['src/index.ts'],
+      changed: ['package.json', 'package-lock.json', 'tasks.md'],
+    })).toEqual([])
   })
 
   it('rejects a declared field holding the wrong value', () => {
     const pkg = applyDelta(mainPkg())
     ;(pkg.engines as Record<string, unknown>).node = '>=22'
-    const problems = checkLine({ pkg, mainPkg: mainPkg(), present: [] })
+    const problems = checkLine({ pkg, mainPkg: mainPkg(), present: [], changed: [] })
     expect(problems.join('\n')).toContain('engines/node')
     expect(problems.join('\n')).toContain('declared ">=24"')
   })
@@ -123,7 +137,7 @@ describe('checkLine', () => {
   it('rejects a difference from the sync point that nobody declared', () => {
     const pkg = applyDelta(mainPkg())
     pkg.dependencies = { yaml: '^2.5.0', chokidar: '^5.0.0' }
-    const problems = checkLine({ pkg, mainPkg: mainPkg(), present: [] })
+    const problems = checkLine({ pkg, mainPkg: mainPkg(), present: [], changed: [] })
     expect(problems.join('\n')).toContain('dependencies')
     expect(problems.join('\n')).toContain('not part of the declared difference')
   })
@@ -133,14 +147,30 @@ describe('checkLine', () => {
       pkg: applyDelta(mainPkg()),
       mainPkg: mainPkg(),
       present: ['src/index.ts', 'tasks.md'],
+      changed: [],
     })
     expect(problems.join('\n')).toContain('tasks.md')
     expect(problems.join('\n')).toContain('must live outside it')
   })
 
+  it('rejects a tracked file that differs from the sync point but was never declared', () => {
+    // The blind spot this exists to close: sections 1-2 only ever read
+    // package.json, so before `changed` existed, an edited src/ file on the
+    // 0.1.5 line still printed "carries exactly the declared difference" and
+    // exited 0. Only a tree-level diff can see that.
+    const problems = checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: ['src/runtime.ts'],
+      changed: ['package.json', 'src/runtime.ts'],
+    })
+    expect(problems.join('\n')).toContain('src/runtime.ts')
+    expect(problems.join('\n')).toContain('not part of the declared difference')
+  })
+
   it('reports an unreadable side instead of silently passing', () => {
-    expect(checkLine({ pkg: undefined, mainPkg: mainPkg(), present: [] }).join()).toContain('package.json is missing')
-    expect(checkLine({ pkg: mainPkg(), mainPkg: undefined, present: [] }).join()).toContain('unreadable')
+    expect(checkLine({ pkg: undefined, mainPkg: mainPkg(), present: [], changed: [] }).join()).toContain('package.json is missing')
+    expect(checkLine({ pkg: mainPkg(), mainPkg: undefined, present: [], changed: [] }).join()).toContain('unreadable')
   })
 })
 
