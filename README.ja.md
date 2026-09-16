@@ -45,7 +45,7 @@
 > メソッドであるため、`typeof` プロブで読み取り、欠落時やエラー時には「ポリシー
 > 不明」にフォールバックします。
 
-バージョン **2.4.0** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
+バージョン **2.4.1** — 変更履歴は [日本語 changelog](./CHANGELOG.ja.md) を参照。
 
 DeepSeek Harness 向けの、単一・自己完結・決定論優先・fail-closed な権限ゲートです。
 

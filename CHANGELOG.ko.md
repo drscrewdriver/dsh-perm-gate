@@ -5,6 +5,12 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [2.4.1] - 2026-09-17
+
+### 수정됨
+
+- 승인 이력이, 플래그된 호출이 왜 검토 없이 실행되었는지 설명하는 유일한 이벤트에 대해 원시 `preset-passthrough` 문자열을 표시했습니다(티어는 `approval: ask`를 선언했지만 세션이 `never`로 재정의되어 게이트의 ask가 패스스루로 강등된 경우입니다). 이제 다른 판정과 마찬가지로 읽기 쉬운 라벨로 표시됩니다.
+
 ## [2.4.0] - 2026-09-17
 
 ### 변경됨

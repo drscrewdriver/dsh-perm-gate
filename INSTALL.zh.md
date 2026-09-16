@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **2.4.0**。裁决链、规则文件格式与自动审查档位请见
+`dsh-perm-gate` 版本 **2.4.1**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件

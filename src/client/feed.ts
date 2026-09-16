@@ -131,6 +131,11 @@ export const VERDICT_LABELS: Readonly<Record<string, string>> = {
   'human-rejected': '人工拒绝',
   'human-cancelled': '人工取消',
   'no-approval-channel': '无审批通道',
+  // The degrade that hides an ask: the tier declares `approval: ask`, but the
+  // session was overridden to `never`, so the gate's ask became a passthrough.
+  // Without this label the approvals history shows the raw event string — for
+  // the one event that explains why a flagged call ran unreviewed.
+  'preset-passthrough': '审批策略 never · 已放行',
   'stand-down': '门禁停用',
 }
 

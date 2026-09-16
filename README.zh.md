@@ -39,7 +39,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **2.4.0** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.4.1** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 

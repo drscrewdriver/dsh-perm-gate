@@ -43,7 +43,7 @@
 > 모두에서 user-approval 서비스의 **개인** 메소드이므로 `typeof` 프로브를 통해
 > 읽으며, 누락되거나 예외 발생 시 "정책_unknown"으로 후퇴합니다.
 
-버전 **2.4.0** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+버전 **2.4.1** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 
