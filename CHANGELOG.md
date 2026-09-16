@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-09-17
+
+### Fixed
+
+- **P0 hard-deny skipped every shell tool but four.** `hardDenyReason` gated its shell
+  inspection on a locally defined regex, `/^(?:bash|pwsh|sh|cmd)$/`, which does **not**
+  match `shell`, `terminal` or `powershell`. `shell` is DSH's primary shell tool, so the
+  whole P0 shell check — the protected-path redirect guard — was **inert for the most
+  common call shape**. Measured, same command `echo x > /etc/passwd`: blocked via `bash`,
+  **allowed** via `shell`. `engine.ts` now imports `SHELL_TOOLS` from `evaluate.ts`; the
+  gate held three copies of that one fact and only one of them was complete.
+- **`git push --delete` was parsed as an ordinary push.** `hasDelete` was computed in
+  `analyzeSubcommand` but only ever read in the `branch` case, so `git push --delete
+  origin main` fell through to the plain-push branch (`destructiveness: 4`) and the
+  `DESTRUCTIVENESS_MAP` entry `'push-delete': 5` was dead data.
+- **Protected-branch detection mis-fired on any name containing a slash.** The predicate
+  stripped everything before the last `/`, so `backup/main` and `feat/release` were read
+  as protected. It now strips only known ref prefixes (`refs/heads/`, `refs/tags/`,
+  `refs/remotes/<remote>/`). The direction matters: this predicate feeds an **unremovable**
+  P0, where a miss still has the keyword / rule / LLM layers behind it, while a false
+  positive blocks a legitimate workflow with no recourse.
+
+### Added
+
+- **P0 hard-deny for remote-history rewrite on a protected branch.** A `git push` that
+  force-overwrites or deletes `main` / `master` / `production` / `release` / `stable` is
+  rejected deterministically, before any LLM call. The pre-existing protection was the
+  flat, branch-blind, namespace-overridable keyword `'push --force'`; this is the
+  non-negotiable floor beneath it.
+  - **Escalate-only by construction, not by convention**: the helper returns
+    `string | undefined`, which the caller reads as deny / undecided. It has no way to
+    express allow, so wiring it into P0 cannot widen what the gate permits.
+  - Deliberately **not** covered (still left to the keyword / rule / LLM layers):
+    force-push to a non-protected branch, `git push --force` with no branch named, and
+    ordinary pushes.
+  - First production use of the command parser (`command-dispatcher`, `command-semantics`,
+    `parsers/git`, `parsers/shell-cmds`), which until now was referenced only by its own
+    test file.
+
+### Tests
+
+- New suite `test/git-protected-push.spec.ts` (13 cases): parser variants, the
+  protected-branch predicate in both directions, full `SHELL_TOOLS` coverage, the four
+  deliberately-allowed shapes, and compound-command segmentation
+  (`git status && git push --force origin main`).
+- **Falsified**: reverting each of the three fixes turns exactly the cases guarding it red
+  (7 failures in total), while the deliberate-allow cases stay green.
+- Full suite **40 files / 459 cases**; `typecheck` clean.
+
 ## [2.1.2] - 2026-09-15
 
 ### Added

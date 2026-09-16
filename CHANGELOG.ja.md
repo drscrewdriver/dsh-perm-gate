@@ -5,6 +5,27 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠します。
 
+## [2.2.0] - 2026-09-17
+
+### 修正
+
+- **P0 ハード拒否が、4 つのシェルツール以外をすべて素通りさせていました。** `hardDenyReason` はシェル検査をローカルの正規表現 `/^(?:bash|pwsh|sh|cmd)$/` で門番していましたが、これは `shell` / `terminal` / `powershell` に**一致しません**。`shell` は DSH の主要シェルツールであるため、P0 のシェル検査（保護パスへのリダイレクト）は**最も一般的な呼び出し形に対して無効**でした。実測、同一コマンド `echo x > /etc/passwd`：`bash` 経由は遮断、`shell` 経由は**通過**。`engine.ts` は `evaluate.ts` から `SHELL_TOOLS` を取り込むよう変更しました——同じ事実の複製が 3 か所にあり、完全だったのは 1 つだけでした。
+- **`git push --delete` が通常の push として解析されていました。** `hasDelete` は `analyzeSubcommand` で計算されながら `branch` ケースでしか読まれず、`git push --delete origin main` は通常 push 分岐（`destructiveness: 4`）に落ちていました。`DESTRUCTIVENESS_MAP` の `'push-delete': 5` は死んだデータでした。
+- **保護ブランチ判定が、スラッシュを含む名前に誤反応していました。** 述語は最後の `/` より前を落としていたため、`backup/main` や `feat/release` が保護扱いになっていました。既知の ref 接頭辞（`refs/heads/`、`refs/tags/`、`refs/remotes/<remote>/`）のみを剥がすよう変更しました。方向が重要です——この述語は**取り消し不能な** P0 に供給され、見逃しにはキーワード／ルール／LLM 層という受け皿がありますが、誤検出は正当なワークフローを出口なく塞いでしまいます。
+
+### 追加
+
+- **保護ブランチに対するリモート履歴改変の P0 ハード拒否。** `main` / `master` / `production` / `release` / `stable` を強制上書きまたは削除する `git push` を、LLM 呼び出しより前に決定的に拒否します。従来の保護は、フラットでブランチを見ず、名前空間で上書き可能なキーワード `'push --force'` でした。これはその下に敷く交渉不能な床です。
+  - **「エスカレーションのみ」は慣習ではなく構造です**: ヘルパーは `string | undefined` を返し、呼び出し側はそれを deny / 未決定として読みます。allow を表現する手段がないため、P0 に配線してもゲートが許可する範囲を広げることはできません。
+  - 意図的に**対象外**（引き続きキーワード／ルール／LLM 層が担当）: 非保護ブランチへの force push、ブランチ名を書かない `git push --force`、通常の push。
+  - コマンドパーサ（`command-dispatcher` / `command-semantics` / `parsers/git` / `parsers/shell-cmds`）の初の本番利用です。これまで自身のテストファイルからしか参照されていませんでした。
+
+### テスト
+
+- 新規 `test/git-protected-push.spec.ts`（13 件）。
+- **反証**: 3 つの修正をそれぞれ戻すと、それを守るケースだけが赤くなります（計 7 件）。意図的に許可するケースは緑のままです。
+- 全量 **40 ファイル / 459 件**、`typecheck` クリーン。
+
 ## [2.0.0] - 2026-09-11
 
 ### 修正

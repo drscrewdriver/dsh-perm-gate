@@ -5,6 +5,27 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
+## [2.2.0] - 2026-09-17
+
+### 수정
+
+- **P0 하드 거부가 4개의 셸 도구를 제외한 나머지를 모두 통과시키고 있었습니다.** `hardDenyReason`은 셸 검사를 로컬 정규식 `/^(?:bash|pwsh|sh|cmd)$/`로 막고 있었는데, 이는 `shell` / `terminal` / `powershell`에 **일치하지 않습니다**. `shell`은 DSH의 주 셸 도구이므로, P0의 셸 검사(보호 경로로의 리다이렉트)는 **가장 흔한 호출 형태에 대해 무력**했습니다. 실측, 동일 명령 `echo x > /etc/passwd`: `bash` 경유는 차단, `shell` 경유는 **통과**. `engine.ts`가 이제 `evaluate.ts`에서 `SHELL_TOOLS`를 가져옵니다——같은 사실의 사본이 세 곳에 있었고, 완전한 것은 하나뿐이었습니다.
+- **`git push --delete`가 일반 push로 파싱되고 있었습니다.** `hasDelete`는 `analyzeSubcommand`에서 계산되지만 `branch` 케이스에서만 읽혔고, 그 결과 `git push --delete origin main`은 일반 push 분기(`destructiveness: 4`)로 떨어졌습니다. `DESTRUCTIVENESS_MAP`의 `'push-delete': 5`는 죽은 데이터였습니다.
+- **보호 브랜치 판정이 슬래시를 포함한 이름에 오작동하고 있었습니다.** 술어가 마지막 `/` 앞부분을 잘라내어 `backup/main`과 `feat/release`가 보호 대상으로 읽혔습니다. 이제 알려진 ref 접두사(`refs/heads/`, `refs/tags/`, `refs/remotes/<remote>/`)만 제거합니다. 방향이 중요합니다——이 술어는 **되돌릴 수 없는** P0에 공급되며, 놓침에는 키워드/규칙/LLM 계층이라는 안전망이 있지만 오탐은 정당한 워크플로를 출구 없이 막습니다.
+
+### 추가
+
+- **보호 브랜치에 대한 원격 이력 재작성의 P0 하드 거부.** `main` / `master` / `production` / `release` / `stable`을 강제 덮어쓰기하거나 삭제하는 `git push`를 LLM 호출 이전에 결정론적으로 거부합니다. 기존 보호는 평면적이고 브랜치를 보지 않으며 네임스페이스로 덮어쓸 수 있는 키워드 `'push --force'`였습니다. 이것은 그 아래에 깔리는 협상 불가능한 바닥입니다.
+  - **"에스컬레이션 전용"은 관례가 아니라 구조입니다**: 헬퍼는 `string | undefined`를 반환하고 호출자는 이를 deny / 미결로 읽습니다. allow를 표현할 수단이 없으므로 P0에 배선해도 게이트가 허용하는 범위를 넓힐 수 없습니다.
+  - 의도적으로 **대상에서 제외**(키워드/규칙/LLM 계층이 계속 담당): 비보호 브랜치로의 force push, 브랜치명을 쓰지 않은 `git push --force`, 일반 push.
+  - 커맨드 파서(`command-dispatcher` / `command-semantics` / `parsers/git` / `parsers/shell-cmds`)의 첫 프로덕션 사용입니다. 지금까지는 자체 테스트 파일에서만 참조되고 있었습니다.
+
+### 테스트
+
+- 신규 `test/git-protected-push.spec.ts`(13건).
+- **반증**: 세 수정을 각각 되돌리면 그것을 지키는 케이스만 빨개집니다(총 7건). 의도적으로 허용하는 케이스는 초록으로 남습니다.
+- 전체 **40 파일 / 459건**, `typecheck` 클린.
+
 ## [2.0.0] - 2026-09-11
 
 ### 수정
