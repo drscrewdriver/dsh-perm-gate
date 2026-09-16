@@ -77,13 +77,13 @@ describe('custom LLM review path (real HTTP, no injected hook)', () => {
     }
   })
 
-  it('hard-risk verdict from the custom API auto-denies without popup', async () => {
+  it('hard-risk verdict from the custom API keeps the ask instead of denying', async () => {
     const { server, base } = await startLlmApi(() => ({ status: 200, content: '{"risk":"risky","category":"system"}' }))
     try {
       const r = runtimeWith(base)
       const ask = r.decideExecution(EXEC)
       const refined = await r.refineAsk(EXEC, ask as never)
-      expect(refined?.kind).toBe('deny')
+      expect(refined?.kind).toBe('ask')
       expect(refined?.reason).toMatch(/risky:system/)
     } finally {
       server.close()

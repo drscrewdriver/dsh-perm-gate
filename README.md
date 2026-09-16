@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.3.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.4.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -335,7 +335,13 @@ optionally overridden with `classifierProvider` / `classifierModel`). A **health
 
 - `safe` → the call is auto-allowed (audited as the `classifier` source); no panel is shown.
 - `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) → the call
-  is **auto-denied** without a panel; hard risks are never auto-allowed and never learned.
+  **keeps the human ask**. The classifier **never denies**: the deny path belongs to the
+  deterministic layers alone (P0 hard-deny, the deny-keyword blacklist, explicit `deny:` rules), so
+  a misgraded category is always negotiable instead of an unappealable block. Hard categories stay
+  distinct from `neutral` in one way that matters: they are **never learned**, so repeated
+  approvals can never sediment them into an auto-allow.
+  (Denying on the model's word was measured live: a benign `git commit -F …` graded `remote`
+  produced an auto-deny with no panel and no grant to retry with.)
 - `risky:neutral` → with `riskLearning` enabled (Settings card, off by default), each human
   approval that actually executes (settled via the host's `tools/result` event) counts toward
   a `tool|category` key; once the count reaches `riskThreshold` (default 3) **and** the new

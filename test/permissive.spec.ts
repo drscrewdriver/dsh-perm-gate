@@ -82,13 +82,27 @@ describe('Permissive independent tier', () => {
     expect(r.auditEntries.at(-1)?.source).toBe('classifier')
   })
 
-  it('llmAssist risky hard category auto-denies without popup', async () => {
+  it('llmAssist risky hard category keeps the human ask — the classifier never denies', async () => {
+    // Deny belongs to the deterministic layers alone. A probabilistic verdict
+    // must not be able to hand down an unappealable block: measured live, the
+    // grader called a benign `git commit -F …` "remote" and the old auto-deny
+    // had no popup and no grant to retry with.
     const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'risky', category: 'deletion' } })
     const ask = r.decideExecution({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }) as never
     const refined = await r.refineAsk({ name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }, ask)
-    expect(refined?.kind).toBe('deny')
+    expect(refined?.kind).toBe('ask')
     expect(refined?.reason).toMatch(/risky:deletion/)
-    expect(r.pendingCount()).toBe(0) // untracked: no human answer needed
+    expect(r.pendingAskCount()).toBe(1) // it IS negotiated now
+  })
+
+  it('a hard category is never learnable, unlike neutral', async () => {
+    // The one distinction the taxonomy keeps: repeated confirmations may
+    // sediment a NEUTRAL verdict into an auto-allow, never a hard one.
+    const r = rt({ permissive: true, llmAssist: true, risk: { kind: 'risky', category: 'remote' }, riskLearning: true, riskThreshold: 1 })
+    const exec = { name: 'bash', arguments: { command: 'git status' }, cwd: '/work' }
+    const refined = await r.refineAsk(exec, r.decideExecution(exec) as never)
+    expect(refined?.kind).toBe('ask')
+    expect(r.pendingCount()).toBe(0) // no learning candidate registered
   })
 
   it('llmAssist without classifier config falls back to the human seam (fail-closed)', async () => {

@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-09-17
+
+### Changed
+
+- **The P3 LLM classifier is escalate-only — it can no longer deny.** A `risky` verdict with a
+  hard category (`deletion` / `credential` / `remote` / `system` / `bulk`) used to **auto-deny**
+  with no panel; it now **keeps the human ask**. Denying is reserved for the deterministic layers
+  alone — P0 hard-deny, the deny-keyword blacklist, explicit `deny:` rules — because a
+  probabilistic verdict must not be able to hand down an unappealable block. Measured live: the
+  grader called a benign `git commit -F …` **`remote`** and the auto-deny left no panel to approve
+  and no grant to retry with; only a manual retry (which happened to grade `safe`) got past it.
+  This also aligns the code with the project's own rule that high-risk operations are intercepted
+  **deterministically, never on the LLM's judgement**.
+
+### Added
+
+- Hard risk categories keep one meaningful distinction from `neutral`: they are **never
+  learnable**. Repeated human approvals cannot sediment a `deletion`/`credential`/`remote`/
+  `system`/`bulk` verdict into an auto-allow (previously this was true only as a side effect of
+  the auto-deny; it is now an explicit property).
+
+### Behaviour notes
+
+- Under `approval: never` an ask the gate cannot deliver still degrades to passthrough, so a
+  classifier-flagged call now **runs** where it used to be auto-denied. That is the direct
+  consequence of "deny only what is deterministically dangerous, negotiate everything else": a
+  negotiation needs a human, and `never` means there is none. Run the gate in a tier whose
+  `approval` is `ask` for the flags to reach you.
+
 ## [2.3.0] - 2026-09-17
 
 ### Added

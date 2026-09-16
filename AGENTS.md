@@ -30,6 +30,12 @@ records repo-local decisions.
 - Waterfall listener (`tools/pre-execute`) always delegates via `next()` on allow/passthrough; it
   vetoes only with `deny`/`ask`.
 - Deny wins over allow: blacklist first, then allow list, then ask list.
+- **Only the deterministic layers may deny**: P0 hard-deny, the deny-keyword blacklist, and
+  explicit `deny:` rules. The P3 LLM classifier is **escalate-only** — it may auto-allow
+  (`safe`) and may keep/raise an ask, but it may never produce a `deny`. A probabilistic verdict
+  must not be able to hand down an unappealable block (measured: a benign `git commit -F …`
+  graded `remote` produced an auto-deny with no panel and no grant). Hard risk categories stay
+  distinct from `neutral` only by being **never learnable**.
 - Unknown or malformed config/rules fail loud at load (never silently disabled).
 - Grants are precise and bounded; a different target is never covered (no cross-target replay).
 - P0 (hard-deny) is monotonic and never negotiated by any later stage — **within the gate's own
