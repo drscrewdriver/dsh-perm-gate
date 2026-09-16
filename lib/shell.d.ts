@@ -20,6 +20,20 @@ export interface SimpleCommand {
 }
 export type CmdFlag = 'recursive' | 'force';
 /**
+ * Reconstruct a simple command's full argv as one string.
+ *
+ * `SimpleCommand` splits the command into `command` + `args`, so any consumer
+ * that matches on a *whole command line* (the `argv.pipeline` dimension, the
+ * `branch` dimension's git parser) needs the parts joined back together —
+ * feeding only `command` loses every subcommand and flag (`git push --force
+ * origin main` degrades to `git`, which parses as "not a git command").
+ *
+ * Redirect targets are appended so a pattern naming the redirect target can
+ * match, and tokens containing whitespace are quoted so the reconstruction
+ * stays tokenizable.
+ */
+export declare function commandArgv(cmd: SimpleCommand): string;
+/**
  * Tokenize a shell string into tokens, honoring single/double quotes and a few
  * common escapes. Missing/EOF quotes throw so the caller can route an
  * undecidable command to `ask` rather than guessing.

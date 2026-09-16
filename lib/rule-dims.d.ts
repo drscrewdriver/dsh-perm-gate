@@ -137,3 +137,38 @@ export interface NetworkDimension {
  * ```
  */
 export declare function parseNetworkDimension(raw: unknown, at: string): NetworkDimension | undefined;
+/**
+ * Parsed `branch` dimension: git branch / remote / shared-branch matching.
+ *
+ * Sub-dimensions are AND — every present sub-dimension must match. Within a
+ * sub-dimension, entries are OR.
+ *
+ * The candidates come from `dispatchCommand` (see `src/command-dispatcher.ts`)
+ * over each decomposed simple command, so `refspec` forms (`HEAD:main`) are
+ * already split and a remote name is never mistaken for a branch name.
+ *
+ * `shared` is **static**: it reflects the parser's protected-branch rule
+ * (`PROTECTED_BRANCHES` in `src/parsers/git.ts`: main / master / production /
+ * release / stable). It does **not** run git to discover whether a branch is
+ * genuinely shared — that would put a subprocess on the decision path.
+ */
+export interface BranchDimension {
+    /** Branch-name globs (e.g. `main`, `release*`). */
+    readonly target?: readonly string[];
+    /** Remote-name globs (e.g. `origin`, `upstream`). */
+    readonly remote?: readonly string[];
+    /** Require the command to target a protected branch. */
+    readonly shared?: boolean;
+}
+/**
+ * Parse the `branch` field: branch / remote / protected-branch matching.
+ *
+ * Format:
+ * ```yaml
+ * branch:
+ *   target: [main, "release*"]
+ *   remote: [origin]
+ *   shared: true
+ * ```
+ */
+export declare function parseBranchDimension(raw: unknown, at: string): BranchDimension | undefined;

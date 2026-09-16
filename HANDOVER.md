@@ -1,75 +1,79 @@
 # dsh-perm-gate — 交接文档（HANDOVER.md）
 
-> 版本线：v2.0.0（`package.json`）· 分支 `main`（DSH ≥ 0.1.2）
+> 版本线：**v2.4.1**（`package.json`）· 分支 `main`（DSH ≥ 0.1.2-alpha.1）
 > 仓库：`E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate`
 > 安装：`dsh plugin --profile web add dsh-perm-gate`
 > 目标读者：续接会话 / 新协作者 — 15 分钟理解全貌，30 分钟开始贡献。
+> **本文所有数字均为 2026-09-17 实测值**（`npm test` 实跑 / 目录枚举 / `package.json` 读取）。
 
 ---
 
 ## 0. 一句话背景
 
-`dsh-perm-gate` 是一个 **DSH Web 插件**：为 DeepSeek Harness 提供 P0–P4 五层权限门控——P0 硬拒绝凭据/保护路径/危险 shell、P1 会话级精确放行 grant、P2 静态规则链（deny→allow→ask）、P3 可选 LLM 风险分级裁决、P4 人工确认缝。独立「自动审查」档位（机器值 `permissive`）与只读/完全权限/白名单平行，前端仅一个开关 + 四策略组合。
+`dsh-perm-gate` 是一个 **DSH Web 插件**：为 DeepSeek Harness 提供 P0–P4 五层权限门控——P0 硬拒绝凭据/保护路径/危险 shell、P1 会话级精确放行 grant、P2 静态规则链（deny→allow→ask）、P3 可选 LLM 风险分级裁决（**只升不降**）、P4 人工确认缝。独立「自动审查」档位（机器值 `permissive` / `permissive-full`）与只读/完全权限/白名单平行。
 
 ---
 
-## 1. 项目目录
+## 1. 项目目录（2026-09-17 实测行数）
 
 ```
 dsh-perm-gate/
-├── src/
-│   ├── index.ts              # host 半入口：cordis apply / settings 注册 / pre-execute 水闸
-│   ├── config.ts             # Schemastery schema + resolveDataDir / resolveDshHome
-│   ├── runtime.ts            # PermGateRuntime 门控引擎（全生命周期）
-│   ├── engine.ts             # P0–P2 纯决策引擎（hard-deny / grant / rule）
-│   ├── classifier.ts         # LLM classifier transport（OpenAI-compatible POST）
-│   ├── risk.ts               # 风险分级协议（safe / risky:category / neutral）
-│   ├── evaluate.ts           # 静态规则匹配（deny-first allow/ask chain）
-│   ├── rule.ts               # permissions YAML 解析 + RegExp 编译（含 ReDoS bound）
-│   ├── grant.ts              # 会话级 grant：canonical fingerprint + TTL + maxUses
-│   ├── allowlist.ts          # rulesFile allow 段增删改
-│   ├── path.ts               # 路径归一化 + 敏感/受保护检测 + ArtifactRegistry
-│   ├── shell.ts              # argv 分解（pipeline/redirects/sh -c 递归/force 识别）
-│   ├── audit.ts              # 审计条目 + MemoryAuditMirror
-│   ├── events.ts             # 决策事件 JSONL 日志 + diff/revert/snapshot API
-│   ├── deny-defaults.ts      # 预设黑名单关键词（继承自 dsh-approval-gate）
-│   ├── host-llm.ts           # DSH host llm service 调用封装
-│   ├── learning.ts           # 判决学习（riskLearning / riskSediment）
-│   ├── grant.ts              # SessionGrant / GrantRegistry
-│   ├── host-llm.ts           # DSH host model group receiver
-│   ├── cli.ts                # 独立 dry-run CLI（dsh-perm-gate --rules ... --tool ... --args ...）
-│   └── client/
-│       ├── index.ts          # browser 半：locales 注册 + slot 注册（tab / input.dock / view）
-│       ├── card.tsx          # Permissive 设置卡（805 行，主 UI）
-│       ├── history.tsx       # 审批历史视图（tab 页，时间线 + diff + snapshot 条）
-│       ├── notice.tsx        # 通知条（conversation.input.dock）
-│       ├── feed.ts           # Feed 组件 + session 解析 + diff/revert 网络层
-│       ├── locales.ts        # 四语字典（zh 源 + en/ja/ko Record<keyof typeof zh>）
-│       ├── sediment.tsx      # 沉淀学习可视化子组件
-│       └── sediments.tsx     # SedimentSection 子组件
-├── test/                     # vitest：23 文件 / 199 测试
-│   ├── engine.spec.ts        # P0/P1/P2 决策路径
-│   ├── runtime.spec.ts       # PermGateRuntime 生命周期
-│   ├── manual-approval.spec.ts # 手动批准/拒绝/取消
-│   ├── deny-keywords.spec.ts # 黑名单词匹配
-│   ├── deny-keywords-scope.spec.ts # 黑名单作用域（跳过 content 字段）
-│   ├── learning.spec.ts      # 判决学习
-│   ├── review.spec.ts        # 审批历史页
-│   ├── grant.spec.ts         # SessionGrant/GrantRegistry
-│   ├── sediments.spec.ts     # 沉淀学习
-│   └── ... （共 23 文件）
-├── lib/                      # 构建产物（git 跟踪；link 模式服务 lib/）
-│   ├── index.js              # host 半
-│   ├── client.js             # browser 半（~102 kB）
-│   └── *.d.ts                # TypeScript 声明
-├── cordis.patch.yml          # DSH profile 补丁（presets + 插件插入）
-├── AGENTS.md                 # 开发规范（合约/原则/构建/文档）
-├── eslint.config.mjs         # ESLint 配置
-├── vitest.config.ts          # vitest 配置
-├── tsconfig.json             # host 半
-├── tsconfig.client.json      # browser 半
-├── tsdown.config.ts          # browser 半构建（tsdown）
-└── LICENSE                   # MIT
+├── src/                                    # 42 个文件
+│   ├── index.ts                    756 行  # host 半入口：cordis apply / settings 注册 / pre-execute 水闸 / 路由装配
+│   ├── config.ts                   349 行  # Schemastery schema + resolveConfig / resolveDataDir / resolveDshHome
+│   ├── runtime.ts                 1741 行  # PermGateRuntime 门控引擎（全生命周期，本仓库最大模块）
+│   ├── engine.ts                   214 行  # P0 硬拒绝判定（hardDenyReason）+ P0→P1→P2 决策链路
+│   ├── evaluate.ts                 377 行  # 静态规则匹配 ruleMatches（10+1 维度，deny-first）
+│   ├── rule.ts                     319 行  # permissions YAML 解析 + VALID_KEYS + RegExp 编译（含 ReDoS bound）
+│   ├── rule-dims.ts                275 行  # 6 个扩展维度的类型与解析（params/absent/agents/when/argv/network）
+│   ├── rule-chain.ts               281 行  # 多文件规则链解析与合并（searchUp / fallback / badFilePolicy）
+│   ├── shadow.ts                   167 行  # 阴影检测（被完全遮蔽的规则序号）
+│   ├── compiler.ts                 241 行  # glob/literal/CIDR/端口/域名/参数模式 → RegExp 编译器
+│   ├── network.ts                  270 行  # 网络纯策略层（NetworkMode / decideNetworkTarget / 回环判定）
+│   ├── network-lifecycle.ts        233 行  # 代理生命周期（启动/重绑/销毁/环境注入快照恢复）
+│   ├── proxy.ts                    603 行  # NetworkProxy：HTTP 转发 + CONNECT 隧道 + 403 阻断 + socket 加固
+│   ├── watch.ts                    203 行  # chokidar 规则文件监听（防抖 / 链级联动 / LRU 回收）
+│   ├── parsers/git.ts              502 行  # git 命令语义解析（子命令 / 分支 / 远程 / 标志 / 破坏性评级）
+│   ├── parsers/shell-cmds.ts       326 行  # 危险 shell 命令解析（rm/mv/chmod/… + 路径与标志提取）
+│   ├── command-semantics.ts         67 行  # CommandSemantics / CommandParser 接口
+│   ├── command-dispatcher.ts       112 行  # 分类器调度（按命令族路由到对应 parser）
+│   ├── shell.ts                    200 行  # argv 分解（pipeline / 重定向 / sh -c 递归 / force 识别）
+│   ├── classifier.ts               181 行  # LLM classifier transport（OpenAI 兼容 POST + 超时/重试）
+│   ├── risk.ts                     174 行  # 风险分级协议（safe / risky:category / unresolved）
+│   ├── host-llm.ts                  86 行  # DSH host llm 服务调用封装
+│   ├── learning.ts                 253 行  # 判决学习（风险确认计数 + 指纹 + 沉淀）
+│   ├── grant.ts                    140 行  # 会话级 grant（canonical fingerprint + TTL + maxUses）
+│   ├── allowlist.ts                 89 行  # rulesFile allow 段增删改
+│   ├── path.ts                     115 行  # 路径归一化 + 敏感/受保护检测 + ArtifactRegistry
+│   ├── agent-identity.ts           107 行  # 从会话 header 提取 main/subagent/preset:<name> 候选
+│   ├── preset.ts                    62 行  # 会话权限档位读取（gatePresets 作用域判定）
+│   ├── session-sweep.ts            167 行  # 清理已归档/已死会话的门控事件与快照
+│   ├── events.ts                   837 行  # 决策事件 JSONL + snapshot/diff/revert + 9 条 HTTP 路由注册
+│   ├── audit.ts                     64 行  # 审计条目 + MemoryAuditMirror
+│   ├── risk 配套: deny-defaults.ts  20 行 · llm-presets.ts 22 行 · receiver-info.ts 112 行
+│   ├── cli.ts                       85 行  # 独立 dry-run CLI
+│   └── client/                             # browser 半（tsdown 打包为 lib/client.js）
+│       ├── card.tsx                918 行  # 自动审查设置卡（主 UI：四策略 + 网络开关 + 学习/阈值）
+│       ├── history.tsx             633 行  # 审批历史视图（时间线 + diff + snapshot）
+│       ├── locales.ts              483 行  # 四语字典，zh 为键集源，**115 key**
+│       ├── feed.ts                 257 行  # Feed 组件 + session 解析 + diff/revert 网络层
+│       ├── notice.tsx              154 行  # 通知条（conversation.input.dock）
+│       ├── sediment.tsx            141 行  # 沉淀学习可视化子组件
+│       └── index.ts                128 行  # locales 注册 + 3 个 slot 注册
+├── test/                                   # vitest：43 文件 / 491 测试
+├── scripts/
+│   ├── patch-permission-glyph.mjs          # opt-in：为 permissive-full 补 composer 图标（含 bin）
+│   └── verify-line.mjs                     # 双线校验
+├── patches/add-permissive-glyph.patch      # 0.1.5 线沿用的手动补丁（main 已被脚本取代）
+├── lib/                                    # 构建产物（**git 跟踪**，71 个文件；github 安装免构建）
+├── examples/permissions.example.yaml       # 规则示例
+├── docs/                                   # 见 §7 文档地图
+├── cordis.patch.yml                        # DSH profile 补丁（presets 5 键 + 插件插入）
+├── dsh.plugin.json                         # 插件描述符（id/version/engines/components）
+├── AGENTS.md                               # 开发规范（合约/铁律/构建/文档）
+├── CHANGELOG.md (+.ja/.ko) · README.md (+.zh/.ja/.ko) · INSTALL.md (+.zh/.ja/.ko)
+├── eslint.config.mjs · vitest.config.ts · tsconfig{,.build,.client}.json · tsdown.config.ts
+└── LICENSE (MIT)
 ```
 
 ---
@@ -78,304 +82,193 @@ dsh-perm-gate/
 
 ### 2.1 cordis 插件合约
 
-| 契约点 | 值 | 说明 |
+| 契约点 | 值 | 位置 |
 |--------|-----|------|
-| `name` | `'dsh-perm-gate'` | 固定 ID |
-| `inject` | `['tools', 'webServer', 'llm', 'agentDefaultModel']` | host 依赖 |
+| `name` | `'dsh-perm-gate'` | `src/index.ts:21` |
+| `inject` | `['tools', 'webServer', 'llm', 'agentDefaultModel']` | `src/index.ts:29` |
 | 导出 | `name` / `inject` / `Config` / `apply`，**无 default export** | DSH Loader 解包 `exports.default ?? exports` |
 
 ### 2.2 settings 注册
 
-| 契约点 | 值 | 说明 |
-|--------|-----|------|
-| `settings` API | 双 API 回退：`installSection`（0.1.2+）→ `register`（所有版本） | 见 `DSH-PLUGIN-COMPATIBILITY-GUIDE.md` |
-| 命名空间 | `'dsh-perm-gate'`（`PERMISSIVE_NAMESPACE` / `PERMISSIVE_NS`） | host 半 `index.ts:29` + browser 半 `index.ts:24` |
-| Schema | `Config`（Schemastery `z.object()`） | `config.ts` |
+| 契约点 | 值 |
+|--------|-----|
+| API | 双 API 回退：`installSection`（0.1.2+）→ `settings.register`（所有版本） |
+| 命名空间 | `'dsh-perm-gate'`（`PERMISSIVE_NAMESPACE`，`src/index.ts:37`） |
+| Schema | `Config`（Schemastery `z.object()`，`src/config.ts`） |
+| 装配 | `src/index.ts:502` 调 `installSettingsSection(...)` |
 
-### 2.3 slot 注册
+### 2.3 slot 注册（`src/client/index.ts`）
 
-| slot 名 | key/id | 组件 | 行号 |
-|---------|--------|------|------|
-| `settings.plugins.tab` | key: `'dsh-perm-gate'` | `PermissiveCard` | `client/index.ts:105–118` |
-| `conversation.input.dock` | id: `'dsh-perm-gate.notice'` | `NoticeStrip` | `client/index.ts:78–86` |
-| `conversation.view` | id: `'dsh-perm-gate.history'` | `HistoryView` | `client/index.ts:91–99` |
+| slot 名 | id | 组件 | order |
+|---------|-----|------|-------|
+| `settings.plugins.tab` | key `dsh-perm-gate` | `PermissiveCard` | — |
+| `conversation.input.dock` | `dsh-perm-gate.notice` | `NoticeStrip` | 30 |
+| `conversation.view` | `dsh-perm-gate.history` | `HistoryView` | 20 |
 
-### 2.4 宿主 API
-
-| API | 调用位置 | 说明 |
-|-----|---------|------|
-| `ctx.settings.installSection()` / `register()` | `index.ts:80` | settings namespace 注册 |
-| `ctx.slots.inject()` / `slots.register()` | `client/index.ts` | slot 注册 |
-| `ctx.locale.register()` | `client/index.ts:69` | 四语字典注册 |
-| `ctx.get('webServer')` | `index.ts:302` | HTTP 路由（best effort） |
-| `ctx.get('llm')` | `index.ts:202` | host model group（best effort） |
-| `ctx.get('agentDefaultModel')` | `index.ts:206` | 当前模型组选择 |
-| `ctx.get('typertGateway')` | `index.ts:132` | 会话消息投递（fallback 通道） |
-| `ctx.get('agents').get(sessionId).followup()` | `index.ts:142` | 会话消息投递（第二个通道） |
-
-### 2.5 HTTP API 端点
+### 2.4 HTTP 端点（9 条，全部 `/api/dsh-perm-gate/*`）
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| `GET` | `/api/dsh-perm-gate/events?sessionId=&since=` | 决策事件 JSONL |
-| `GET` | `/api/dsh-perm-gate/diff` | unified diff |
-| `POST` | `/api/dsh-perm-gate/revert` | 撤销文件改动 |
-| `GET` | `/api/dsh-perm-gate/snapshots-stats` | 快照统计 |
-| `POST` | `/api/dsh-perm-gate/snapshots-clear` | 清理快照 |
-| `GET` | `/api/dsh-perm-gate/learning` | 学习状态 |
-| `POST` | `/api/dsh-perm-gate/learning` | 学习重置 |
-| `POST` | `/api/dsh-perm-gate/health` | health test |
-| `GET` | `/api/dsh-perm-gate/receiver` | llmAssist receiver 元数据 |
+| `GET` | `/events?sessionId=&since=` | 决策事件 JSONL |
+| `GET` | `/diff` | unified diff |
+| `POST` | `/revert` | 撤销文件改动 |
+| `GET` | `/snapshots-stats` | 快照统计 |
+| `POST` | `/snapshots-clear` | 清理快照 |
+| `GET` / `POST` | `/learning` | 学习状态读 / 重置 |
+| `POST` | `/health` | health test |
+| `GET` | `/receiver` | llmAssist receiver 元数据 |
+| `GET` | `/network` | 网络诊断（模式 / 代理端口 / 绑定状态） |
 
-### 2.6 水闸事件
+定义集中在 `src/events.ts:448-456`；注册入口 `registerEventsRoute` / `registerReviewRoutes` / `registerLearningRoute` / `registerHealthRoute` / `registerNetworkRoute` / `registerReceiverRoute`。
+
+### 2.5 水闸事件
 
 | 事件名 | 监听方式 | 说明 |
 |--------|---------|------|
 | `tools/pre-execute` | `ctx.on()` | 水闸入口：返回 `deny`/`ask` 或 `next()` |
-| `tools/result` | `ctx.on()` | 结果回传：settle 学习/ask |
-| `approval/request` | `ctx.inject(['approval'], ...)` | 被动观察：settle 手动批准结果 |
+| `tools/result` | `ctx.on()` | 结算：学习/ask 落账 |
+| `approval/request` | `ctx.inject(['approval'], …)` | 被动观察手动批准结果 |
 
-### 2.7 语义 token
+### 2.6 语义 token
 
-| Token | 用途 |
-|-------|------|
-| `--dsw-alias-label-primary` | 主文字色 |
-| `--dsw-alias-label-secondary` | 次要文字色 |
-| `--dsw-alias-label-tertiary` | 辅助文字色 |
-| `--dsw-alias-label-caption` | 说明文字色 |
-| `--dsw-alias-bg-layer-3` | 背景层 |
-| `--dsw-alias-border-l2` | 边框色 |
-| `--dsw-alias-state-business-primary` | 品牌/强调色 |
-| `--dsw-alias-bg-surface` | 表面色 |
-| `--ds-font-family-code` | 代码字体 |
+`--dsw-alias-label-primary` / `-secondary` / `-tertiary` / `-caption`、`--dsw-alias-bg-layer-3`、`--dsw-alias-bg-surface`、`--dsw-alias-border-l2`、`--dsw-alias-state-business-primary`、`--ds-font-family-code`。
 
 ---
 
-## 3. 代码结构速查（以 v0.2.0 行号为参考）
+## 3. 匹配维度总表（11 个维度 + 3 个通用字段）
 
-### `src/index.ts`（411 行）
+`src/rule.ts` 的 `VALID_KEYS` 是权威清单，逐字如下：
+`tools` / `command` / `args` / `paths` / `params` / `absent` / `agents` / `when` / `argv` / `network` / `branch` / `action` / `reason` / `enabled`。
 
-| 区域 | 内容 |
-|------|------|
-| ~1–60 | 模块头 + 类型声明（SettingsScope, EventContextLike） |
-| ~68–90 | `installSettingsSection()` — inline settings 注册器 |
-| ~92–121 | `PermissiveSurface` interface + `asSurface()` 转换器 |
-| ~128–156 | `buildSessionSender()` — 撤销消息投递 |
-| ~165–178 | `makeApprovalAnswerer()` — 审批应答门：先尝试用门禁已放行的裁决直接批准沙箱提权（`answerEscalation`，免弹窗），否则 `next()` 转发并记录人工裁决 |
-| ~194–213 | `makePreExecuteListener()` — 水闸：**先 await `refineAsk`** 再返回决策（safe→`next()` 不弹面板 / 硬类别→deny / neutral·unresolved→ask） |
-| ~215–483 | `apply()` 主入口：config → runtime → settings → routes → watergate → approval |
+| 维度 | 语义 | 逻辑 | 实现 |
+|---|---|---|---|
+| `tools` | 工具名 glob | OR | `evaluate.ts` |
+| `command` | 命令词 `word#recursive\|force` | OR | `parsers/git.ts` + `parsers/shell-cmds.ts` |
+| `args` | 参数 token 扫描 | **OR**（非 AND——见 `docs/ui-gap-analysis-and-branch-permissions.md` §3.3） | `evaluate.ts` |
+| `paths` | 工作区相对路径 glob | OR | `path.ts` |
+| `params` | 键→值 glob | **AND over keys**，`!` 前缀取反 | `rule-dims.ts` |
+| `absent` | 必须不存在的参数键 | AND（全部缺失） | `rule-dims.ts` |
+| `agents` | `main` / `subagent` / `preset:<name>` | OR | `agent-identity.ts` |
+| `when` | 环境/平台条件 | AND | `rule-dims.ts` |
+| `argv` | 额外 argv 模式（`pipeline` 等） | OR | `evaluate.ts:112` |
+| `network` | 域名 / IP / 端口 / scheme | OR + CIDR | `network.ts` + `compiler.ts` |
+| `branch` | git 分支 / 远程 / 保护分支（**仅 git 命令**） | 子维度 AND，内部 OR | `command-dispatcher.ts` + `parsers/git.ts` |
 
-### `src/runtime.ts`（932 行）
-
-| 区域 | 内容 |
-|------|------|
-| ~1–25 | 模块头 + 全部类型导入 |
-| ~28–54 | `ToolExecutionLike` / `ToolResultLike` 类型声明 |
-| ~57–68 | `sessionIdOf()` / `cwdOf()` — 会话/cwd 解析 |
-| ~85–93 | `PendingAsk` 类型 |
-| ~95–147 | `PermGateRuntimeOptions` + 回调接口 |
-| ~166–198 | `constructor`：规则编译、grants、learning、events 初始化 |
-| ~200–230 | `compileInline()` / `reload()` — 规则热重载 |
-| ~282–292 | `ctxFor()` — 构建决策上下文 |
-| ~338–348 | `denyKeywordHit()` — 黑名单扫描 |
-| ~355–383 | `recordEvent()` — 事件写入 |
-| ~427–486 | `decideExecution()` — 核心决策入口 |
-| ~496–504 | `applyPermissive()` — Permissive 档位调制 |
-| ~515–608 | `refineAsk()` — LLM 风险分级精化 |
-| ~620–705 | `settleAskOutcome()` / `settleExecution()` / `recordAskOutcome` — 终端结算 |
-| ~707–805 | 学习管理 API（learningSnapshot, learningReset, healthCheck） |
-| ~758–805 | grant API（grant, approveRepeat, approveAllowEverywhere, allowlist, setAllowlist） |
-| ~828–864 | `eventFiles()` — 文件路径提取 |
-| ~872–928 | 黑名单词匹配工具（CONTENT_ARG_KEYS, keywordMatcher, denyScanText） |
-
-### `src/engine.ts`（99 行）
-
-| 区域 | 内容 |
-|------|------|
-| ~17–18 | `DESTRUCTIVE_TOOL` / `READ_TOOLS` 常量 |
-| ~20–31 | `serialized()` / `containsCredentialMaterial()` |
-| ~33–39 | `pathArgument()` |
-| ~45–76 | `hardDenyReason()` — P0 硬拒绝判定 |
-| ~87–99 | `decide()` — P0→P1→P2 决策链路 |
-
-### `src/events.ts`（800+ 行）
-
-| 区域 | 内容 |
-|------|------|
-| ~19–49 | `GateEvent` 类型 + kind 枚举 |
-| ~51–100 | `EventLog` 类：append / read / since 过滤 |
-| ~100–250 | snapshot 管理（save / load / list / clear） |
-| ~250–450 | diff 生成（diffLines, resolveAbsPath） |
-| ~450–800+ | HTTP 路由注册（DIFF_ROUTE, REVERT_ROUTE, SNAPSHOTS_STATS_ROUTE, SNAPSHOTS_CLEAR_ROUTE） |
-
-### `src/client/card.tsx`（805 行）
-
-| 区域 | 内容 |
-|------|------|
-| ~1–57 | 模块头 + 接口声明 |
-| ~66–98 | CSS 常量 |
-| ~104–805 | `PermissiveCard` React 组件 |
-
-### `src/client/locales.ts`（439 行）
-
-| 区域 | 内容 |
-|------|------|
-| ~1–9 | NS + PermissiveKey 类型 |
-| ~10–117 | `zh` 字典（源，68+ key） |
-| ~118–225 | `en` 字典 |
-| ~226–333 | `ja` 字典 |
-| ~334–439 | `ko` 字典 |
+完整格式规范见 `docs/rules-format.md`（中）/ `docs/rules-format.en.md`（英）。
 
 ---
 
 ## 4. 重要设计原则
 
-1. **P0 硬拒绝单调性**
-   - 凭据/保护路径/危险 shell 的硬拒绝从不协商、从不被后续阶段覆盖
-   - 历史教训：任何 "LLM 判定 safe 就放行" 的设计都不可接受，P0 前 P0 之后
-   - 代码：`engine.ts:hardDenyReason()` 始终最先执行
-
-2. **只读内部工具自动放行**
-   - 工作区只读查询工具（`read` / `read_image` / `grep` / `glob` / `ls` / `lsp`）
-     不可能修改 workspace，且 P0 已保护敏感路径（外部路径读取）。直接 auto-allow
-   - DSH 内部协调工具（`agent_teams_*`、`conversation_search`、`memory_*`、
-     `get_goal` / `update_goal` / `create_goal`、`taskboard_*`、`job_*`、
-     `list_agents` / `interrupt_agent` / `send_message`、`subagent` / `subagent_fork` / `terminal` / `skill`）
-     不修改 workspace 文件，自动放行
-   - P0 硬拒绝仍然优先：这些工具若携带凭据材料仍会被 P0 拦截
-   - 代码：`engine.ts:decide()` 中的 `READ_TOOLS` + `INTERNAL_TOOLS` 预检
-
-3. **deny wins over allow**
-   - 静态规则链：deny → allow → ask，首次匹配胜出
-   - 黑名单词层在 deny 之前（deny-keyword 也是 deny）
-   - 代码：`evaluate.ts:decideRules()` 首次匹配
-
-4. **Fail-closed 默认**
-   - LLM 分类器任何错误 → `ask`（不自动放行）
-   - 网络超时/解析失败/非 JSON → `ask`
-   - 代码：`classifier.ts:155–180` 所有异常路径都返回 `ask`
-
-4. **Grant 精确匹配，绝不跨目标复用**
-   - `canonicalizeCall()` 按工具名+排序后参数构建指纹，cosmetic 等价共享、不同目标不共享
-   - 代码：`grant.ts:36–39`
-
-5. **事件记录永不影响门控**
-   - 事件写入错误被 swallow（`events.ts` append 错误不抛）
-   - 事件是 best-effort 审计，不是门控条件
-   - 代码：`events.ts:120+` 所有 I/O 错误被捕获
-
-6. **双通道终端结算 + "settle on delete" 去重**
-   - 主通道：`approval/request` 观察者（记录手动批准/拒绝/取消）
-   - 备通道：`tools/result` 回传（settle 学习/ask）
-   - 去重：用 `pendingAsks.delete()` 而非全局 flag，缺 callId 也能工作
-   - 代码：`runtime.ts:620–705`
-
-7. **Settings 双半分离**（参考 `01-host-client-settings-separation.md`）
-   - Host 半只声明 Schema + 注册命名空间，不渲染 UI
-   - Browser 半只渲染组件 + 订阅 scope 变更，不声明 Schema
-   - 桥接：同一字符串命名空间 `'dsh-perm-gate'`
-
-8. **文档契约**（参考 `03-multilingual-docs-pattern.md`）
-   - English README 是源，zh/ja/ko 镜像
-   - 每语 README/INSTALL 顶部有完整互链块 + ja/ko 兼容性说明
-   - `locales.ts` 中 zh 是 key 源，en/ja/ko 用 `Record<keyof typeof zh, string>` 编译期保正确
+1. **P0 硬拒绝单调性** —— 凭据/保护路径/危险 shell 的硬拒绝从不协商、从不被后续阶段覆盖。代码：`engine.ts::hardDenyReason()` 始终最先执行。
+2. **只有确定性层可以 deny** —— P0 硬拒绝、deny 关键词黑名单、显式 `deny:` 规则。**P3 LLM 分类器 escalate-only**：可自动放行（`safe`）、可维持/提升 ask，**永不产生 deny**。实测教训：分类器把一条良性 `git commit -F …` 判成 `remote` → 自动拒绝 → 既无面板可批、也无 grant 可复用。
+3. **只读内部工具自动放行** —— `read` / `read_image` / `grep` / `glob` / `ls` / `lsp` 及 `agent_teams_*` / `memory_*` / `job_*` / `taskboard_*` 等内部工具；P0 仍优先（携带凭据材料照样拦）。代码：`engine.ts::decide()` 的 `READ_TOOLS` + `INTERNAL_TOOLS` 预检。
+4. **deny wins over allow** —— deny → allow → ask，首次匹配胜出；黑名单词层在 deny 之前。
+5. **fail-closed 默认** —— LLM 分类器任何错误/超时/非 JSON → `ask`，绝不自动放行。
+6. **Grant 精确匹配** —— `canonicalizeCall()` 按工具名 + 排序后参数构建指纹；cosmetic 等价共享，不同目标绝不共享。
+7. **stand-down 永不静默** —— 作用域外（会话档位不在 `gatePresets`）整门停用（含 P0），但每个 (session, preset) 转换记一条 `stand-down` 事件，客户端显示常驻 `GATE OFF` 条。
+8. **事件记录永不影响门控** —— 事件写入错误被 swallow，是 best-effort 审计而非门控条件。
+9. **Settings 双半分离** —— host 半只声明 Schema + 注册命名空间；browser 半只渲染 + 订阅。
+10. **文档契约** —— English `README.md` 是源，zh/ja/ko 镜像；`locales.ts` 中 `zh` 是键集源，其余用 `Record<keyof typeof zh, string>` 编译期强制对齐。
 
 ---
 
-## 5. 开发/发布流程
-
-### 开发
+## 5. 开发 / 发布流程
 
 ```powershell
 cd E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate
 npm install
-npm run build               # → lib/index.js + lib/client.js
-# link 注册
-dsh plugin --profile web add link:$PWD
-# 验证
-# F12 Console → 检查 settings → plugins 出现「自动审查」卡片
+npm run typecheck   # tsc --noEmit + tsc -p tsconfig.client.json --noEmit
+npm run lint        # eslint src test scripts tsdown.config.ts eslint.config.mjs
+npm test            # vitest run —— 43 文件 / 491 用例
+npm run build       # tsc -p tsconfig.build.json && tsdown → lib/
 ```
 
-### 发布（固定步骤）
+**发布固定步骤**：① 四项门禁全绿 → ② 更新 `package.json` version + `dsh.plugin.json` version + CHANGELOG（三语）+ README 版本行 → ③ `git add . ; git commit ; git push origin main` → ④ `npm run release:latest`（`npm publish --tag latest`）。
 
-1. `npm run typecheck` — host + client 双 tsconfig
-2. `npm run lint` — eslint 0 issues
-3. `npm test` — 23 files / 199 tests
-4. `npm run build` — tsc + tsdown → lib/
-5. 更新 package.json version + CHANGELOG + README
-6. `git add . ; git commit -m "..." ; git push origin main`
-7. `git tag -a vX.Y.Z && git push origin vX.Y.Z`
-8. `npm publish --access public` — ⚠️ 必须带 `--access public`
+**装机纪律**：先 `remove` 再 `add`，ref **钉死 SHA**（防增量覆盖与混合状态）。
 
-### HMR 热更新
+**HMR**：node 半区改动 → 重启 `dsh web`；client 半区改动 → 刷新页面（Ctrl+F5）；规则文件改动 → 由 `watch.ts` 自动热重载。
 
-- **node 半区变更**：重启 dsh（`dsh web` → stop → start）
-- **client 半区变更**：刷新页面（Ctrl+F5），无需重启 dsh
-- **规则文件变更**（`rulesFile`）：自动热重载（`runtime.reload()`），无需重启
+**注意**：仓库**无 CI**（`.github/` 不存在），全部验证在本地执行。
 
 ---
 
 ## 6. 测试速查
 
-### 自动化
-
 ```powershell
-cd E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate
-npm test           # vitest run — 23 files, 199 tests
-npm run typecheck  # tsc --noEmit (host) + tsc -p tsconfig.client.json --noEmit
-npm run lint       # eslint src test tsdown.config.ts eslint.config.mjs
+npm test                              # 全量
+npx vitest run test/proxy-errors.spec.ts   # 单文件
 ```
 
-### 回归用例（新增功能时）
+43 个测试文件，按主题分：
 
-1. **P0 硬拒绝** — 凭据/保护路径/危险 shell 仍被拒绝
-2. **Permissive 档位** — off 时行为不变，on 时策略生效
-3. **学习沉淀** — `riskLearning` off → on → sediment 仍正确
-4. **黑名单词** — 边界匹配不误伤（`format` 不匹配 `formatFile` 等）
-5. **审批历史** — manual-approved/rejected/cancelled 记录正确
-6. **四语 locales** — 新增 key 编译期报 `Record<keyof typeof zh>` 错误
+| 主题 | 文件 |
+|---|---|
+| P0/P1/P2 决策 | `engine` · `evaluate` · `rule` · `rule-dims` · `compiler` · `shadow` · `shell` |
+| 门控运行时 | `runtime` · `runtime-risk` · `permissive` · `pre-execute` · `preset-scope` · `session-resolution` |
+| 网络 | `network` · `network-approval` · `network-lifecycle` · `proxy-errors` |
+| 命令解析 | `command-parsers` · `git-protected-push` |
+| LLM/学习 | `risk` · `custom-llm` · `host-llm` · `learning` · `sediment` · `auto-allow-tools` |
+| 事件/审计 | `events` · `audit` · `review` · `manual-approval` |
+| 授权/白名单 | `grant` · `write-path` |
+| 会话清理 | `session-sweep` · `session-sweep-apply` |
+| 打包/契约 | `patch-presets` · `glyph-patch` · `data-home` · `feature` · `agent-identity` |
+| 规则链与维度 | `rule-chain`（链合并回归） · `branch-dimension` · `pipeline-dimension` |
 
-### 常规目检
-
-1. 官方明/暗主题下卡片可读
-2. Permissive 开关 + 三策略组合
-3. 审批历史 tab 正确加载
-4. 通知条样式
-5. diff 面板 + 撤销
-6. settings 面板 whitelist 增删
-7. deny-keyword 预设 + 自定义增删
+**回归要点**（新增功能时）：P0 硬拒绝仍拒绝 · `permissive` off 时行为不变 · 学习沉淀正确 · 黑名单词边界不误伤 · 审批历史记录正确 · 四语 key 编译期对齐。
 
 ---
 
-## 7. 待办/路线图
+## 7. 文档地图
 
-### 近期
+| 文件 | 内容 | 状态 |
+|---|---|---|
+| `README.md` (+zh/ja/ko) | 项目介绍、P0–P4、规则格式、自动审查档位、CLI | 与代码同步 |
+| `INSTALL.md` (+zh/ja/ko) | 安装 / 升级 / 迁移 / 验证 / 排障 | 与代码同步 |
+| `CHANGELOG.md` (+ja/ko) | Keep-a-Changelog | 与代码同步 |
+| `docs/rules-format.md` / `.en.md` | **规则格式权威规范（11 维度全表 + 3 个通用字段）** | 本计划新增 |
+| `docs/baseline-guard.md` | 能力吸收前的 30 文件回归护栏（「不得改既有用例来适配新行为」） | 由 `.agents/` 迁入 |
+| `docs/ui-gap-analysis-and-branch-permissions.md` | UI 缺口分析 + branch 维度可行性（需求出处） | 草案，2026-09-16 |
+| `docs/repair-log.md` | 历史修复台账 | 归档 |
+| `HANDOVER.md` | 本文 | 2026-09-17 重写 |
+| `AGENTS.md` | 开发铁律 | 持续维护 |
+| `tasks.md` / `findings.md` / `checklist.md`（仓库根） | 2026-09-06 建线记录 | **已归档**，见文件顶部指针 |
 
-- **内部只读工具白名单**：`read` / `read_image` / `grep` / `glob` / `ls` / `lsp` 等纯只读工具应自动放行
-- **`rulesFile` 默认路径**：当前 `cordis.patch.yml` 无 `config.rulesFile` → 需要 profile 级默认值
-- **`data-home` 配置**：`cordis.patch.yml` 无 `config.dshHome` → 事件/快照/学习需默认解析到 `$DSH_HOME/perm-gate/`
+> 兼容线：`compat/0.1.5` = DSH 0.1.5 专用线（3.x 系列），由主线经 PR 同步。当前该线落后主线 33 提交，且**未承诺 0.1.5 100% 可用**。
+
+---
+
+## 8. 待办 / 路线图
+
+### 近期（有明确规划）
+- **规则测试 UI** —— 把 CLI dry-run 接到设置卡，输入命令即时看命中结果
+- **`compat/0.1.5` 收口** —— 落后主线 33 提交；其 `lib/` 被 `.gitignore` 排除导致无法 `github:` 安装
 
 ### 中期
+- 可视化规则编辑器（`docs/ui-gap-analysis-and-branch-permissions.md` Phase 1–3）
+- 快照压缩与磁盘管理
+- 规则变更历史与回滚
 
-- **AgentTeams 集成**：`agent_teams_*` 工具群应有明确的权限策略（内部只读工具放行）
-- **学习沉淀 UI**：沉淀区的数据可视化 + 键级管理
-- **快照压缩**：大量 diff 快照的磁盘空间管理
+### 明确不做（已裁定）
+- **branch 运行时 git 查询**（`git branch -r --contains`）：与低延迟静态拦截冲突
+- Docker / SQL / 包管理器命令解析器
 
 ### 推迟
-
-- **CI/CD**：无 GitHub Actions 配置
-- **npm registry 发布**：尚未发布到 npm
+- CI（当前无 GitHub Actions）
+- npm registry 发布（`release:latest` 脚本已备，尚未执行）
 
 ---
 
-## 8. 社区与 issue 现状
+## 9. 社区与 issue 现状
 
 - **issue**：无公开 issue tracker（内部项目）
 - **PR**：无外部 PR
 - **贡献者**：内部开发
 - **投稿状态**：未投稿至 awesome-dsh-plugin
+- **GitHub topics**（发布时设置）：`dsh`、`dsh-plugin`、`deepseek-harness`、`permission`、`permission-gate`、`allowlist`、`sandbox`、`ai-safety`
 
 ---
 
-*创建日期：2026-09-09*
+*初版：2026-09-09 · 本次重写：2026-09-17（版本 2.0.0 → 2.4.1；用例 23/199 → 43/491；补网络执行面、热重载、6 扩展维度、命令分类器）*
 *参照标准：`improve-dsh-plugins/02-handover-markdown-pattern.md`*

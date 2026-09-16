@@ -1,5 +1,9 @@
 # Checklist
 
+> **【已归档 · 2026-09-17】** 本文件是 2026-09-06 的验收记录，勾选状态停留在当时。
+> 后续验收由工作区计划 `.agents/plans/perm-gate-next/checklist.md` 承接。
+> **本文件内容一字未删，仅此顶部指针是后加的。**
+
 > 2026-09-06 验收记录。验证口径:`npm run typecheck && npm run lint && npm test && npm run build` 全绿(121/121 测试)。
 
 ## Must Pass

@@ -44,16 +44,6 @@ const DESTRUCTIVE_COMMANDS: Record<string, number> = {
   'tar': 2,
 }
 
-/** Dangerous flags that increase destructiveness */
-const DANGEROUS_FLAGS = new Set([
-  '-rf', '-r', '-f', '-fr',
-  '--recursive', '--force', '--no-preserve-root',
-  '--no-clobber',
-  '-p', // preserve
-  '-a', // archive
-  '--delete',
-])
-
 /** System directories that shouldn't be modified */
 const SYSTEM_DIRS = /^(\/bin|\/sbin|\/usr|\/lib|\/etc|\/boot|\/dev|\/proc|\/sys|\/var|C:\\Windows|C:\\Program Files)/i
 
@@ -96,7 +86,6 @@ export class ShellDangerousParser implements CommandParser {
   }
 
   parse(command: string): CommandSemantics | null {
-    const startTime = performance.now()
     const trimmed = command.trim()
     const cmd = trimmed.toLowerCase()
     const baseName = this.extractBaseName(cmd)
@@ -105,7 +94,6 @@ export class ShellDangerousParser implements CommandParser {
     let operation = baseName
     let targets: string[] = []
     let destructiveFlags = false
-    let requiresConfirmation = false
 
     // Parse based on command type
     if (baseName === 'rm' || baseName === 'rmdir') {

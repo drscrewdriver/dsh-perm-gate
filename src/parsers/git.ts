@@ -22,48 +22,6 @@ const PROTECTED_BRANCHES = /^(main|master|production|release|stable)$/i
 /** Known remote names (common defaults) */
 const KNOWN_REMOTES = /^(origin|upstream|fork|origin-\w+)$/i
 
-/** Destructive git operations mapped to destructiveness levels */
-const DESTRUCTIVENESS_MAP: Record<string, number> = {
-  // Level 5: Extreme (data loss, hard to recover)
-  'push-force-with-lease': 5,
-  'push-force': 5,
-  'reset-hard': 5,
-  'clean-force': 5,
-  'branch-delete-force': 5,
-  'push-delete': 5,
-
-  // Level 4: High (significant changes)
-  'push': 4,
-  'reset-mixed': 4,
-  'rebase-interactive': 4,
-  'merge-ff-only': 3,
-
-  // Level 3: Medium (reversible but impactful)
-  'checkout-new-branch': 3,
-  'branch-create': 3,
-  'merge': 3,
-  'rebase': 3,
-  'cherry-pick': 3,
-  'revert': 3,
-  'stash-pop': 2,
-
-  // Level 2: Low (informational)
-  'branch-delete': 2,
-  'branch-rename': 2,
-  'tag-delete': 2,
-  'stash-drop': 2,
-
-  // Level 1: Safe (read-only)
-  'status': 1,
-  'log': 1,
-  'diff': 1,
-  'show': 1,
-  'branch-list': 1,
-  'remote-list': 1,
-  'stash-list': 1,
-  'blame': 1,
-}
-
 /** Flags that increase destructiveness */
 const DESTRUCTIVE_FLAGS = new Set([
   '--force', '-f',
@@ -74,40 +32,6 @@ const DESTRUCTIVE_FLAGS = new Set([
   '-rf',
   '--clean',
   '--reset',
-])
-
-/** Flags to extract (normalized) */
-const EXTRACT_FLAGS = new Set([
-  '--force', '-f',
-  '--hard', '--soft', '--mixed',
-  '--amend',
-  '--delete', '-d', '-D',
-  '--recursive', '-r',
-  '--dry-run', '-n',
-  '--verbose', '-v',
-  '--all', '-a',
-  '--tags',
-  '--prune',
-  '--set-upstream', '-u',
-  '--force-with-lease',
-  '--no-verify', '-n',
-  '--follow',
-  '--stat',
-  '--oneline',
-  '--graph',
-  '--decorate',
-  '--first-parent',
-  '--no-ff',
-  '--ff-only',
-  '--squash',
-  '--abort',
-  '--continue',
-  '--skip',
-  '--onto',
-  '--keep',
-  '--index',
-  '--include-hidden',
-  '--no-dirty',
 ])
 
 export class GitParser implements CommandParser {
@@ -124,7 +48,6 @@ export class GitParser implements CommandParser {
   }
 
   parse(command: string): CommandSemantics | null {
-    const startTime = performance.now()
     const trimmed = command.trim()
 
     // Extract the git command portion (strip shell wrappers)

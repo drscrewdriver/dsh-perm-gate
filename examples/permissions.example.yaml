@@ -9,8 +9,23 @@ permissions:
       reason: no direct remote shell
     - paths: [.dsh/**]
       reason: protect harness metadata
+    # `command` matches the decomposed command WORD only (`git`), so the
+    # subcommand belongs in `args`. A multi-word entry such as `git pull` can
+    # never match — see docs/rules-format.md §4.2.
+    - command: [git]
+      args: [push]
+      branch:
+        target: [main, master, "release*"]
+        shared: true
+      reason: no push to a protected branch
   allow:
-    - command: [git pull, pnpm, node, npm run]
+    - command: [pnpm, node]
+      reason: routine project development
+    - command: [git]
+      args: [pull]
+      reason: routine project development
+    - command: [npm]
+      args: [run]
       reason: routine project development
     - command: [curl, wget]
       args: ["https://*.example.com/*"]

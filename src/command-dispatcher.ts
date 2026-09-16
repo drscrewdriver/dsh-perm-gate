@@ -3,7 +3,7 @@
  * Runs parsers in priority order, returns first match.
  */
 
-import type { CommandParser, ClassificationResult, CommandSemantics } from './command-semantics.js'
+import type { CommandParser, ClassificationResult } from './command-semantics.js'
 import { GitParser } from './parsers/git.js'
 import { ShellDangerousParser } from './parsers/shell-cmds.js'
 

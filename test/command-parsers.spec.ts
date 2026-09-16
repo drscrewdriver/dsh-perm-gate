@@ -6,7 +6,6 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { dispatchCommand, registerParser, clearParsers } from '../src/command-dispatcher'
 import { GitParser } from '../src/parsers/git'
 import { ShellDangerousParser } from '../src/parsers/shell-cmds'
-import type { CommandSemantics } from '../src/command-semantics'
 
 describe('Git Parser', () => {
   const parser = new GitParser()

@@ -256,6 +256,69 @@ export function parseNetworkDimension(raw: unknown, at: string): NetworkDimensio
   return result
 }
 
+// ─── branch ────────────────────────────────────────────────────────────────
+
+/**
+ * Parsed `branch` dimension: git branch / remote / shared-branch matching.
+ *
+ * Sub-dimensions are AND — every present sub-dimension must match. Within a
+ * sub-dimension, entries are OR.
+ *
+ * The candidates come from `dispatchCommand` (see `src/command-dispatcher.ts`)
+ * over each decomposed simple command, so `refspec` forms (`HEAD:main`) are
+ * already split and a remote name is never mistaken for a branch name.
+ *
+ * `shared` is **static**: it reflects the parser's protected-branch rule
+ * (`PROTECTED_BRANCHES` in `src/parsers/git.ts`: main / master / production /
+ * release / stable). It does **not** run git to discover whether a branch is
+ * genuinely shared — that would put a subprocess on the decision path.
+ */
+export interface BranchDimension {
+  /** Branch-name globs (e.g. `main`, `release*`). */
+  readonly target?: readonly string[]
+  /** Remote-name globs (e.g. `origin`, `upstream`). */
+  readonly remote?: readonly string[]
+  /** Require the command to target a protected branch. */
+  readonly shared?: boolean
+}
+
+/**
+ * Parse the `branch` field: branch / remote / protected-branch matching.
+ *
+ * Format:
+ * ```yaml
+ * branch:
+ *   target: [main, "release*"]
+ *   remote: [origin]
+ *   shared: true
+ * ```
+ */
+export function parseBranchDimension(raw: unknown, at: string): BranchDimension | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new RuleError(`${at}.branch must be a mapping`)
+  }
+  const obj = raw as Record<string, unknown>
+  const unknownKeys = Object.keys(obj).filter((k) => k !== 'target' && k !== 'remote' && k !== 'shared')
+  if (unknownKeys.length > 0) {
+    throw new RuleError(
+      `${at}.branch unknown field${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => JSON.stringify(k)).join(', ')} (expected target / remote / shared)`,
+    )
+  }
+  const target_ = obj.target !== undefined ? toStringList(obj.target, `${at}.branch.target`) : undefined
+  const remote_ = obj.remote !== undefined ? toStringList(obj.remote, `${at}.branch.remote`) : undefined
+  if (obj.shared !== undefined && typeof obj.shared !== 'boolean') {
+    throw new RuleError(`${at}.branch.shared must be a boolean`)
+  }
+  const shared_ = obj.shared as boolean | undefined
+  if (target_ === undefined && remote_ === undefined && shared_ === undefined) return undefined
+  return {
+    ...(target_ !== undefined && { target: target_ }),
+    ...(remote_ !== undefined && { remote: remote_ }),
+    ...(shared_ !== undefined && { shared: shared_ }),
+  }
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
 /** Convert an unknown value to a string list (string → [string], array → filtered). */

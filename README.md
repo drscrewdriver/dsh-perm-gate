@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.4.1** — see the [Changelog](./CHANGELOG.md).
+Version **2.5.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
