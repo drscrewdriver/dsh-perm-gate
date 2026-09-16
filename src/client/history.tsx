@@ -47,6 +47,7 @@ const TAG_KEYS = {
   'manual-approved': 'history.tag.manualApproved',
   'manual-rejected': 'history.tag.manualRejected',
   'manual-cancelled': 'history.tag.manualCancelled',
+  'stand-down': 'history.tag.standDown',
 } as const satisfies Record<GateEvent['kind'], PermissiveKey>
 
 /** Full props: locale seat + the session-id carriers the slot delivers. */

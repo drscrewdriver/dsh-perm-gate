@@ -1,5 +1,6 @@
 import z from '@deepseek-ai/schemastery';
 import type { RuleAction } from './rule.js';
+import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js';
 /**
  * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
  * `~/.dsh`. A profile entry that omits `config` must still get a writable data
@@ -217,16 +218,7 @@ export interface PermissiveStrategies {
     readonly trustEscalation: boolean;
 }
 export declare const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies>;
-/**
- * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
- * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
- * same approval behaviour) — so a user can have the gate without inheriting a
- * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
- * preset, including the hard-deny layer).
- */
-export declare const DEFAULT_GATE_PRESETS: readonly string[];
-/** Normalize the gate scope: an unset/empty list means the default. */
-export declare function resolveGatePresets(configured?: readonly string[]): readonly string[];
+export { DEFAULT_GATE_PRESETS, resolveGatePresets };
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
 export declare function resolvePermissiveStrategies(bag?: Partial<PermissiveStrategies>): PermissiveStrategies;
 export declare const Config: z<PermGateConfig>;

@@ -8,9 +8,11 @@ export interface GateEvent {
     /**
      * auto = allowed (rule/grant/llm), ask = routed to the human, deny = vetoed,
      * learned = confirmation settled, manual-* = the human's terminal answer to an
-     * ask (approved / rejected / cancelled).
+     * ask (approved / rejected / cancelled), stand-down = the gate itself is
+     * inactive in this session's permission preset and therefore decided nothing
+     * (see {@link GateEvent.verdict} `stand-down`).
      */
-    readonly kind: 'auto' | 'ask' | 'deny' | 'learned' | 'manual-approved' | 'manual-rejected' | 'manual-cancelled';
+    readonly kind: 'auto' | 'ask' | 'deny' | 'learned' | 'manual-approved' | 'manual-rejected' | 'manual-cancelled' | 'stand-down';
     /** Risk category when an LLM verdict contributed to the decision. */
     readonly risk?: string;
     /** Truncated decision reason. */

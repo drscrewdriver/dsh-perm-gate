@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.2.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.3.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -229,7 +229,16 @@ proxy liveness, env-injection state, block counters, recent blocks).
 自动审查 is an **independent approval tier** in the DSH permission picker, parallel to
 Read Only / Workspace Write / Full access / Whitelist. It is **not** generic "auto-approval" and
 never mints blanket authority: it only narrows or widens the seam *before* the human/LLM step
-while P0 hard-deny stays monotonic and non-negotiable.
+while P0 hard-deny stays monotonic and non-negotiable **within the gate's own scope**.
+
+> **P0 is scoped, not global.** The gate acts only while the session's permission preset is one
+> of `gatePresets` (default `permissive` / `permissive-full`). Under any other preset — Read Only,
+> Workspace Write, or Full access — the **entire** gate stands down, P0 hard-deny included,
+> because the selected tier's own policy governs that session. This is deliberate (see
+> `gatePresets` in the configuration table), but it means "P0 is non-negotiable" holds *inside*
+> the gate's tiers rather than across every tier. A stand-down is not silent: the gate records one
+> `stand-down` event per session/preset transition and the browser shows a sticky **GATE OFF**
+> strip above the input. Set `gatePresets: ['*']` to make P0 global again.
 
 **Two variants ship**, because a preset's `sandbox` and `approval` are independent knobs and
 coupling them forced a bad trade:

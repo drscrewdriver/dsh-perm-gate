@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-09-17
+
+### Added
+
+- **A stand-down is no longer silent.** When the session's permission preset is outside
+  `gatePresets`, the gate used to stand down and record nothing — so the tool call looked
+  exactly like one the gate had inspected and allowed. It now records **one** `stand-down`
+  notice per (session, preset) transition (never per call), naming the preset, the scope and
+  the fact that P0 hard-deny is inactive. The browser renders it as a sticky **GATE OFF**
+  strip above the input, and the approvals history shows a `Gate off` tag.
+- The 自动审查 settings card states the gate's own preset scope (`gatePresets`, default
+  `permissive` / `permissive-full`) and what happens outside it, so the scope is visible
+  where the tier is configured.
+
+### Changed
+
+- **P0's documented positioning is scoped, not global.** P0 hard-deny is monotonic and
+  non-negotiable *within the gate's preset scope*; across presets the gate stands down
+  entirely — P0 included — because the selected tier's own policy owns that session. The
+  code always behaved this way; `AGENTS.md` and the four READMEs claimed otherwise, which
+  made `danger-full-access` read as "P0 still applies". Set `gatePresets: ['*']` to make P0
+  global again.
+
+### Fixed
+
+- `DEFAULT_GATE_PRESETS` / `resolveGatePresets` moved from `config.ts` (which imports
+  schemastery) into the dependency-free `preset.ts`, so the browser half can render the scope
+  without pulling a node-only dependency into the client bundle. `config.ts` re-exports both,
+  so existing imports are unchanged.
+
 ## [2.2.0] - 2026-09-17
 
 ### Fixed

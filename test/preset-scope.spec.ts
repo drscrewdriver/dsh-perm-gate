@@ -151,7 +151,10 @@ describe('gate scoping', () => {
     expect(r.pendingAskCount()).toBe(0)
   })
 
-  it('records nothing while standing down', () => {
+  it('announces the stand-down once per (session, preset) instead of deciding silently', () => {
+    // A silent stand-down is the dangerous case: the call looks exactly like one
+    // the gate inspected and allowed. Exactly one notice must land, on the first
+    // call observed in the out-of-scope preset — not one per call.
     const dir = tmpDir()
     const runtime = new PermGateRuntime({
       rulesFile: undefined,
@@ -159,7 +162,56 @@ describe('gate scoping', () => {
       eventsFile: join(dir, 'events.jsonl'),
     })
     expect(runtime.decideExecution(execOf('danger-full-access', 'rm -rf /work/build'))).toBeUndefined()
-    expect(runtime.eventLog?.query() ?? []).toHaveLength(0)
+    const events = runtime.eventLog?.query() ?? []
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('stand-down')
+    expect(events[0]?.verdict).toBe('stand-down')
+    expect(events[0]?.sessionId).toBe('s1')
+    // The notice names the preset, the scope, and the fact P0 is inactive.
+    expect(events[0]?.reason).toContain('"danger-full-access"')
+    expect(events[0]?.reason).toContain('permissive')
+    expect(events[0]?.reason).toContain('P0 hard-deny')
+
+    // Repeated calls in the same preset add nothing.
+    expect(runtime.decideExecution(execOf('danger-full-access', 'cat ~/.ssh/id_rsa'))).toBeUndefined()
+    expect(runtime.decideExecution(execOf('danger-full-access'))).toBeUndefined()
+    expect(runtime.eventLog?.query() ?? []).toHaveLength(1)
+  })
+
+  it('re-announces when the session moves to a different out-of-scope preset', () => {
+    const dir = tmpDir()
+    const modern = execModern('danger-full-access', 'snapshotEvents')
+    const runtime = new PermGateRuntime({
+      rulesFile: undefined,
+      gatePresets: ['permissive'],
+      eventsFile: join(dir, 'events.jsonl'),
+    })
+    expect(runtime.decideExecution(modern.exec())).toBeUndefined()
+    modern.append('permission/preset', { preset: 'read-only' })
+    expect(runtime.decideExecution(modern.exec())).toBeUndefined()
+    const presets = (runtime.eventLog?.query() ?? []).map((e) => e.reason)
+    expect(presets).toHaveLength(2)
+    expect(presets[0]).toContain('"danger-full-access"')
+    expect(presets[1]).toContain('"read-only"')
+
+    // A session-scoped memo: another session started in the same preset still
+    // gets its own notice (the stand-down is a per-session fact).
+    expect(runtime.decideExecution({ ...execOf('read-only'), sessionId: 's2' } as never)).toBeUndefined()
+    expect(runtime.eventLog?.query() ?? []).toHaveLength(3)
+  })
+
+  it('records no notice while the gate is in scope', () => {
+    const dir = tmpDir()
+    const runtime = new PermGateRuntime({
+      rulesFile: undefined,
+      gatePresets: ['permissive'],
+      eventsFile: join(dir, 'events.jsonl'),
+    })
+    expect(runtime.decideExecution(execOf('permissive', 'rm -rf /work/build'))?.kind).toBe('deny')
+    // Exactly the decision — the stand-down notice never fires in scope.
+    const events = runtime.eventLog?.query() ?? []
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('deny')
   })
 
   it('records the decision on the `0.1.2` snapshot shape', () => {

@@ -16,6 +16,7 @@ import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
+import { DEFAULT_GATE_PRESETS } from '../preset.ts'
 import { SedimentSection } from './sediment.tsx'
 
 /**
@@ -68,6 +69,13 @@ export interface PermissiveCardValue {
   allowlist?: string[]
   /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
   denyKeywords?: string[]
+  /**
+   * Session permission presets in which the gate acts at all (the host's
+   * resolved `gatePresets`). Outside them the whole gate — P0 hard-deny
+   * included — stands down; the card states that scope so the user is not
+   * surprised by a silent stand-down.
+   */
+  gatePresets?: string[]
   // ─── Network (Phase 2) ─────────────────────────────────────────────
   /** Master network switch. When false, no proxy is started. */
   networkEnabled?: boolean
@@ -289,6 +297,17 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     />
                   </div>
                   <p style={hintStyle}>{t('card.permissiveHint')}</p>
+                  {/* The gate's own scope: outside these presets the WHOLE gate
+                      stands down, P0 hard-deny included (see the stand-down note
+                      in src/runtime.ts). Stated here because the settings card is
+                      where the tier is configured, and a silent stand-down would
+                      otherwise look like a gate that approved the call. */}
+                  <p style={hintStyle}>
+                    {t('card.scopeNote').replace(
+                      '%scope',
+                      ((value.gatePresets ?? []).length > 0 ? (value.gatePresets as string[]) : [...DEFAULT_GATE_PRESETS]).join(' / '),
+                    )}
+                  </p>
 
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.strategies')}</p>

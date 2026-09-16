@@ -227,6 +227,12 @@ export declare class PermGateRuntime {
      * frozen events, which would otherwise re-fold on every tool call.
      */
     private presetCache;
+    /**
+     * Last stand-down announced per session (sessionId → the out-of-scope preset
+     * name, `''` when the session records none). Bounded by the session count and
+     * only read on the stand-down path — the in-scope path never touches it.
+     */
+    private readonly standDownAnnounced;
     private readonly learning;
     private readonly events?;
     /** Learning candidates awaiting human approval + execution (call fingerprint → candidate). */
@@ -325,8 +331,26 @@ export declare class PermGateRuntime {
      * `danger-full-access` means "full access without approval prompts", where a
      * forwarded ask can only fail (the approval seam rejects before any answerer
      * runs) and a hard-deny would silently overrule the tier the user chose.
+     *
+     * P0 is therefore monotonic only WITHIN the gate's scope, not across every
+     * preset. {@link announceStandDown} makes that visible instead of silent.
      */
     private gateActive;
+    /**
+     * Record one `stand-down` event the first time a session is observed with a
+     * preset outside {@link gatePresets}, and again whenever that preset changes.
+     *
+     * Per-call silence is what makes a stand-down dangerous: the tool call looks
+     * exactly like a call the gate inspected and allowed. One event per
+     * transition is enough to say otherwise, and keeps the feed (and the
+     * `events.jsonl` append) proportional to preset changes rather than to call
+     * volume.
+     *
+     * The event is a NOTICE, not a decision: it carries no allow/deny meaning,
+     * and the call it was observed on is still settled entirely by the selected
+     * tier. `verdict: 'stand-down'` labels it for the history view.
+     */
+    private announceStandDown;
     /**
      * Whether an `ask` produced while the gate is active can actually reach a
      * human. Under `approval: never` the DSH approval seam returns `rejected`

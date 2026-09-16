@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
+import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js'
 
 /**
  * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
@@ -250,20 +251,10 @@ export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
   trustEscalation: true,
 }
 
-/**
- * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
- * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
- * same approval behaviour) — so a user can have the gate without inheriting a
- * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
- * preset, including the hard-deny layer).
- */
-export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive', 'permissive-full']
-
-/** Normalize the gate scope: an unset/empty list means the default. */
-export function resolveGatePresets(configured?: readonly string[]): readonly string[] {
-  if (configured === undefined || configured.length === 0) return DEFAULT_GATE_PRESETS
-  return configured.filter((name) => typeof name === 'string' && name !== '')
-}
+// The scope constants live in the dependency-free `preset` module (the browser
+// half renders them); bound locally AND re-exported so every existing
+// `./config.js` import keeps resolving.
+export { DEFAULT_GATE_PRESETS, resolveGatePresets }
 
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
 export function resolvePermissiveStrategies(bag: Partial<PermissiveStrategies> = {}): PermissiveStrategies {
