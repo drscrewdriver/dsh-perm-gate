@@ -98,6 +98,7 @@
     "patch:glyph:check": "node scripts/patch-permission-glyph.mjs --check",
     "verify:line": "node scripts/verify-line.mjs new",
     "verify:lines": "node scripts/verify-line.mjs both",
+    "check:line": "node scripts/sync-0.1.5-line.mjs check",
     "release:latest": "npm publish --tag latest",
     "release:2x": "npm publish --tag 2.x",
     "release:legacy": "npm publish --tag legacy"
