@@ -5,46 +5,87 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、
 このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠します。
 
-## [Unreleased]
+## [2.4.1] - 2026-09-17
 
-### 追加
+### 修正
 
-- **セッションスイープ — 認可チェーンがセッションライフサイクルに追従するようになりました。** プラグイン起動時および
-  1 時間ごとに、ゲートは DSH のワークスペースストア（`$DSH_HOME/storages/workspace.json`、読み取り専用）を読み、
-  ゲートがデータを保持しているすべてのセッションを分類します。DSH がアーカイブ済み（`global.archivedSessionIds`）、
-  またはまったく追跡していないセッションの判定イベントは `$DSH_HOME/perm-gate/events.jsonl` から削除され、
-  変更前スナップショットは `$DSH_HOME/perm-gate/snapshots/` から削除されます。ライブセッションには触れず、
-  帰属できない行（空の sessionId、解析不能な行/ファイル）は決して削除しません。I/O エラーはすべて
-  fail-open（そのラウンドはスキップされ、1 時間後に再試行）で、タイマーは `unref` 済みでプラグインとともに破棄されます。
-  新しい設定: `sessionSweep`（デフォルト `true`）、`workspaceStoreFile`。アーカイブ済みセッションを復元しても、
-  スイープされた履歴は戻りません。
-## [3.0.0] - 2026-09-13
+- 承認履歴が、フラグ付きの呼び出しがなぜレビューされずに実行されたのかを説明する唯一のイベントについて、生の `preset-passthrough` 文字列を表示していました（ティアは `approval: ask` を宣言しているのに、セッションが `never` で上書きされ、ゲートの ask がパススルーに降格したためです）。他の判定と同じく読みやすいラベルで表示されるようになりました。
+
+## [2.4.0] - 2026-09-17
 
 ### 変更
 
-- **DSH 0.1.5 専用ラインを新設しました: ブランチ `compat/0.1.5`、バージョン系列 `3.x`、npm dist-tag
-  `dsh-0.1.5`。** `engines.dsh` は `>=0.1.5-rc.1 <0.2.0-0` に、`engines.node` は `>=24` に狭まりました
-  （DSH 0.1.5 は Node 24 未満で何も告げずに動作しません）。メジャー昇格が境界線です: `^2.x` の
-  インストールが `3.x` を解決することはなく、その逆もありません。
-- **公開済み `@deepseek-ai/dsh@0.1.5-rc.2` バンドルに対して検証済み — どの統合シームにもコード変更は
-  不要でした:**
-  - 権限プリセット表は cordis id `permission` のままパッチされます。裏付けパッケージは
-    `@deepseek-ai/dsh-permission-presets`（`PermissionPresetService`）へ移動しましたが、設定形状は
-    完全互換です（`sandbox`/`approval` は必須、`name`/`description` は省略可能な文字列、`custom` は
-    予約語）。内蔵セット（read-only / workspace-write / danger-full-access）も不変のため、
-    `cordis.patch.yml` の全表再宣言はこのままで正しいです。
-  - `approval/request` ウォーターフォール、閉集合の結果（`allowed-once`/`rejected`/`cancelled`/
-    `unavailable`）、サンドボックス昇格 reason の形式は 0.1.2 と同一です。
-  - `effectivePolicy` は user-approval サービスのプライベートメソッドのままです（`typeof` プロブで読む）。
-  - `permission/preset` イベント payload（`{ preset }`）、`snapshotEvents()`/`ownEvents()` ログ
-    アクセサ、3 つのクライアントスロット（`conversation.input.dock`、`conversation.view`、
-    `settings.plugins.tab`）はすべて不変です。設定のプラグインタブは
-- オプションの手動 glyph パッチ（`patches/add-permissive-glyph.patch`）は引き続き適用可能です:
-  composer の `permissionGlyphs` map は 0.1.5-rc.2 でも構造的に不変ですが 15559 行へ移動したため、
-  適用時には hunk の行番号を付け直してください。
-    `dsh-client-ui-settings-plugins` に移りましたが契約は互換です。
-- `test/patch-presets.spec.ts` に予約語 `custom` のガードを追加、`scripts/verify-line.mjs` にこの
-  ブランチ用の `015` ラインを追加しました。
+- **P3 LLM 分類器はエスカレート専用になり、拒否できなくなりました。** ハードカテゴリ
+  (`deletion` / `credential` / `remote` / `system` / `bulk`) の `risky` 判定はこれまでパネルなしで
+  **自動拒否**していましたが、現在は**人間への確認（ask）を維持**します。拒否は決定論的レイヤー
+  （P0 ハード拒否、拒否キーワードのブラックリスト、明示的な `deny:` ルール）だけに属します。
+  確率的な判定が、異議を唱えられないブロックを下してはならないからです。実測: グレーダーは無害な
+  `git commit -F …` を **`remote`** と判定し、自動拒否は承認するパネルも再試行する grant も残しませんでした
+  （たまたま `safe` と判定された手動リトライだけが通りました）。これは「高リスク操作は**決定論的に**
+  遮断し、LLM の判断には委ねない」というプロジェクト自身のルールとも整合します。
+
+### 追加
+
+- ハードリスクカテゴリは `neutral` との重要な違いを一つだけ保ちます: **決して学習されません**。
+  人間の承認を繰り返しても `deletion`/`credential`/`remote`/`system`/`bulk` の判定が自動許可に
+  沈殿することはありません（従来は自動拒否の副作用としてのみ成立していましたが、現在は明示的な性質です）。
+
+### 動作上の注意
+
+- `approval: never` では、ゲートが配信できない ask は従来どおりパススルーに降格するため、分類器が
+  フラグを立てた呼び出しは**実行されます**（以前は自動拒否でした）。これは「決定論的に危険なものだけを
+  拒否し、それ以外は交渉する」の直接の帰結です —— 交渉には人間が必要で、`never` は人間がいないことを
+  意味します。フラグを実際に受け取りたい場合は `approval` が `ask` のティアで運用してください。
+
+## [2.3.0] - 2026-09-17
+
+### 追加
+
+- **ゲートの停止はもはや沈黙しません。** セッションの権限プリセットが `gatePresets` の外にあるとき、
+  ゲートは停止して何も記録しませんでした —— そのためツール呼び出しは、ゲートが検査して許可した
+  呼び出しと見分けがつきませんでした。現在は (session, preset) の遷移ごとに **1 件だけ**
+  `stand-down` 通知を記録し（呼び出しごとではありません）、プリセット・スコープ・P0 ハード拒否が
+  無効である事実を明示します。ブラウザは入力欄の上に常駐の **GATE OFF** ストリップとして表示し、
+  承認履歴には `ゲート停止` タグが出ます。
+- 自动审查 設定カードがゲート自身のプリセットスコープ（`gatePresets`、既定は
+  `permissive` / `permissive-full`）とその外側で何が起きるかを明示するため、スコープはティアを
+  設定する場所で確認できます。
+
+### 変更
+
+- **P0 の文書上の位置づけはグローバルではなくスコープ付きです。** P0 ハード拒否は*ゲートのプリセット
+  スコープ内*で単調かつ交渉不能です。プリセットをまたぐとゲートは P0 を含めて完全に停止します ——
+  選択されたティア自身のポリシーがそのセッションを所有するためです。コードは常にこう動作していましたが、
+  `AGENTS.md` と 4 つの README は逆を主張しており、`danger-full-access` が「P0 は依然適用される」と
+  読めてしまいました。`gatePresets: ['*']` を設定すると P0 は再びグローバルになります。
+
+### 修正
+
+- `DEFAULT_GATE_PRESETS` / `resolveGatePresets` を `config.ts`（schemastery を import しています）から
+  依存のない `preset.ts` へ移し、ブラウザ側が node 専用依存をクライアントバンドルに引き込まずに
+  スコープを描画できるようにしました。`config.ts` は両方を再エクスポートするため、既存の import は
+  変更ありません。
+
+## [2.2.0] - 2026-09-17
+
+### 修正
+
+- **P0 ハード拒否が、4 つのシェルツール以外をすべて素通りさせていました。** `hardDenyReason` はシェル検査をローカルの正規表現 `/^(?:bash|pwsh|sh|cmd)$/` で門番していましたが、これは `shell` / `terminal` / `powershell` に**一致しません**。`shell` は DSH の主要シェルツールであるため、P0 のシェル検査（保護パスへのリダイレクト）は**最も一般的な呼び出し形に対して無効**でした。実測、同一コマンド `echo x > /etc/passwd`：`bash` 経由は遮断、`shell` 経由は**通過**。`engine.ts` は `evaluate.ts` から `SHELL_TOOLS` を取り込むよう変更しました——同じ事実の複製が 3 か所にあり、完全だったのは 1 つだけでした。
+- **`git push --delete` が通常の push として解析されていました。** `hasDelete` は `analyzeSubcommand` で計算されながら `branch` ケースでしか読まれず、`git push --delete origin main` は通常 push 分岐（`destructiveness: 4`）に落ちていました。`DESTRUCTIVENESS_MAP` の `'push-delete': 5` は死んだデータでした。
+- **保護ブランチ判定が、スラッシュを含む名前に誤反応していました。** 述語は最後の `/` より前を落としていたため、`backup/main` や `feat/release` が保護扱いになっていました。既知の ref 接頭辞（`refs/heads/`、`refs/tags/`、`refs/remotes/<remote>/`）のみを剥がすよう変更しました。方向が重要です——この述語は**取り消し不能な** P0 に供給され、見逃しにはキーワード／ルール／LLM 層という受け皿がありますが、誤検出は正当なワークフローを出口なく塞いでしまいます。
+
+### 追加
+
+- **保護ブランチに対するリモート履歴改変の P0 ハード拒否。** `main` / `master` / `production` / `release` / `stable` を強制上書きまたは削除する `git push` を、LLM 呼び出しより前に決定的に拒否します。従来の保護は、フラットでブランチを見ず、名前空間で上書き可能なキーワード `'push --force'` でした。これはその下に敷く交渉不能な床です。
+  - **「エスカレーションのみ」は慣習ではなく構造です**: ヘルパーは `string | undefined` を返し、呼び出し側はそれを deny / 未決定として読みます。allow を表現する手段がないため、P0 に配線してもゲートが許可する範囲を広げることはできません。
+  - 意図的に**対象外**（引き続きキーワード／ルール／LLM 層が担当）: 非保護ブランチへの force push、ブランチ名を書かない `git push --force`、通常の push。
+  - コマンドパーサ（`command-dispatcher` / `command-semantics` / `parsers/git` / `parsers/shell-cmds`）の初の本番利用です。これまで自身のテストファイルからしか参照されていませんでした。
+
+### テスト
+
+- 新規 `test/git-protected-push.spec.ts`（13 件）。
+- **反証**: 3 つの修正をそれぞれ戻すと、それを守るケースだけが赤くなります（計 7 件）。意図的に許可するケースは緑のままです。
+- 全量 **40 ファイル / 459 件**、`typecheck` クリーン。
 
 ## [2.0.0] - 2026-09-11
 

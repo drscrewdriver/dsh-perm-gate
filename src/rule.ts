@@ -9,7 +9,23 @@
  * nothing matches, `defaultAction` applies.
  */
 import { parse } from 'yaml'
-import { compileGlob, hashText, type CompiledPattern } from './compiler.js'
+import { compileGlob, compileBranchPattern, hashText, type CompiledPattern } from './compiler.js'
+import {
+  parseParamsDimension,
+  parseAbsentDimension,
+  parseAgentsDimension,
+  parseWhenDimension,
+  parseArgvDimension,
+  parseNetworkDimension,
+  parseBranchDimension,
+  type ParamsDimension,
+  type AbsentDimension,
+  type AgentsDimension,
+  type WhenDimension,
+  type ArgvDimension,
+  type NetworkDimension,
+  type BranchDimension,
+} from './rule-dims.js'
 
 export type RuleAction = 'allow' | 'ask' | 'deny'
 
@@ -34,6 +50,20 @@ export interface RuleEntryDoc {
   readonly args: string[]
   /** Workspace-relative path globs; empty = no constraint. */
   readonly paths: string[]
+  /** Parameter key→value matching (AND over keys, `!` prefix negates). */
+  readonly params: ParamsDimension
+  /** Parameter keys that must NOT be present. */
+  readonly absent: AbsentDimension
+  /** Agent identity candidates (main / subagent / preset:<name>). */
+  readonly agents: AgentsDimension
+  /** Environment / platform conditions. */
+  readonly when: WhenDimension | undefined
+  /** Extra argv patterns (pipeline etc.). */
+  readonly argv: ArgvDimension | undefined
+  /** Network dimension (domain / IP / port / scheme). */
+  readonly network: NetworkDimension | undefined
+  /** Git branch / remote / protected-branch dimension. */
+  readonly branch: BranchDimension | undefined
   readonly action: RuleAction
   readonly reason: string
   readonly enabled: boolean
@@ -49,7 +79,28 @@ export interface CompiledRuleEntry {
   readonly command: readonly CommandSpec[]
   readonly args: readonly CompiledPattern[]
   readonly paths: readonly CompiledPattern[]
+  /** Parsed params dimension (raw patterns; compiled on match). */
+  readonly params: ParamsDimension
+  /** Parsed absent dimension (raw key names). */
+  readonly absent: AbsentDimension
+  /** Parsed agents dimension (raw patterns). */
+  readonly agents: AgentsDimension
+  /** Parsed when dimension (raw conditions). */
+  readonly when: WhenDimension | undefined
+  /** Parsed argv dimension (raw patterns). */
+  readonly argv: ArgvDimension | undefined
+  /** Parsed network dimension (raw patterns). */
+  readonly network: NetworkDimension | undefined
+  /** Compiled branch dimension (patterns compiled; absent = no constraint). */
+  readonly branch: CompiledBranchDimension | undefined
   readonly source: RuleEntryDoc
+}
+
+/** Compiled `branch` dimension: `target`/`remote` globs, raw `shared` flag. */
+export interface CompiledBranchDimension {
+  readonly target: readonly CompiledPattern[]
+  readonly remote: readonly CompiledPattern[]
+  readonly shared: boolean
 }
 
 export interface CommandSpec {
@@ -140,7 +191,8 @@ export function parsePermissionsDocument(text: string): PermissionsDoc {
 
 function parseRuleEntry(raw: unknown, action: RuleAction, at: string): RuleEntryDoc {
   if (!isRecord(raw)) throw new RuleError(`${at} must be a mapping`)
-  const unknown = Object.keys(raw).filter((k) => !['tools', 'command', 'args', 'paths', 'action', 'reason', 'enabled'].includes(k))
+  const VALID_KEYS = ['tools', 'command', 'args', 'paths', 'params', 'absent', 'agents', 'when', 'argv', 'network', 'branch', 'action', 'reason', 'enabled']
+  const unknown = Object.keys(raw).filter((k) => !VALID_KEYS.includes(k))
   if (unknown.length > 0) {
     throw new RuleError(`${at} unknown field${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => JSON.stringify(k)).join(', ')}`)
   }
@@ -156,6 +208,13 @@ function parseRuleEntry(raw: unknown, action: RuleAction, at: string): RuleEntry
     command: stringList(raw.command, `${at}.command`),
     args: stringList(raw.args, `${at}.args`),
     paths: stringList(raw.paths, `${at}.paths`),
+    params: parseParamsDimension(raw.params, `${at}.params`),
+    absent: parseAbsentDimension(raw.absent, `${at}.absent`),
+    agents: parseAgentsDimension(raw.agents, `${at}.agents`),
+    when: parseWhenDimension(raw.when, `${at}.when`),
+    argv: parseArgvDimension(raw.argv, `${at}.argv`),
+    network: parseNetworkDimension(raw.network, `${at}.network`),
+    branch: parseBranchDimension(raw.branch, `${at}.branch`),
     action,
     reason: reason === undefined ? `${action}` : reason,
     enabled: raw.enabled === undefined ? true : typeof raw.enabled === 'boolean' ? raw.enabled : (() => { throw new RuleError(`${at}.enabled must be a boolean`) })(),
@@ -192,20 +251,59 @@ function compileCommand(entry: string, opts: CompileOptions): CommandSpec {
   return { word: compileGlob(word, { segments: false, maxStars: opts.maxGlobStars ?? 2 }), flag }
 }
 
+/**
+ * Compile the `branch` dimension (undefined = the rule does not constrain on it).
+ *
+ * Glob degree is bounded inside `compileBranchPattern` (DEFAULT_MAX_STARS), so
+ * this takes no options: branch patterns are never path-segmented.
+ */
+function compileBranchDimension(dim: BranchDimension | undefined): CompiledBranchDimension | undefined {
+  if (dim === undefined) return undefined
+  return {
+    target: (dim.target ?? []).map((p) => compileBranchPattern(p)),
+    remote: (dim.remote ?? []).map((p) => compileBranchPattern(p)),
+    shared: dim.shared === true,
+  }
+}
+
+/**
+ * Compile one parsed entry into a hot-path rule.
+ *
+ * Exported because the multi-file rule chain (`rule-chain.ts`) merges entries
+ * from several documents into one ruleset and must produce the SAME shape here
+ * — an entry built by hand would silently drop every compiled dimension, and an
+ * empty dimension means "no constraint", i.e. "matches everything".
+ */
+export function compileRuleEntry(
+  entry: RuleEntryDoc,
+  action: RuleAction,
+  index: number,
+  opts: CompileOptions = {},
+): CompiledRuleEntry {
+  return {
+    index,
+    action,
+    reason: entry.reason,
+    enabled: entry.enabled,
+    tools: compilePatternList(entry.tools, 'tools', opts),
+    command: entry.command.map((c) => compileCommand(c, opts)),
+    args: compilePatternList(entry.args, 'args', opts),
+    paths: compilePatternList(entry.paths, 'paths', opts),
+    params: entry.params,
+    absent: entry.absent,
+    agents: entry.agents,
+    when: entry.when,
+    argv: entry.argv,
+    network: entry.network,
+    branch: compileBranchDimension(entry.branch),
+    source: entry,
+  }
+}
+
 /** Compile a validated document into hot-path rules. */
 export function compileDocument(doc: PermissionsDoc, opts: CompileOptions = {}): CompiledRuleset {
   const comp = (list: RuleEntryDoc[], action: RuleAction, offset: number): readonly CompiledRuleEntry[] =>
-    list.map((entry, i) => ({
-      index: offset + i,
-      action,
-      reason: entry.reason,
-      enabled: entry.enabled,
-      tools: compilePatternList(entry.tools, 'tools', opts),
-      command: entry.command.map((c) => compileCommand(c, opts)),
-      args: compilePatternList(entry.args, 'args', opts),
-      paths: compilePatternList(entry.paths, 'paths', opts),
-      source: entry,
-    }))
+    list.map((entry, i) => compileRuleEntry(entry, action, offset + i, opts))
   return {
     defaultAction: doc.defaultAction,
     deny: comp(doc.deny, 'deny', 0),

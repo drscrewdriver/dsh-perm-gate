@@ -21,6 +21,24 @@ export interface SimpleCommand {
 
 export type CmdFlag = 'recursive' | 'force'
 
+/**
+ * Reconstruct a simple command's full argv as one string.
+ *
+ * `SimpleCommand` splits the command into `command` + `args`, so any consumer
+ * that matches on a *whole command line* (the `argv.pipeline` dimension, the
+ * `branch` dimension's git parser) needs the parts joined back together —
+ * feeding only `command` loses every subcommand and flag (`git push --force
+ * origin main` degrades to `git`, which parses as "not a git command").
+ *
+ * Redirect targets are appended so a pattern naming the redirect target can
+ * match, and tokens containing whitespace are quoted so the reconstruction
+ * stays tokenizable.
+ */
+export function commandArgv(cmd: SimpleCommand): string {
+  const quote = (token: string): string => (/\s/.test(token) ? JSON.stringify(token) : token)
+  return [cmd.command, ...cmd.args, ...cmd.redirects].map(quote).join(' ')
+}
+
 const WRAPPER_WORDS = new Set(['env', 'sudo', 'command', 'nohup', 'xargs'])
 const COMMAND_WORDS = new Set(['sh', 'bash', 'zsh', 'dash', 'busybox', 'pwsh', 'powershell', 'cmd'])
 

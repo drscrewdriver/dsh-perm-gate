@@ -1,4 +1,5 @@
 import { type CompiledPattern } from './compiler.js';
+import { type ParamsDimension, type AbsentDimension, type AgentsDimension, type WhenDimension, type ArgvDimension, type NetworkDimension, type BranchDimension } from './rule-dims.js';
 export type RuleAction = 'allow' | 'ask' | 'deny';
 /** A parsed, shape-validated permissions document (patterns not yet compiled). */
 export interface PermissionsDoc {
@@ -20,6 +21,20 @@ export interface RuleEntryDoc {
     readonly args: string[];
     /** Workspace-relative path globs; empty = no constraint. */
     readonly paths: string[];
+    /** Parameter key→value matching (AND over keys, `!` prefix negates). */
+    readonly params: ParamsDimension;
+    /** Parameter keys that must NOT be present. */
+    readonly absent: AbsentDimension;
+    /** Agent identity candidates (main / subagent / preset:<name>). */
+    readonly agents: AgentsDimension;
+    /** Environment / platform conditions. */
+    readonly when: WhenDimension | undefined;
+    /** Extra argv patterns (pipeline etc.). */
+    readonly argv: ArgvDimension | undefined;
+    /** Network dimension (domain / IP / port / scheme). */
+    readonly network: NetworkDimension | undefined;
+    /** Git branch / remote / protected-branch dimension. */
+    readonly branch: BranchDimension | undefined;
     readonly action: RuleAction;
     readonly reason: string;
     readonly enabled: boolean;
@@ -34,7 +49,27 @@ export interface CompiledRuleEntry {
     readonly command: readonly CommandSpec[];
     readonly args: readonly CompiledPattern[];
     readonly paths: readonly CompiledPattern[];
+    /** Parsed params dimension (raw patterns; compiled on match). */
+    readonly params: ParamsDimension;
+    /** Parsed absent dimension (raw key names). */
+    readonly absent: AbsentDimension;
+    /** Parsed agents dimension (raw patterns). */
+    readonly agents: AgentsDimension;
+    /** Parsed when dimension (raw conditions). */
+    readonly when: WhenDimension | undefined;
+    /** Parsed argv dimension (raw patterns). */
+    readonly argv: ArgvDimension | undefined;
+    /** Parsed network dimension (raw patterns). */
+    readonly network: NetworkDimension | undefined;
+    /** Compiled branch dimension (patterns compiled; absent = no constraint). */
+    readonly branch: CompiledBranchDimension | undefined;
     readonly source: RuleEntryDoc;
+}
+/** Compiled `branch` dimension: `target`/`remote` globs, raw `shared` flag. */
+export interface CompiledBranchDimension {
+    readonly target: readonly CompiledPattern[];
+    readonly remote: readonly CompiledPattern[];
+    readonly shared: boolean;
 }
 export interface CommandSpec {
     readonly word: CompiledPattern;
@@ -56,6 +91,15 @@ export declare class RuleError extends Error {
 }
 /** Parse a raw YAML permissions document; malformed files fail loud at load. */
 export declare function parsePermissionsDocument(text: string): PermissionsDoc;
+/**
+ * Compile one parsed entry into a hot-path rule.
+ *
+ * Exported because the multi-file rule chain (`rule-chain.ts`) merges entries
+ * from several documents into one ruleset and must produce the SAME shape here
+ * — an entry built by hand would silently drop every compiled dimension, and an
+ * empty dimension means "no constraint", i.e. "matches everything".
+ */
+export declare function compileRuleEntry(entry: RuleEntryDoc, action: RuleAction, index: number, opts?: CompileOptions): CompiledRuleEntry;
 /** Compile a validated document into hot-path rules. */
 export declare function compileDocument(doc: PermissionsDoc, opts?: CompileOptions): CompiledRuleset;
 /** SHA-256 hash of the raw document (compile-cache key without recompiling). */

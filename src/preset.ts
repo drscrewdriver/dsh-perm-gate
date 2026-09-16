@@ -42,3 +42,21 @@ export function presetInScope(preset: string | undefined, scope: readonly string
   if (preset === undefined) return false
   return scope.includes(preset)
 }
+
+/**
+ * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
+ * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
+ * same approval behaviour) — so a user can have the gate without inheriting a
+ * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
+ * preset, including the hard-deny layer).
+ *
+ * Lives in this dependency-free module (not `config.ts`) so the browser half can
+ * render the scope without pulling schemastery into the client bundle.
+ */
+export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive', 'permissive-full']
+
+/** Normalize the gate scope: an unset/empty list means the default. */
+export function resolveGatePresets(configured?: readonly string[]): readonly string[] {
+  if (configured === undefined || configured.length === 0) return DEFAULT_GATE_PRESETS
+  return configured.filter((name) => typeof name === 'string' && name !== '')
+}

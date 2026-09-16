@@ -6,8 +6,13 @@
  *
  *   safe                      → the gate may auto-allow the ask
  *   risky:<hard category>     → deletion / credential / remote / system / bulk —
- *                               auto-deny: the operation is clearly dangerous,
- *                               no popup or human review needed
+ *                               the operation looks dangerous; the gate KEEPS the
+ *                               human ask and never learns these into an
+ *                               auto-allow. It is NOT an auto-deny: denying is
+ *                               reserved for the deterministic layers (P0,
+ *                               deny-keywords, `deny:` rules), because a
+ *                               probabilistic verdict must not be able to hand
+ *                               down an unappealable block.
  *   risky:neutral             → no hard-risk signal but not clearly safe; the
  *                               verdict-learning path may auto-allow after
  *                               enough human confirmations
@@ -27,12 +32,21 @@ export type RiskCategory = 'deletion' | 'credential' | 'remote' | 'system' | 'bu
 /**
  * Categories that always route to the human seam regardless of learning state
  * or any later LLM opinion. Order-stable for prompts and event payloads.
+ *
+ * "Hard" means *never auto-allowed and never learned* — the gate keeps asking.
+ * It does not mean auto-denied: the deny path belongs to the deterministic
+ * layers alone (P0 hard-deny, the deny-keyword blacklist, explicit `deny:`
+ * rules), so a misgraded category can always be negotiated instead of becoming
+ * an unappealable block.
  */
 export const HARD_RISK_CATEGORIES: readonly RiskCategory[] = ['deletion', 'credential', 'remote', 'system', 'bulk']
 
 const RISK_CATEGORIES: readonly RiskCategory[] = [...HARD_RISK_CATEGORIES, 'neutral']
 
-/** Whether a category must never be auto-allowed. Unknown categories are hard too (fail-closed). */
+/**
+ * Whether a category must never be auto-allowed — and never learned into one.
+ * Unknown categories are hard too (fail-closed).
+ */
 export function isHardRisk(category: string): boolean {
   if ((HARD_RISK_CATEGORIES as readonly string[]).includes(category)) return true
   // An unknown category means the verdict is unreliable — treat it as hard.
@@ -134,9 +148,8 @@ export type RiskSend = (system: string, user: string) => Promise<{ ok: true; con
 export function riskUserText(req: RiskRequest): string {
   // Enrich the prompt with full path context so the LLM can judge
   // whether a deletion targets a temporary/build artifact vs real data.
-  const raw = req.args ?? {}
-  const argsRecord = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>
-  const enriched: Record<string, unknown> = { ...argsRecord }
+  const args = (req.args ?? {}) as Record<string, unknown>
+  const enriched = { ...args } as Record<string, unknown>
   // Surface the working directory if present (helps LLM see temp paths).
   if (typeof enriched.cwd === 'string' && enriched.cwd !== '') {
     enriched.__cwd = enriched.cwd

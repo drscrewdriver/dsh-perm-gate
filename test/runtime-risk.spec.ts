@@ -98,7 +98,10 @@ describe('verdict learning end-to-end (refineAsk + settleExecution)', () => {
     })
     const ask = r.decideExecution(EXEC)
     const refined = await r.refineAsk(EXEC, ask as never)
-    expect(refined?.kind).toBe('deny')
+    // Kept as an ask (the classifier never denies) AND never turned into a
+    // learning candidate — repeated confirmations cannot auto-allow a hard
+    // category.
+    expect(refined?.kind).toBe('ask')
     expect(r.pendingCount()).toBe(0)
   })
 

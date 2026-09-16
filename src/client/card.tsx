@@ -16,6 +16,7 @@ import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
+import { DEFAULT_GATE_PRESETS } from '../preset.ts'
 import { SedimentSection } from './sediment.tsx'
 
 /**
@@ -68,6 +69,23 @@ export interface PermissiveCardValue {
   allowlist?: string[]
   /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
   denyKeywords?: string[]
+  /**
+   * Session permission presets in which the gate acts at all (the host's
+   * resolved `gatePresets`). Outside them the whole gate — P0 hard-deny
+   * included — stands down; the card states that scope so the user is not
+   * surprised by a silent stand-down.
+   */
+  gatePresets?: string[]
+  // ─── Network (Phase 2) ─────────────────────────────────────────────
+  /** Master network switch. When false, no proxy is started. */
+  networkEnabled?: boolean
+  /** Network policy mode. */
+  networkMode?: 'deny-all' | 'whitelist' | 'allow-all'
+  /** Rewrite HTTP(S)_PROXY / ALL_PROXY for subprocesses. Default true. */
+  networkInjectEnv?: boolean
+  // ─── Hot reload (Phase 3) ──────────────────────────────────────────
+  /** Enable file watching for rule hot-reload. */
+  watch?: boolean
 }
 
 /** One injected face: the plugin's own settings scope. */
@@ -84,6 +102,24 @@ interface ReceiverInfoBody {
   readonly source?: 'custom' | 'host'
   readonly selection?: { readonly provider: string; readonly model: string } | null
   readonly providers?: readonly { readonly id: string; readonly name: string; readonly models: readonly { readonly id: string; readonly name: string }[]; readonly error?: string }[]
+}
+
+/**
+ * The report served by POST /api/dsh-perm-gate/dry-run. `verdict` is the
+ * effective result of the whole chain; `ruleLayer` is what the `permissions`
+ * chain decides on its own, and only that layer can name a rule index.
+ */
+interface DryRunReport {
+  readonly verdict?: 'allow' | 'ask' | 'deny'
+  readonly reason?: string
+  readonly ruleCount?: number
+  readonly defaultAction?: string
+  readonly ruleLayer?: {
+    readonly action?: 'allow' | 'ask' | 'deny'
+    readonly reason?: string
+    readonly ruleIndex?: number
+    readonly matchedDimensions?: readonly string[]
+  }
 }
 
 const rowStyle: CSSProperties = {
@@ -171,6 +207,43 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   // Health-test state for the llmAssist receiver.
   const [healthBusy, setHealthBusy] = useState(false)
   const [healthResult, setHealthResult] = useState<string | null>(null)
+  // Rule-test (dry-run) state: the call to try and its report. Read-only — the
+  // panel never writes a rule, so "test first" cannot itself change the ruleset.
+  const [dryTool, setDryTool] = useState('shell')
+  const [dryCommand, setDryCommand] = useState('')
+  const [dryBusy, setDryBusy] = useState(false)
+  const [dryReport, setDryReport] = useState<DryRunReport | null>(null)
+  const [dryError, setDryError] = useState<string | null>(null)
+  const runDryRunTest = (): void => {
+    const tool = dryTool.trim() === '' ? 'shell' : dryTool.trim()
+    const command = dryCommand.trim()
+    setDryBusy(true)
+    setDryError(null)
+    setDryReport(null)
+    // A shell call is described by its `command`; any other tool's arguments are
+    // not expressible in one line, so the panel honestly tests the empty form.
+    const args: Record<string, unknown> = command === '' ? {} : { command }
+    fetch('/api/dsh-perm-gate/dry-run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tool, args }),
+    })
+      .then(async (r) => {
+        const text = await r.text()
+        if (r.status === 404) throw new Error(t('card.dryRunStale'))
+        try {
+          return JSON.parse(text) as { ok?: boolean; result?: DryRunReport; error?: string }
+        } catch {
+          throw new Error(text.trim().slice(0, 120) !== '' ? text.trim().slice(0, 120) : `HTTP ${r.status}`)
+        }
+      })
+      .then((res) => {
+        if (res.ok === true && res.result !== undefined) setDryReport(res.result)
+        else setDryError(res.error ?? t('card.dryRunFail'))
+      })
+      .catch((e: unknown) => { setDryError(String((e as Error)?.message ?? e)) })
+      .finally(() => { setDryBusy(false) })
+  }
   // Receiver introspection: the live provider/model-group catalog (host mode)
   // and the provider/model the gate will actually use right now.
   const receiverSource = (value.classifierSource ?? 'custom') === 'host' ? 'host' : 'custom'
@@ -279,6 +352,17 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     />
                   </div>
                   <p style={hintStyle}>{t('card.permissiveHint')}</p>
+                  {/* The gate's own scope: outside these presets the WHOLE gate
+                      stands down, P0 hard-deny included (see the stand-down note
+                      in src/runtime.ts). Stated here because the settings card is
+                      where the tier is configured, and a silent stand-down would
+                      otherwise look like a gate that approved the call. */}
+                  <p style={hintStyle}>
+                    {t('card.scopeNote').replace(
+                      '%scope',
+                      ((value.gatePresets ?? []).length > 0 ? (value.gatePresets as string[]) : [...DEFAULT_GATE_PRESETS]).join(' / '),
+                    )}
+                  </p>
 
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.strategies')}</p>
@@ -602,6 +686,106 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                   </section>
 
                   <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.dryRun')}</p>
+                    <p style={hintStyle}>{t('card.dryRunHint')}</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end', margin: '6px 0' }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '0 0 120px' }}>
+                        <span style={fieldLabelStyle}>{t('card.dryRunTool')}</span>
+                        <input
+                          type="text"
+                          value={dryTool}
+                          disabled={readonly}
+                          placeholder="shell"
+                          onChange={(e) => { setDryTool(e.target.value) }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') runDryRunTest() }}
+                          style={controlStyle}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 260px', minWidth: 0 }}>
+                        <span style={fieldLabelStyle}>{t('card.dryRunCommand')}</span>
+                        <input
+                          type="text"
+                          value={dryCommand}
+                          disabled={readonly}
+                          placeholder={t('card.dryRunCommandPlaceholder')}
+                          onChange={(e) => { setDryCommand(e.target.value) }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') runDryRunTest() }}
+                          style={controlStyle}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={readonly || dryBusy}
+                        onClick={runDryRunTest}
+                        style={{ ...controlStyle, flex: '0 0 auto', cursor: readonly || dryBusy ? 'default' : 'pointer' }}
+                      >
+                        {dryBusy ? t('card.dryRunRunning') : t('card.dryRunTest')}
+                      </button>
+                    </div>
+                    {dryError !== null && (
+                      <p style={{ ...hintStyle, color: 'var(--dsw-alias-label-error, #c0392b)' }}>{t('card.dryRunFail')}{dryError}</p>
+                    )}
+                    {dryReport === null
+                      ? (dryError === null && <p style={hintStyle}>{t('card.dryRunEmpty')}</p>)
+                      : (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--dsw-alias-border-l2)',
+                              background: 'var(--dsw-alias-bg-surface, transparent)',
+                              fontSize: '12px',
+                              lineHeight: '18px',
+                            }}
+                          >
+                            {/* The verdict badge: colour carries the same meaning as the word. */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={fieldLabelStyle}>{t('card.dryRunVerdict')}</span>
+                              {(() => {
+                                const verdict = dryReport.verdict ?? 'ask'
+                                const colour = verdict === 'deny'
+                                  ? 'var(--dsw-alias-label-error, #c0392b)'
+                                  : verdict === 'allow'
+                                    ? 'var(--dsw-alias-label-success, #2e7d32)'
+                                    : 'var(--dsw-alias-label-warning, #b26a00)'
+                                const text = verdict === 'deny'
+                                  ? t('card.dryRunDeny')
+                                  : verdict === 'allow' ? t('card.dryRunAllow') : t('card.dryRunAsk')
+                                return <strong style={{ color: colour }}>{text}</strong>
+                              })()}
+                              {(dryReport.ruleCount ?? 0) === 0 && (
+                                <span style={{ color: 'var(--dsw-alias-label-secondary, inherit)' }}>{t('card.dryRunNoRules')}</span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', overflowWrap: 'anywhere' }}>
+                              <span style={fieldLabelStyle}>{t('card.dryRunRule')}</span>
+                              <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+                                {dryReport.ruleLayer?.ruleIndex === undefined
+                                  ? t('card.dryRunRuleNone').replace('%d', dryReport.defaultAction ?? 'ask')
+                                  : `#${dryReport.ruleLayer.ruleIndex} (${dryReport.ruleLayer.action ?? '?'})`}
+                              </code>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', overflowWrap: 'anywhere' }}>
+                              <span style={fieldLabelStyle}>{t('card.dryRunDimensions')}</span>
+                              <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+                                {(dryReport.ruleLayer?.matchedDimensions ?? []).length === 0
+                                  ? '—'
+                                  : (dryReport.ruleLayer?.matchedDimensions ?? []).join(', ')}
+                              </code>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', overflowWrap: 'anywhere' }}>
+                              <span style={fieldLabelStyle}>{t('card.dryRunReason')}</span>
+                              <span style={{ color: 'var(--dsw-alias-label-secondary, inherit)' }}>{dryReport.reason ?? ''}</span>
+                            </div>
+                            <p style={{ ...hintStyle, margin: 0 }}>{t('card.dryRunNote')}</p>
+                          </div>
+                        )}
+                  </section>
+
+                  <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.allowlist')}</p>
                     <p style={hintStyle}>{t('card.allowlistHint')}</p>
                     <p style={hintStyle}>{t('card.allowlistPresetNote')}</p>
@@ -832,6 +1016,53 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         )
                         : null}
                   </section>
+
+                  {/* ─── Network master switch (Phase 2) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.networkEnabled')}</p>
+                    <p style={hintStyle}>{t('card.networkEnabledHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.networkEnabled === true}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('networkEnabled', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.networkEnabled === true ? 'ON' : 'OFF'}</span>
+                    </div>
+                    <p style={hintStyle}>{t('card.networkRebindNote')}</p>
+                  </section>
+
+                  {/* ─── Network env injection (Phase 2) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
+                    <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.networkInjectEnv !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('networkInjectEnv', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.networkInjectEnv !== false ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </section>
+
+                  {/* ─── Hot reload switch (Phase 3) ─── */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.watch')}</p>
+                    <p style={hintStyle}>{t('card.watchHint')}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                      <input
+                        type="checkbox"
+                        checked={value.watch !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('watch', event.currentTarget.checked) }}
+                      />
+                      <span style={{ fontSize: '13px' }}>{value.watch !== false ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </section>
+
                   {!snapshot.writable
                     && <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('card.readonly')}</p>}
                 </>

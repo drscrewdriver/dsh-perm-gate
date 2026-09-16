@@ -32,17 +32,11 @@ describe('cordis.patch.yml permission presets', () => {
     expect(Object.keys(presets).length).toBeGreaterThan(0)
   })
 
-  it('restates every built-in tier of dsh-base (id: permission, backed by dsh-permission-presets on 0.1.5)', () => {
-    // dsh-base/cordis.patch.yml (`id: permission`) is the authoritative set;
-    // on the 0.1.5 line the same id is backed by @deepseek-ai/dsh-permission-presets
-    // and the built-in set is unchanged (verified against 0.1.5-rc.2).
+  it('restates every built-in tier of @deepseek-ai/dsh-base', () => {
+    // dsh-base/cordis.patch.yml (`id: permission`) is the authoritative set.
     expect(presets['read-only']).toMatchObject({ sandbox: 'read-only', approval: 'ask' })
     expect(presets['workspace-write']).toMatchObject({ sandbox: 'workspace-write', approval: 'ask' })
     expect(presets['danger-full-access']).toMatchObject({ sandbox: 'danger-full-access', approval: 'never' })
-  })
-
-  it('never uses the reserved `custom` key (0.1.5 PermissionPresetService throws on it)', () => {
-    expect(Object.keys(presets)).not.toContain('custom')
   })
 
   it('adds the 自动审查 tier with a label and description', () => {
@@ -54,14 +48,47 @@ describe('cordis.patch.yml permission presets', () => {
     expect(presets['permissive']?.description).toBeTruthy()
   })
 
+  it('adds the full-access 自动审查 tier: same approval, no sandbox restriction', () => {
+    // `sandbox` and `approval` are independent knobs. `permissive` keeps the
+    // file sandbox, which also denies the named pipes a child needs — git
+    // clone, MSYS2 sh.exe and ConPTY fail under it. This tier lifts only the
+    // sandbox, keeping the approval behaviour identical.
+    expect(presets['permissive-full']).toMatchObject({
+      sandbox: 'danger-full-access',
+      approval: 'ask',
+      name: '自动审查（高权限）',
+    })
+    expect(presets['permissive-full']?.description).toBeTruthy()
+  })
+
+  it('keeps approval: ask on every gate tier (never would defeat the gate)', () => {
+    // Under `approval: never` the DSH seam rejects every ask before any
+    // answerer runs, so this gate's asks would degrade to passthrough. Any
+    // tier the gate claims must therefore stay answerable.
+    expect(presets['permissive']?.approval).toBe('ask')
+    expect(presets['permissive-full']?.approval).toBe('ask')
+  })
+
   it('lifts the label into the product string while the key stays machine-stable', () => {
     // The 0.1.2 permission surfaces render a host-supplied `name` verbatim and
     // simply title-case a kebab-case name, so the localized label can only come
     // from this one string; the KEY stays `permissive` because `gatePresets`
     // matches keys and the permission projection reports them.
-    const name = presets['permissive']?.name ?? ''
-    expect(name).toBe('自动审查')
-    expect(name).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+    for (const key of ['permissive', 'permissive-full']) {
+      const name = presets[key]?.name ?? ''
+      expect(name).not.toBe('')
+      expect(name).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+    }
+    expect(presets['permissive']?.name).toBe('自动审查')
+  })
+
+  it('never uses the reserved `custom` key', () => {
+    // Ported from the DSH 0.1.5 line, where the `permission` id is backed by
+    // @deepseek-ai/dsh-permission-presets and its PermissionPresetService
+    // rejects `custom` as a reserved key. A preset map that grows a `custom`
+    // entry therefore throws on load there while staying silent on 0.1.2 —
+    // so the reservation is pinned here, on the line both branches share.
+    expect(Object.keys(presets)).not.toContain('custom')
   })
 
   it('does not resurrect the retired auto tier', () => {
@@ -71,6 +98,7 @@ describe('cordis.patch.yml permission presets', () => {
     expect(Object.keys(presets).sort()).toEqual([
       'danger-full-access',
       'permissive',
+      'permissive-full',
       'read-only',
       'workspace-write',
     ])

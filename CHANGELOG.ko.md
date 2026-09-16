@@ -5,45 +5,85 @@
 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)을 따르며,
 이 프로젝트는 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)을 준수합니다.
 
-## [Unreleased]
+## [2.4.1] - 2026-09-17
+
+### 수정됨
+
+- 승인 이력이, 플래그된 호출이 왜 검토 없이 실행되었는지 설명하는 유일한 이벤트에 대해 원시 `preset-passthrough` 문자열을 표시했습니다(티어는 `approval: ask`를 선언했지만 세션이 `never`로 재정의되어 게이트의 ask가 패스스루로 강등된 경우입니다). 이제 다른 판정과 마찬가지로 읽기 쉬운 라벨로 표시됩니다.
+
+## [2.4.0] - 2026-09-17
+
+### 변경됨
+
+- **P3 LLM 분류기는 에스컬레이션 전용이 되어 더 이상 거부할 수 없습니다.** 하드 카테고리
+  (`deletion` / `credential` / `remote` / `system` / `bulk`)의 `risky` 판정은 이전에는 패널 없이
+  **자동 거부**했지만, 이제는 **사람 확인(ask)을 유지**합니다. 거부는 결정론적 계층(P0 하드 거부,
+  거부 키워드 블랙리스트, 명시적 `deny:` 규칙)에만 속합니다. 확률적 판정이 이의를 제기할 수 없는
+  차단을 내려서는 안 되기 때문입니다. 실측: 그레이더가 무해한 `git commit -F …`를 **`remote`**로
+  판정했고, 자동 거부는 승인할 패널도 재시도할 grant도 남기지 않았습니다(우연히 `safe`로 판정된
+  수동 재시도만 통과했습니다). 이는 "고위험 작업은 **결정론적으로** 차단하고 LLM 판단에 맡기지
+  않는다"는 프로젝트 자체 규칙과도 일치합니다.
+
+### 추가됨
+
+- 하드 위험 카테고리는 `neutral`과의 중요한 차이를 하나만 유지합니다: **결코 학습되지 않습니다**.
+  사람의 승인을 반복해도 `deletion`/`credential`/`remote`/`system`/`bulk` 판정이 자동 허용으로
+  침전되지 않습니다(이전에는 자동 거부의 부수 효과로만 성립했지만, 이제는 명시적 속성입니다).
+
+### 동작 주의
+
+- `approval: never`에서는 게이트가 전달할 수 없는 ask가 여전히 패스스루로 강등되므로, 분류기가
+  플래그한 호출은 이제 **실행됩니다**(이전에는 자동 거부였습니다). 이는 "결정론적으로 위험한 것만
+  거부하고 나머지는 협상한다"의 직접적 귀결입니다 —— 협상에는 사람이 필요하고, `never`는 사람이
+  없다는 뜻입니다. 플래그를 실제로 받으려면 `approval`이 `ask`인 티어에서 운용하십시오.
+
+## [2.3.0] - 2026-09-17
+
+### 추가됨
+
+- **게이트 정지는 더 이상 침묵하지 않습니다.** 세션 권한 프리셋이 `gatePresets` 밖에 있을 때 게이트는
+  정지하고 아무것도 기록하지 않았습니다 —— 그래서 그 도구 호출은 게이트가 검사하고 허용한 호출과
+  구별되지 않았습니다. 이제 (session, preset) 전환마다 **1건만** `stand-down` 알림을 기록하고
+  (호출마다가 아닙니다), 프리셋·범위·P0 하드 거부가 비활성이라는 사실을 명시합니다. 브라우저는
+  입력창 위에 상시 **GATE OFF** 표시줄로 렌더링하고, 승인 이력에는 `게이트 정지` 태그가 표시됩니다.
+- 自动审查 설정 카드가 게이트 자체의 프리셋 범위(`gatePresets`, 기본값
+  `permissive` / `permissive-full`)와 그 밖에서 벌어지는 일을 명시하므로, 범위를 티어를 설정하는
+  곳에서 확인할 수 있습니다.
+
+### 변경됨
+
+- **P0의 문서상 위치는 전역이 아니라 범위 한정입니다.** P0 하드 거부는 *게이트의 프리셋 범위 안에서*
+  단조롭고 협상 불가능합니다. 프리셋을 넘어가면 게이트는 P0를 포함해 완전히 정지합니다 —— 선택된
+  티어 자체의 정책이 그 세션을 소유하기 때문입니다. 코드는 항상 이렇게 동작했지만 `AGENTS.md`와
+  4개 README는 반대로 주장해, `danger-full-access`가 "P0는 여전히 적용된다"로 읽혔습니다.
+  `gatePresets: ['*']`로 설정하면 P0는 다시 전역이 됩니다.
+
+### 수정됨
+
+- `DEFAULT_GATE_PRESETS` / `resolveGatePresets`를 `config.ts`(schemastery를 import합니다)에서
+  의존성 없는 `preset.ts`로 옮겨, 브라우저 쪽이 node 전용 의존성을 클라이언트 번들로 끌어오지 않고
+  범위를 렌더링할 수 있게 했습니다. `config.ts`는 둘 다 재수출하므로 기존 import는 변경이 없습니다.
+
+## [2.2.0] - 2026-09-17
+
+### 수정
+
+- **P0 하드 거부가 4개의 셸 도구를 제외한 나머지를 모두 통과시키고 있었습니다.** `hardDenyReason`은 셸 검사를 로컬 정규식 `/^(?:bash|pwsh|sh|cmd)$/`로 막고 있었는데, 이는 `shell` / `terminal` / `powershell`에 **일치하지 않습니다**. `shell`은 DSH의 주 셸 도구이므로, P0의 셸 검사(보호 경로로의 리다이렉트)는 **가장 흔한 호출 형태에 대해 무력**했습니다. 실측, 동일 명령 `echo x > /etc/passwd`: `bash` 경유는 차단, `shell` 경유는 **통과**. `engine.ts`가 이제 `evaluate.ts`에서 `SHELL_TOOLS`를 가져옵니다——같은 사실의 사본이 세 곳에 있었고, 완전한 것은 하나뿐이었습니다.
+- **`git push --delete`가 일반 push로 파싱되고 있었습니다.** `hasDelete`는 `analyzeSubcommand`에서 계산되지만 `branch` 케이스에서만 읽혔고, 그 결과 `git push --delete origin main`은 일반 push 분기(`destructiveness: 4`)로 떨어졌습니다. `DESTRUCTIVENESS_MAP`의 `'push-delete': 5`는 죽은 데이터였습니다.
+- **보호 브랜치 판정이 슬래시를 포함한 이름에 오작동하고 있었습니다.** 술어가 마지막 `/` 앞부분을 잘라내어 `backup/main`과 `feat/release`가 보호 대상으로 읽혔습니다. 이제 알려진 ref 접두사(`refs/heads/`, `refs/tags/`, `refs/remotes/<remote>/`)만 제거합니다. 방향이 중요합니다——이 술어는 **되돌릴 수 없는** P0에 공급되며, 놓침에는 키워드/규칙/LLM 계층이라는 안전망이 있지만 오탐은 정당한 워크플로를 출구 없이 막습니다.
 
 ### 추가
 
-- **세션 스윕 — 인가 체인이 세션 수명 주기를 따르게 됩니다.** 플러그인 시작 시와 매시간 게이트는 DSH의
-  워크스페이스 저장소(`$DSH_HOME/storages/workspace.json`, 읽기 전용)를 읽어 게이트가 데이터를 보유한 모든
-  세션을 분류합니다. DSH가 아카이브했거나(`global.archivedSessionIds`) 더 이상 추적하지 않는 세션의 판정
-  이벤트는 `$DSH_HOME/perm-gate/events.jsonl`에서 제거되고 변경 전 스냅샷은 `$DSH_HOME/perm-gate/snapshots/`에서
-  삭제됩니다. 활성 세션은 건드리지 않으며, 귀속할 수 없는 행(빈 sessionId, 파싱 불가한 행/파일)은 절대
-  삭제하지 않습니다. 모든 I/O 오류는 fail-open(해당 라운드는 건너뛰고 1시간 후 재시도)이며 타이머는
-  `unref` 처리되어 플러그인과 함께 해제됩니다. 새 설정: `sessionSweep`(기본값 `true`), `workspaceStoreFile`.
-  아카이브된 세션을 복원해도 스윕된 기록은 돌아오지 않습니다.
-## [3.0.0] - 2026-09-13
+- **보호 브랜치에 대한 원격 이력 재작성의 P0 하드 거부.** `main` / `master` / `production` / `release` / `stable`을 강제 덮어쓰기하거나 삭제하는 `git push`를 LLM 호출 이전에 결정론적으로 거부합니다. 기존 보호는 평면적이고 브랜치를 보지 않으며 네임스페이스로 덮어쓸 수 있는 키워드 `'push --force'`였습니다. 이것은 그 아래에 깔리는 협상 불가능한 바닥입니다.
+  - **"에스컬레이션 전용"은 관례가 아니라 구조입니다**: 헬퍼는 `string | undefined`를 반환하고 호출자는 이를 deny / 미결로 읽습니다. allow를 표현할 수단이 없으므로 P0에 배선해도 게이트가 허용하는 범위를 넓힐 수 없습니다.
+  - 의도적으로 **대상에서 제외**(키워드/규칙/LLM 계층이 계속 담당): 비보호 브랜치로의 force push, 브랜치명을 쓰지 않은 `git push --force`, 일반 push.
+  - 커맨드 파서(`command-dispatcher` / `command-semantics` / `parsers/git` / `parsers/shell-cmds`)의 첫 프로덕션 사용입니다. 지금까지는 자체 테스트 파일에서만 참조되고 있었습니다.
 
-### 변경
+### 테스트
 
-- **DSH 0.1.5 전용 라인을 새로 만들었습니다: 브랜치 `compat/0.1.5`, 버전 계열 `3.x`, npm dist-tag
-  `dsh-0.1.5`.** `engines.dsh`는 `>=0.1.5-rc.1 <0.2.0-0`으로, `engines.node`는 `>=24`로 좁아졌습니다
-  (DSH 0.1.5는 Node 24 미만에서 아무 알림 없이 동작하지 않습니다). 메이저 bump가 경계선입니다:
-  `^2.x` 설치가 `3.x`를 해석하는 일은 없고 그 반대도 마찬가지입니다.
-- **공개된 `@deepseek-ai/dsh@0.1.5-rc.2` 번들 대비 검증 완료 — 어떤 통합 시브에도 코드 변경이
-  필요하지 않았습니다:**
-  - 권한 프리셋 표는 여전히 cordis id `permission` 아래에서 패치됩니다. 뒷받침 패키지는
-    `@deepseek-ai/dsh-permission-presets`(`PermissionPresetService`)로 옮겼지만 설정 형상은 완전히
-    호환됩니다(`sandbox`/`approval` 필수, `name`/`description` 선택 문자열, `custom`은 예약어).
-    내장 세트(read-only / workspace-write / danger-full-access)도 불변이므로 `cordis.patch.yml`의
-    전체 표 재선언은 그대로 올바릅니다.
-  - `approval/request` 워터폴, 폐집합 결과(`allowed-once`/`rejected`/`cancelled`/`unavailable`),
-    샌드박스 승격 reason 형식은 0.1.2와 동일합니다.
-  - `effectivePolicy`는 user-approval 서비스의 private 메서드로 남아 있습니다(`typeof` 프로브로 읽음).
-  - `permission/preset` 이벤트 payload(`{ preset }`), `snapshotEvents()`/`ownEvents()` 로그
-    접근자, 3개의 클라이언트 슬롯(`conversation.input.dock`, `conversation.view`,
-    `settings.plugins.tab`)은 모두 불변입니다. 설정의 플러그인 탭은 `dsh-client-ui-settings-plugins`로
-- 선택적 수동 glyph 패치(`patches/add-permissive-glyph.patch`)는 계속 적용 가능합니다:
-  composer의 `permissionGlyphs` map은 0.1.5-rc.2에서도 구조적으로 불변이지만 15559줄로 이동했으므로,
-  적용 시 hunk 줄 번호를 다시 맞춰야 합니다.
-    옮겼지만 계약은 호환됩니다.
-- `test/patch-presets.spec.ts`에 예약어 `custom` 가드를 추가하고, `scripts/verify-line.mjs`에 이
-  브랜치용 `015` 라인을 추가했습니다.
+- 신규 `test/git-protected-push.spec.ts`(13건).
+- **반증**: 세 수정을 각각 되돌리면 그것을 지키는 케이스만 빨개집니다(총 7건). 의도적으로 허용하는 케이스는 초록으로 남습니다.
+- 전체 **40 파일 / 459건**, `typecheck` 클린.
 
 ## [2.0.0] - 2026-09-11
 

@@ -6,7 +6,7 @@
 # 2) Insert the plugin itself (host half) into the profile.
 #
 # The tier's DISPLAY NAME is the Chinese product label, matching every official
-# 0.1.5 permission label (仅可查看 / 工作区内修改 / 完全权限) in a zh session. Both
+# 0.1.2 permission label (仅可查看 / 工作区内修改 / 完全权限) in a zh session. Both
 # permission surfaces — the General-settings default row and the composer
 # picker — render a host-supplied name verbatim unless the value is one of the
 # three built-ins, so a single `name:` string is what both show; neither surface
@@ -14,23 +14,24 @@
 # stays `permissive`: it is the key `gatePresets` matches and the value the
 # permission projection reports, so only the label text is user-facing.
 #
-# The tier's icon comes from the optional MANUAL host-side patch
-# `patches/add-permissive-glyph.patch`, applied to the installed
-# node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js — this
-# plugin ships no picker decoration of its own. Verified against
-# 0.1.5-rc.2: the `permissionGlyphs` map is structurally unchanged (same
-# read-only / workspace-write / FULL_ACCESS keys, same `shieldOutline`
-# variable) but moved to line 15559, so re-anchor the hunk when applying.
+# The composer's permission picker draws an icon per preset from a CLOSED map
+# inside @deepseek-ai/dsh-client-ui-conversation (`permissionGlyphs`), whose
+# source states the rule: "host-configured names outside the design set get
+# none". DSH ships a shield+eye glyph for `permissive`, so 自动审查 has an icon,
+# but a second plugin tier has none — it falls back to text in the trigger. The
+# map is a closure variable with no plugin-facing seam (the option objects the
+# host supplies carry only {value, name, description}), so the only way to give
+# BOTH tiers the same glyph is to extend that map.
+# `scripts/patch-permission-glyph.mjs` does exactly that, duplicating the
+# `permissive` entry under `permissive-full`. It patches a HOST package, so it
+# must be re-run after any DSH upgrade or reinstall.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should
-# survive. The authoritative built-in set is `dsh-base/cordis.patch.yml`
-# (`id: permission`, backed by @deepseek-ai/dsh-permission-presets on the
-# 0.1.5 line — same id as 0.1.2, different backing package):
+# survive. The authoritative built-in set is
+# `@deepseek-ai/dsh-base/cordis.patch.yml` (`id: permission`):
 #   read-only / workspace-write / danger-full-access
 # Omitting any of them silently drops that tier on the next profile load.
-# Shape per entry (0.1.5 PermissionPresetService.Config): sandbox/approval
-# required, name/description optional strings; `custom` is a reserved key.
 # `test/patch-presets.spec.ts` pins the exact key set so the two cannot drift.
 #
 # The `auto` tier is deliberately NOT restated. It was contributed by
@@ -39,6 +40,24 @@
 # lost its implementation with that plugin, and this gate is inactive in it
 # (`gatePresets` defaults to `['permissive']`) — so it only offered a duplicate
 # tier that looked protected while nothing was.
+#
+# TWO tiers ship, because `sandbox` and `approval` are INDEPENDENT knobs and
+# coupling them forced a bad trade:
+#
+#   permissive       sandbox: workspace-write   approval: ask
+#   permissive-full  sandbox: danger-full-access approval: ask
+#
+# `permissive` keeps the built-in file sandbox. That sandbox also denies the
+# named pipes a child process needs to start — `git clone`, MSYS2/Cygwin
+# `sh.exe` and ConPTY all fail with `Win32 error 5` under it. Because this gate
+# is only active in the tiers listed in `gatePresets`, a user who wanted the
+# gate had to accept that restriction to get it. `permissive-full` removes the
+# coupling: same approval behaviour, no file-sandbox restriction.
+#
+# The gate itself only reads the preset NAME (see `src/preset.ts`), never the
+# sandbox mode, so both tiers get the full P0–P4 chain. `approval: ask` is
+# required on both — under `approval: never` the DSH seam rejects every ask
+# before any answerer runs, which would degrade this gate's asks to passthrough.
 - id: permission
   config:
     presets:
@@ -53,6 +72,11 @@
         approval: ask
         name: 自动审查
         description: 独立审批档 —— 作用域内安全操作自动放行，危险/未知越界转人工确认（审批强度可在「设置 → 插件 → 自动审查」调整）。
+      permissive-full:
+        sandbox: danger-full-access
+        approval: ask
+        name: 自动审查（高权限）
+        description: 只由本插件的审批门过滤 —— 文件修改与子进程网络访问不再受沙箱限制，审批仍逐次生效，但没有系统沙箱兜底。
       danger-full-access:
         sandbox: danger-full-access
         approval: never

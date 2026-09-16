@@ -15,7 +15,13 @@ export interface GateEvent {
   readonly ts: string
   readonly sessionId: string
   readonly tool: string
-  readonly kind: 'auto' | 'ask' | 'deny' | 'learned' | 'manual-approved' | 'manual-rejected' | 'manual-cancelled'
+  /**
+   * `stand-down` is not a decision: it says the gate is inactive in this
+   * session's permission preset, so this call was settled by the tier, not by
+   * the gate. `VERDICT_LABELS['stand-down']` and `presentation()` carry the
+   * user-facing wording; it is always sticky.
+   */
+  readonly kind: 'auto' | 'ask' | 'deny' | 'learned' | 'manual-approved' | 'manual-rejected' | 'manual-cancelled' | 'stand-down'
   readonly risk?: string
   readonly reason: string
   /** Decision-path label (rule / grant / hard-deny / llm-safe …). */
@@ -94,6 +100,10 @@ export function presentation(kind: GateEvent['kind']): { color: string; bg: stri
       return { color: 'var(--dsw-alias-state-error-primary, #c0392b)', bg: 'var(--dsw-alias-interactive-bg-hover-danger, rgba(192,57,43,0.08))', tag: 'REJECTED', sticky: false }
     case 'manual-cancelled':
       return { color: 'var(--dsw-alias-label-secondary, #666)', bg: 'var(--dsw-alias-bg-module-platform, rgba(127,127,127,0.08))', tag: 'CANCELLED', sticky: false }
+    case 'stand-down':
+      // Sticky on purpose: an inactive gate is a standing state, not an
+      // incident. It must outlive the next auto-allow or it reads as noise.
+      return { color: 'var(--dsw-alias-state-warn-label, #b9770e)', bg: 'var(--dsw-alias-state-warn-tertiary, rgba(185,119,14,0.14))', tag: 'GATE OFF', sticky: true }
     default:
       return { color: 'var(--dsw-alias-state-success-primary, #1e8449)', bg: 'var(--dsw-alias-state-success-tertiary, rgba(30,132,73,0.08))', tag: 'ALLOW', sticky: false }
   }
@@ -121,6 +131,12 @@ export const VERDICT_LABELS: Readonly<Record<string, string>> = {
   'human-rejected': '人工拒绝',
   'human-cancelled': '人工取消',
   'no-approval-channel': '无审批通道',
+  // The degrade that hides an ask: the tier declares `approval: ask`, but the
+  // session was overridden to `never`, so the gate's ask became a passthrough.
+  // Without this label the approvals history shows the raw event string — for
+  // the one event that explains why a flagged call ran unreviewed.
+  'preset-passthrough': '审批策略 never · 已放行',
+  'stand-down': '门禁停用',
 }
 
 /** Compact wall-clock rendering of an ISO timestamp. */

@@ -19,11 +19,22 @@ import { decideRules, type ToolCallContext } from './evaluate.js'
 import { canonicalizeCall, GrantRegistry } from './grant.js'
 import { learnKey, operationFingerprint, RiskLearning } from './learning.js'
 import { ArtifactRegistry } from './path.js'
-import { decomposeShellCommand } from './shell.js'
 import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } from './risk.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
-import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
+import {
+  compileDocument,
+  documentHash,
+  extractPathCandidates,
+  parsePermissionsDocument,
+  type CompiledRuleEntry,
+  type CompiledRuleset,
+  type RuleAction,
+} from './rule.js'
+import { decomposeShellCommand } from './shell.js'
+import type { NetworkTarget } from './network.js'
+import { extractAgentCandidates } from './agent-identity.js'
+import { resolveRuleChain } from './rule-chain.js'
 import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
 import { permissionPresetOf, presetInScope, type SessionEventLike } from './preset.js'
 import { resolveGatePresets } from './config.js'
@@ -31,6 +42,58 @@ import { resolveGatePresets } from './config.js'
 export interface PreToolDecisionLike {
   kind: 'deny' | 'ask'
   reason: string
+}
+
+/**
+ * The P2 rule chain's own verdict for one call, as reported by
+ * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
+ * verdict: a P0 hard-deny or a preset deny-keyword fires *before* this layer and
+ * never leaves a rule index behind, so a differing pair is information rather
+ * than a contradiction.
+ */
+export interface RuleExplanation {
+  readonly action: RuleAction
+  readonly reason: string
+  readonly ruleIndex: number | undefined
+  readonly rule: CompiledRuleEntry | undefined
+  readonly defaultAction: RuleAction
+}
+
+/** Locate a rule by its chain-wide index (deny entries first, then allow, then ask). */
+function findRuleByIndex(ruleset: CompiledRuleset, index: number): CompiledRuleEntry | undefined {
+  return (
+    ruleset.deny.find((entry) => entry.index === index) ??
+    ruleset.allow.find((entry) => entry.index === index) ??
+    ruleset.ask.find((entry) => entry.index === index)
+  )
+}
+
+/** Which layer of the chain produced a decision, from its stage. */
+function sourceOfStage(stage: FinalDecision['stage'], reason: string): DecisionSource {
+  switch (stage) {
+    case 'hard-deny':
+      return 'hard-deny'
+    case 'grant':
+      return 'grant'
+    case 'rule':
+      return 'rule'
+    case 'classifier':
+      return 'classifier'
+    default:
+      return reason.startsWith('permissive') ? 'permissive' : 'default'
+  }
+}
+
+/**
+ * The pure policy outcome for one call, as reported by
+ * {@link PermGateRuntime.explainCall}. Same chain as the host-facing decision,
+ * minus every side effect and minus the session-state layers.
+ */
+export interface CallExplanation {
+  readonly action: RuleAction
+  readonly reason: string
+  readonly source: DecisionSource | 'deny-keyword' | 'cleanup-safe'
+  readonly ruleIndex?: number
 }
 
 export interface ToolExecutionLike {
@@ -143,6 +206,8 @@ interface PendingAsk {
 }
 
 export interface PermGateRuntimeOptions extends PermGateConfig {
+  /** Workspace root for chain resolution. Defaults to process.cwd(). */
+  readonly cwd?: string
   readonly onRulesChanged?: (ruleset: CompiledRuleset) => void
   readonly now?: () => number
   /**
@@ -202,6 +267,25 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * review page's diff/revert data plane (events are still recorded).
    */
   readonly snapshotsDir?: string
+  // ─── Network approval seam ──────────────────────────────────────────
+  /**
+   * Raise one interactive approval request on behalf of a subprocess network
+   * connection. Wired by `apply` to the DSH `approval` service
+   * (`approval.request`), which routes the prompt to the agent, appends the
+   * `approval/asked` + `approval/decided` audit pair, and applies the session
+   * policy before any answerer runs.
+   *
+   * Absent (or throwing) means the connection cannot ride the seam and the
+   * gate fails closed to `deny`. Only `'allowed-once'` is treated as an allow.
+   */
+  readonly requestApproval?: (req: NetworkApprovalRequest) => Promise<ApprovalOutcomeLike>
+  /**
+   * How long one approved network target stays approved for the session (ms).
+   * A single shell command routinely opens many connections to the same host;
+   * without this the human would be prompted once per connection.
+   * Default 30 minutes.
+   */
+  readonly networkGrantTtlMs?: number
 }
 
 export type CallDecision = 'allow' | 'deny' | 'ask'
@@ -284,7 +368,7 @@ function isCleanupSafe(exec: ToolExecutionLike): string | undefined {
     if (!SHELL_DELETE_RE.test(cmd.command)) continue
 
     // Collect all non-flag argument tokens as potential targets.
-    const targets = cmd.args.filter((a: string) => !a.startsWith('-'))
+    const targets = cmd.args.filter((a) => !a.startsWith('-'))
     if (targets.length === 0) continue
 
     let allSafe = true
@@ -326,6 +410,59 @@ export interface ApprovalRequestLike {
 export type ApprovalOutcomeLike = 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
 
 /**
+ * One approval ask the gate raises on behalf of a subprocess network
+ * connection. Structurally the subset of the DSH `ApprovalRequest` the gate
+ * supplies — the host service adds the borrowed session/log handling.
+ */
+export interface NetworkApprovalRequest {
+  /** The host agent the question is asked on behalf of (routes the prompt). */
+  readonly agent: unknown
+  /** The tool whose subprocess opened the connection. */
+  readonly toolName: string
+  /** The exact tool call, when the host gave one — lets the UI attach the prompt. */
+  readonly callId?: string
+  readonly reason: string
+  readonly signal?: AbortSignal
+}
+
+/** The attribution the proxy layer receives for one connection. */
+export interface ShellAttribution {
+  readonly tool: string
+  readonly callId?: string
+  /** The host agent, needed to route an approval request. */
+  readonly agent?: unknown
+  readonly sessionId: string
+  readonly signal?: AbortSignal
+}
+
+/** One in-flight shell execution, retained for proxy-layer attribution. */
+interface InFlightShell {
+  readonly key: string
+  readonly tool: string
+  readonly callId?: string
+  readonly agent?: unknown
+  readonly sessionId: string
+  readonly signal?: AbortSignal
+  readonly at: number
+}
+
+/** A shell whose result never arrived is dropped after this long (ms). */
+const IN_FLIGHT_SHELL_TTL_MS = 30 * 60_000
+
+/** Tool names that execute a command string (mirrors evaluate's shell roster). */
+const SHELL_TOOL_NAMES: ReadonlySet<string> = new Set(['shell', 'terminal', 'bash', 'pwsh', 'sh', 'cmd', 'powershell'])
+
+/** Whether a tool name runs a shell command. */
+function isShellToolName(name: string): boolean {
+  return SHELL_TOOL_NAMES.has(name)
+}
+
+/** The session-grant key for one network target (scheme/host/port). */
+function networkGrantKey(sessionId: string, target: NetworkTarget): string {
+  return `${sessionId}|${target.scheme ?? ''}|${target.host}|${target.port ?? ''}`
+}
+
+/**
  * One call the gate positively allowed, retained so an approval raised from inside
  * that same call (the sandbox escalation) can be answered from the verdict that
  * already cleared it. Keyed by the host's execution id, which the approval request
@@ -356,6 +493,15 @@ export class PermGateRuntime {
   private readonly gatePresets: readonly string[]
   /** Extra tool names the user classified as safe (config `autoAllowTools`). */
   private readonly autoAllowExtra: ReadonlySet<string>
+  // ─── Network seam (T2.11) ───────────────────────────────────────────
+  /** In-flight shell executions, for proxy-layer network attribution. */
+  private readonly inFlightShells = new Map<string, InFlightShell>()
+  /** Stable key per execution object (the host call id is not always present). */
+  private readonly shellKeys = new WeakMap<object, string>()
+  private shellSeq = 0
+  /** Session-scoped network grants: grantKey -> expiry epoch ms. */
+  private readonly networkGrants = new Map<string, number>()
+  private readonly networkGrantTtlMs: number
   /**
    * Cache of the permission-preset fold. The key is the log's length plus the
    * identity of its LAST event: a session's log only appends, so "same length
@@ -365,6 +511,12 @@ export class PermGateRuntime {
    * frozen events, which would otherwise re-fold on every tool call.
    */
   private presetCache: { length: number; last: SessionEventLike | undefined; preset: string | undefined } | undefined
+  /**
+   * Last stand-down announced per session (sessionId → the out-of-scope preset
+   * name, `''` when the session records none). Bounded by the session count and
+   * only read on the stand-down path — the in-scope path never touches it.
+   */
+  private readonly standDownAnnounced = new Map<string, string>()
   private readonly learning: RiskLearning
   private readonly events?: EventLog
   /** Learning candidates awaiting human approval + execution (call fingerprint → candidate). */
@@ -394,6 +546,7 @@ export class PermGateRuntime {
       (options.autoAllowTools ?? []).filter((name) => typeof name === 'string' && name !== ''),
     )
     this.strategies = resolvePermissiveStrategies(options.permissiveStrategies)
+    this.networkGrantTtlMs = options.networkGrantTtlMs ?? 30 * 60_000
     this.learning = new RiskLearning(options.learningFile, {
       threshold: () => this.liveRiskLearning().threshold,
       now: options.now,
@@ -405,12 +558,34 @@ export class PermGateRuntime {
   }
 
   private compileInline(options: PermGateRuntimeOptions): CompiledRuleset {
-    const text = options.rulesFile !== undefined ? readFileSafe(options.rulesFile) : ''
     const empty: CompiledRuleset = {
       defaultAction: options.defaultAction ?? 'ask',
       deny: [], allow: [], ask: [],
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
     }
+
+    // Chain mode: when searchUp is enabled, use the multi-file chain resolver.
+    if (options.searchUp === true) {
+      const cwd = options.cwd ?? process.cwd()
+      const rulesFile = options.rulesFile !== undefined ? options.rulesFile : 'rules.yml'
+      try {
+        return resolveRuleChain(cwd, {
+          rulesFile,
+          searchUp: true,
+          fallbackPath: options.fallbackPath,
+          badFilePolicy: options.badFilePolicy ?? 'fail',
+          maxChainLength: options.maxChainLength ?? 10,
+        }, {
+          maxGlobStars: 2,
+          caseInsensitivePaths: options.caseInsensitivePaths ?? true,
+        })
+      } catch {
+        return empty
+      }
+    }
+
+    // Single-file mode (legacy): read and compile one rules file.
+    const text = options.rulesFile !== undefined ? readFileSafe(options.rulesFile) : ''
     if (text === '') return empty
     const hash = documentHash(text)
     const hit = this.cache.get(hash)
@@ -500,7 +675,197 @@ export class PermGateRuntime {
       home: cwdOf(exec),
       caseInsensitive: this.options.caseInsensitivePaths ?? true,
       dshHome: this.options.dshHome,
+      agentCandidates: extractAgentCandidates(exec),
     }
+  }
+
+  // ─── Network seam (T2.11) ───────────────────────────────────────────
+
+  /**
+   * Register a shell execution as in-flight so a proxy-layer block made by its
+   * child process can be attributed back to the session — and therefore ride
+   * the interactive approval seam. Called when the gate lets a shell call run;
+   * {@link endShellExecution} removes it.
+   */
+  beginShellExecution(exec: ToolExecutionLike): void {
+    if (!isShellToolName(exec.name)) return
+    const key = this.shellKeyOf(exec)
+    this.inFlightShells.set(key, {
+      key,
+      tool: exec.name,
+      callId: exec.callId,
+      agent: exec.agent,
+      sessionId: sessionIdOf(exec),
+      signal: exec.signal,
+      at: Date.now(),
+    })
+  }
+
+  /** Remove a shell execution from the in-flight table (its tool call settled). */
+  endShellExecution(exec: ToolExecutionLike): void {
+    if (!isShellToolName(exec.name)) return
+    this.inFlightShells.delete(this.shellKeyOf(exec))
+  }
+
+  /** Drop every in-flight entry (dispose / session teardown). */
+  clearShellExecutions(): void {
+    this.inFlightShells.clear()
+  }
+
+  /**
+   * The newest live in-flight shell execution, for proxy-layer attribution.
+   * Stale entries (a shell that never reported a result) are expired here so a
+   * long-dead call can never authorize a later connection.
+   */
+  currentAttribution(): ShellAttribution | undefined {
+    const now = Date.now()
+    let newest: InFlightShell | undefined
+    for (const entry of this.inFlightShells.values()) {
+      if (now - entry.at > IN_FLIGHT_SHELL_TTL_MS) {
+        this.inFlightShells.delete(entry.key)
+        continue
+      }
+      // An aborted call was cancelled or rejected: it will never run, so it
+      // must not authorize a connection made by some later command.
+      if (entry.signal?.aborted === true) {
+        this.inFlightShells.delete(entry.key)
+        continue
+      }
+      if (newest === undefined || entry.at >= newest.at) newest = entry
+    }
+    if (newest === undefined) return undefined
+    return {
+      tool: newest.tool,
+      ...(newest.callId !== undefined ? { callId: newest.callId } : {}),
+      ...(newest.agent !== undefined ? { agent: newest.agent } : {}),
+      sessionId: newest.sessionId,
+      ...(newest.signal !== undefined ? { signal: newest.signal } : {}),
+    }
+  }
+
+  /** A stable per-execution key: the host call id, else an object-keyed fallback. */
+  private shellKeyOf(exec: ToolExecutionLike): string {
+    const cached = this.shellKeys.get(exec as object)
+    if (cached !== undefined) return cached
+    const key = typeof exec.callId === 'string' && exec.callId !== ''
+      ? `call:${exec.callId}`
+      : `exec:${sessionIdOf(exec)}:${exec.name}:${++this.shellSeq}`
+    this.shellKeys.set(exec as object, key)
+    return key
+  }
+
+  /**
+   * Ask the human to allow one network target, on behalf of the attributed
+   * shell execution. Returns `'allow'` only for an explicit `allowed-once`;
+   * every other outcome (rejection, cancellation, timeout, no answerer)
+   * fails closed to `'deny'`.
+   *
+   * The approval seam requires an open turn — the durable audit pair must be
+   * enclosed by the log's commit boundary — which holds here because the ask
+   * happens *while* the shell tool call is executing.
+   */
+  async askNetwork(target: NetworkTarget, reason: string, timeoutMs: number): Promise<'allow' | 'deny'> {
+    const attribution = this.currentAttribution()
+    if (attribution === undefined || attribution.agent === undefined) {
+      // Unattributable traffic cannot ride the approval seam — fail closed.
+      this.auditNetworkAsk(target, 'deny', 'no in-flight shell to attribute the connection to', undefined)
+      return 'deny'
+    }
+
+    // A session already allowed this exact target: honour it without asking.
+    const grantKey = networkGrantKey(attribution.sessionId, target)
+    if (this.networkGrants.has(grantKey)) {
+      return 'allow'
+    }
+
+    const requester = this.options.requestApproval
+    if (requester === undefined) {
+      this.auditNetworkAsk(target, 'deny', 'no approval service available', attribution)
+      return 'deny'
+    }
+
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The timeout is raced, not merely signalled. `abort()` only *asks* the
+    // callee to withdraw the question; a callee that ignores the signal would
+    // otherwise leave this await pending forever and hang the CONNECT. The
+    // race guarantees the wait settles no matter what the seam does.
+    const timedOut = new Promise<ApprovalOutcomeLike>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        resolve('unavailable')
+      }, Math.max(1, timeoutMs))
+    })
+    let outcome: ApprovalOutcomeLike = 'unavailable'
+    try {
+      outcome = await Promise.race([
+        requester({
+          agent: attribution.agent,
+          toolName: attribution.tool,
+          ...(attribution.callId !== undefined ? { callId: attribution.callId } : {}),
+          reason,
+          signal: controller.signal,
+        }),
+        timedOut,
+      ])
+    } catch {
+      // A seam failure (e.g. no open turn) is never an allow.
+      outcome = 'unavailable'
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+
+    if (outcome === 'allowed-once') {
+      // Remember it for this session so one command making many connections
+      // does not prompt once per connection.
+      this.networkGrants.set(grantKey, Date.now() + this.networkGrantTtlMs)
+      this.auditNetworkAsk(target, 'allow', 'approved by the human (session grant)', attribution)
+      return 'allow'
+    }
+    this.auditNetworkAsk(target, 'deny', `approval seam returned ${outcome}`, attribution)
+    return 'deny'
+  }
+
+  /** Record one network escalation outcome in the audit mirror + event feed. */
+  private auditNetworkAsk(
+    target: NetworkTarget,
+    verdict: 'allow' | 'deny',
+    reason: string,
+    attribution: ShellAttribution | undefined,
+  ): void {
+    const now = Date.now()
+    const tool = attribution?.tool ?? 'subprocess'
+    const detail = `network ${verdict === 'allow' ? 'allowed' : 'denied'} ${target.scheme ?? '?'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''} — ${reason}`
+    try {
+      this.audit.append(makeEntry({
+        callId: randomId(),
+        tool,
+        outcome: verdict === 'allow' ? 'allow' : 'deny',
+        source: 'rule',
+        reason: detail,
+        at: now,
+      }))
+    } catch {
+      // Auditing must never influence the verdict.
+    }
+    if (this.events !== undefined && attribution?.sessionId !== undefined) {
+      try {
+        this.events.append({
+          sessionId: attribution.sessionId,
+          tool,
+          kind: verdict === 'allow' ? 'auto' : 'deny',
+          reason: detail,
+          verdict: 'network-ask',
+        })
+      } catch {
+        // Same: the feed is best-effort.
+      }
+    }
+  }
+
+  /** The compiled ruleset (read-only view for network module). */
+  get compiledRuleset(): CompiledRuleset {
+    return this.ruleset
   }
 
   private liveRiskLearning(): RiskLearningState {
@@ -560,9 +925,43 @@ export class PermGateRuntime {
    * `danger-full-access` means "full access without approval prompts", where a
    * forwarded ask can only fail (the approval seam rejects before any answerer
    * runs) and a hard-deny would silently overrule the tier the user chose.
+   *
+   * P0 is therefore monotonic only WITHIN the gate's scope, not across every
+   * preset. {@link announceStandDown} makes that visible instead of silent.
    */
-  private gateActive(exec: ToolExecutionLike): boolean {
-    return presetInScope(this.presetOf(exec), this.gatePresets)
+  private gateActive(preset: string | undefined): boolean {
+    return presetInScope(preset, this.gatePresets)
+  }
+
+  /**
+   * Record one `stand-down` event the first time a session is observed with a
+   * preset outside {@link gatePresets}, and again whenever that preset changes.
+   *
+   * Per-call silence is what makes a stand-down dangerous: the tool call looks
+   * exactly like a call the gate inspected and allowed. One event per
+   * transition is enough to say otherwise, and keeps the feed (and the
+   * `events.jsonl` append) proportional to preset changes rather than to call
+   * volume.
+   *
+   * The event is a NOTICE, not a decision: it carries no allow/deny meaning,
+   * and the call it was observed on is still settled entirely by the selected
+   * tier. `verdict: 'stand-down'` labels it for the history view.
+   */
+  private announceStandDown(exec: ToolExecutionLike, preset: string | undefined): void {
+    const sessionId = sessionIdOf(exec)
+    const announced = preset ?? ''
+    if (this.standDownAnnounced.get(sessionId) === announced) return
+    this.standDownAnnounced.set(sessionId, announced)
+    const scope = this.gatePresets.includes('*') ? 'every preset' : this.gatePresets.join(', ')
+    const named = preset === undefined ? 'no permission/preset recorded' : `"${preset}"`
+    this.recordEvent(
+      exec,
+      'stand-down',
+      `perm-gate is INACTIVE: the session permission preset is ${named} and the gate scope is ${scope}. `
+        + 'No P0 hard-deny, no rule, no ask and no allow is evaluated for any call in this session — '
+        + 'the selected tier\'s own policy governs. Select a preset in the gate scope to re-arm it.',
+      { verdict: 'stand-down' },
+    )
   }
 
   /**
@@ -794,10 +1193,17 @@ export class PermGateRuntime {
    */
   decideExecution(exec: ToolExecutionLike): PreToolDecisionLike | undefined {
     // The gate is scoped to its own tier(s): anywhere else it stands down
-    // entirely and records nothing (the session's selected tier owns the call).
-    if (!this.gateActive(exec)) return undefined
+    // entirely and decides nothing (the session's selected tier owns the call).
+    // The stand-down is announced ONCE per (session, preset) transition — the
+    // call's outcome is unchanged, but the user must be able to see that the
+    // gate — including P0 hard-deny — is inactive; a silent stand-down reads as
+    // "the gate looked at this and allowed it".
+    const preset = this.presetOf(exec)
+    if (!this.gateActive(preset)) {
+      this.announceStandDown(exec, preset)
+      return undefined
+    }
 
-    const ctx = this.ctxFor(exec)
     const callId = randomId()
 
     // Preset deny-keyword layer (deny wins over allow): a dangerous-keyword hit
@@ -811,13 +1217,9 @@ export class PermGateRuntime {
       return { kind: 'deny', reason }
     }
 
-    const grantResolver: GrantResolver = (tool, args) => {
-      if (exec.parentAuthorized === false) return 'no-match'
-      return this.grants.decide(tool, args)
-    }
-
-    const raw = decide(ctx, { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
-    const decision = this.applyPermissive(raw)
+    // The same chain `explainCall` reports, evaluated once here so the two views
+    // cannot drift; this caller adds the side effects and the session layers.
+    const decision = this.applyPermissive(this.rawPolicy(exec))
 
     // Deterministic cleanup pre-screen: if a deletion command targets a
     // regenerable/temporary artifact inside the workspace, allow it directly.
@@ -888,6 +1290,85 @@ export class PermGateRuntime {
     // rather than prompted. Reached only after the two passthrough early-returns.
     this.clearCall(exec, decision.reason, source, source)
     return undefined
+  }
+
+  /**
+   * The **pure policy** outcome for one call: the same chain
+   * {@link decideExecution} runs, with every side effect and every session-state
+   * layer removed.
+   *
+   * Side effects removed — no audit entry, no event, no ask tracking, no call
+   * clearance, no learning. A rule-test panel must be able to run on every
+   * keystroke without writing to the live decision feed.
+   *
+   * Session-state layers removed — the preset stand-down and the
+   * `approval: never` ask degradation both describe a session a session-less
+   * caller does not have. Including them is not harmless: the degradation turns
+   * every "the rules would ask a human" into a reported **allow**, which is the
+   * opposite of the truth for exactly the rules someone opens the panel to
+   * review (measured on the live host: `shell ls -la` reported `allow` while the
+   * rule layer said `ask`).
+   *
+   * `reason` is never collapsed: "allow" has causes worth naming (a rule, a
+   * grant, cleanup-safety, the permissive default).
+   */
+  explainCall(exec: ToolExecutionLike): CallExplanation {
+    const keyword = this.denyKeywordHit(exec)
+    if (keyword !== undefined) {
+      return {
+        action: 'deny',
+        reason: `deny-keyword: matches preset blacklist entry "${keyword}"`,
+        source: 'deny-keyword',
+      }
+    }
+    const decision = this.applyPermissive(this.rawPolicy(exec))
+    if (decision.action === 'ask') {
+      const cleanupSafe = isCleanupSafe(exec)
+      if (cleanupSafe !== undefined) {
+        return { action: 'allow', reason: `cleanup-safe: ${cleanupSafe}`, source: 'cleanup-safe' }
+      }
+    }
+    return {
+      action: decision.action,
+      reason: decision.reason,
+      source: sourceOfStage(decision.stage, decision.reason),
+      ...(decision.ruleIndex !== undefined ? { ruleIndex: decision.ruleIndex } : {}),
+    }
+  }
+
+  /**
+   * P0 hard-deny → P1 session grant → P2 rules → P4 ask, as a value. Shared by
+   * the host-facing decision and {@link explainCall} so the two cannot drift.
+   */
+  private rawPolicy(exec: ToolExecutionLike): FinalDecision {
+    const grantResolver: GrantResolver = (tool, args) => {
+      if (exec.parentAuthorized === false) return 'no-match'
+      return this.grants.decide(tool, args)
+    }
+    return decide(this.ctxFor(exec), { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
+  }
+
+  /**
+   * Rule-layer explanation for one would-be call: what the `permissions` chain
+   * decides on its own, before P0 hard-deny, P1 session grants, the P3
+   * classifier and the P4 ask ever get a say.
+   *
+   * This is the read-only half of a dry-run. It appends nothing to the audit
+   * mirror, records no event, mints no grant and touches no learning store, so a
+   * "rule test" panel may call it on every keystroke without leaving a trace in
+   * the decision feed. It answers a narrower question than
+   * {@link decideExecution} and says so: `ruleIndex` identifies a rule in the
+   * chain, which only this layer can attribute.
+   */
+  explainRules(exec: ToolExecutionLike): RuleExplanation {
+    const decision = decideRules(this.ruleset, this.ctxFor(exec))
+    return {
+      action: decision.action,
+      reason: decision.reason,
+      ruleIndex: decision.ruleIndex,
+      rule: decision.ruleIndex === undefined ? undefined : findRuleByIndex(this.ruleset, decision.ruleIndex),
+      defaultAction: this.ruleset.defaultAction,
+    }
   }
 
   /**
@@ -1001,13 +1482,22 @@ export class PermGateRuntime {
     if (risk.kind === 'risky') {
       if (risk.category !== 'neutral') {
         // Hard category (deletion / credential / remote / system / bulk) or an
-        // off-protocol output graded hard: auto-deny. The operation is clearly
-        // dangerous or sensitive — no popup, no learning, just block.
-        const reason = `${decision.reason} [llm-assist risky:${risk.category} → auto-deny]`
-        this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'deny', source: 'classifier', reason, at: Date.now() }))
-        this.recordEvent(exec, 'deny', reason, { risk: risk.category, verdict: 'llm-deny', category: risk.category })
-        this.untrackAsk(exec)
-        return { kind: 'deny', reason }
+        // off-protocol output graded hard: KEEP THE ASK.
+        //
+        // Denying here would make a probabilistic verdict the source of an
+        // unappealable block: the gate would be "sure enough" to refuse on the
+        // model's word alone, with no popup to appeal to and no grant to retry
+        // with — measured live on a benign `git commit -F …` the grader called
+        // `remote`. Deny stays with the deterministic layers (P0 hard-deny, the
+        // deny-keyword blacklist, explicit `deny:` rules); everything the
+        // classifier merely *suspects* is negotiated with the human instead.
+        //
+        // Hard categories stay distinct from `neutral` in one way that matters:
+        // they are NEVER learnable, so repeated confirmations cannot sediment
+        // them into an auto-allow.
+        const hardReason = `${decision.reason} [llm-assist risky:${risk.category} → ask]`
+        this.trackAsk(exec, hardReason, undefined)
+        return { kind: 'ask', reason: hardReason }
       }
 
       const learning = this.liveRiskLearning()

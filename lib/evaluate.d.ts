@@ -9,6 +9,15 @@ export interface ToolCallContext {
     readonly home?: string;
     readonly dshHome?: string;
     readonly caseInsensitive?: boolean;
+    /** Agent identity candidates from session context. */
+    readonly agentCandidates?: readonly string[];
+    /** Network request info (for network dimension matching). */
+    readonly network?: {
+        readonly domain?: string;
+        readonly ip?: string;
+        readonly port?: number;
+        readonly scheme?: string;
+    };
 }
 export interface Decision {
     readonly action: RuleAction;

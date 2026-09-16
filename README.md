@@ -27,12 +27,11 @@
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
 > | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x` is a range) |
-> | 0.1.5-rc.1+ (dedicated line) | `compat/0.1.5` | `3.x` | `@dsh-0.1.5` |
 >
-> The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+,
-> `3.x` = DSH 0.1.5+), and the majors fence each other: a `^1.x` install never resolves
-> a `2.x` release and vice versa. `engines.dsh` states the same split but DSH never
-> reads it — the ranges and dist-tags are what hold an old DSH on `1.x`.
+> The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+),
+> and the majors fence each other: a `^1.x` install never resolves a `2.x` release and
+> vice versa. `engines.dsh` states the same split but DSH never reads it — the ranges
+> and dist-tags are what hold an old DSH on `1.x`.
 >
 > `@deepseek-ai/dsh-client-runtime` was **removed** at `0.1.2-alpha.1` — it did not
 > merely move. The `legacy` line still reaches `ctx.slots` through it; `main` gets
@@ -43,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **3.0.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.6.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -78,11 +77,13 @@ cross-plugin version coupling.
   malformed rules, and source-hash compile caching.
 - **Audit** — every decision is logged as an `{ignorable:true}` event with its `callId`; the
   model-visible reason matches the recorded outcome.
-- **自动审查 tier** (`permissive`) — an **independent approval mode** (separate from read-only,
-  full-access and whitelist tiers) that is neither "auto-approve" nor blanket trust. Front-end
-  exposes a **single switch** (`permissive`); the four backend strategies are **combinable** and
-  driven by plugin settings — still fail-closed against P0. The permission picker and the
-  settings row both show it under the product label 自动审查, with no icon.
+- **自动审查 tier** (`permissive`, plus `permissive-full`) — an **independent approval mode**
+  (separate from read-only, full-access and whitelist tiers) that is neither "auto-approve" nor
+  blanket trust. Front-end exposes a **single switch** (`permissive`); the four backend strategies
+  are **combinable** and driven by plugin settings — still fail-closed against P0. The permission
+  picker and the settings row both show it under the product label 自动审查, with no icon. The
+  `permissive-full` variant keeps the identical approval behaviour but drops the built-in file
+  sandbox, which otherwise denies the named pipes `git clone` / Cygwin / ConPTY need.
 - **Sandbox-escalation auto-answer** (`trustEscalation`) — a sandbox escalation is asked from
   *inside* the shell / pwsh / edit tool body, after `tools/pre-execute`, so the gate never saw
   it and a call it auto-allowed still prompted you to approve the widening. With this strategy
@@ -126,7 +127,7 @@ Add the plugin to `cordis.yml`:
     rulesFile: ./permissions.yaml   # optional; defaults to $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME              # root pinned for protected-target checks
     defaultAction: ask              # allow | ask | deny
-    gatePresets: [permissive]       # tiers where the gate is active at all (default)
+    gatePresets: [permissive, permissive-full]   # tiers where the gate is active (default)
     sessionSweep: true              # hourly cleanup of archived/dead sessions' gate data
 ```
 
@@ -143,6 +144,7 @@ unattributable rows (empty session id) are never deleted, and any failure is
 fail-open: the round is skipped and retried an hour later. Set `sessionSweep: false`
 to disable; `workspaceStoreFile` overrides the store path. Restoring an archived
 session does not restore its swept history.
+
 ### Rules file
 
 ```yaml
@@ -169,18 +171,104 @@ permissions:
 A command entry `word#flag` matches the command word (`word`) with the modifier `recursive` or
 `force` — so `rm#recursive` matches `rm -rf`, `env rm -rf`, and `sh -c "rm -rf /"`.
 
+### Network policy (opt-in)
+
+A local HTTP/CONNECT proxy that adjudicates the outbound traffic of **shell
+subprocesses** against the same rules file, plus an approval path for targets no
+rule covers. **Off by default** — enabling it binds a loopback port and rewrites
+the proxy environment for child processes, so it is never turned on implicitly.
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # master switch (default false)
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny  — unlisted target handling
+    networkUnattributed: allow     # allow | deny — traffic with no shell attribution
+    networkInjectEnv: true         # rewrite HTTP(S)_PROXY/ALL_PROXY for children
+    networkAskTimeoutMs: 120000    # approval wait before failing closed
+    networkGrantTtlMs: 1800000     # how long one approval covers its target
+```
+
+**Tiered behaviour.** Nothing reaches the network without an allow rule.
+An unlisted target is escalated to the interactive approval seam, raised on
+behalf of the shell command that opened the connection; approving widens reach
+for that target for the session. A `deny` rule is **never** escalated —
+approval can widen what an unlisted target may reach, but it can never override
+a rule that says no.
+
+**The boundary — read this before relying on it.** The proxy is a *cooperative*
+policy layer, not an enforcement boundary. It only sees traffic from clients
+that read the proxy environment:
+
+| Client | Covered? |
+|--------|----------|
+| `curl`, `wget`, `git`, Go `net/http`, Python `requests` | yes |
+| **Node.js `http`/`https`/`fetch`** | **no — connects directly** |
+| Java (without `-D` proxy flags), .NET `HttpClient` | no |
+| Raw sockets, custom TCP | no |
+| DNS, QUIC/HTTP3, non-HTTP protocols | no |
+| Connections to a literal IP | no |
+
+So a shell command like `node -e "require('http').get('http://host/')"` is not
+intercepted. Treat this as a guardrail against accidents and a place to state
+intent, not as a hermetic sandbox.
+
+DSH's **own** network traffic — the built-in network tools and the LLM
+transport — is deliberately left alone. Those connections carry no shell
+attribution, and `networkUnattributed: allow` (the default) passes them
+through unreviewed: reviewing them would let the host block *itself*, which is
+a worse failure than a missed block. Set `networkUnattributed: deny` only if
+you know your host's clients ignore the proxy environment.
+
+Query the live state at `GET /api/dsh-perm-gate/network` (mode, bind, port,
+proxy liveness, env-injection state, block counters, recent blocks).
+
 ## The 自动审查 tier (machine value `permissive`)
 
 自动审查 is an **independent approval tier** in the DSH permission picker, parallel to
 Read Only / Workspace Write / Full access / Whitelist. It is **not** generic "auto-approval" and
 never mints blanket authority: it only narrows or widens the seam *before* the human/LLM step
-while P0 hard-deny stays monotonic and non-negotiable.
+while P0 hard-deny stays monotonic and non-negotiable **within the gate's own scope**.
+
+> **P0 is scoped, not global.** The gate acts only while the session's permission preset is one
+> of `gatePresets` (default `permissive` / `permissive-full`). Under any other preset — Read Only,
+> Workspace Write, or Full access — the **entire** gate stands down, P0 hard-deny included,
+> because the selected tier's own policy governs that session. This is deliberate (see
+> `gatePresets` in the configuration table), but it means "P0 is non-negotiable" holds *inside*
+> the gate's tiers rather than across every tier. A stand-down is not silent: the gate records one
+> `stand-down` event per session/preset transition and the browser shows a sticky **GATE OFF**
+> strip above the input. Set `gatePresets: ['*']` to make P0 global again.
+
+**Two variants ship**, because a preset's `sandbox` and `approval` are independent knobs and
+coupling them forced a bad trade:
+
+| Picker label | Machine value | sandbox | approval |
+|--------------|---------------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查（高权限） | `permissive-full` | `danger-full-access` | `ask` |
+
+The plain tier keeps the built-in file sandbox. That sandbox also denies the named pipes a child
+process needs to start, so `git clone`, MSYS2/Cygwin `sh.exe` and ConPTY fail under it with
+`Win32 error 5` / `couldn't create signal pipe`. Because the gate is active **only** in the tiers
+listed in `gatePresets`, wanting the gate meant accepting that restriction. 自动审查（高权限）
+removes the coupling: identical approval behaviour, no file-sandbox restriction. The tier's own
+description states the trade plainly — the workflow is smoother, approvals still apply per call,
+but there is **no system sandbox left as a backstop**. Both are in the
+default `gatePresets`, so either one gives you the full P0–P4 chain — the gate reads the preset
+**name** only, never the sandbox mode.
 
 The picker label is a **host-supplied product string**, not a per-locale dictionary entry: DSH
-0.1.2 renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
+renders a plugin tier's `name:` verbatim on both permission surfaces (the General-settings
 default row and the composer picker) and only supplies its own localized labels for the three
-built-in values, so `cordis.patch.yml` ships the Chinese label for every session. The tier draws
-**no icon** — the composer renders glyphs only for the built-in values.
+built-in values, so `cordis.patch.yml` ships the Chinese label for every session.
+
+The **icon** is a different story. The composer's glyph map is closed, and its own comment states
+the rule: *host-configured names outside the design set get none.* `permissive` is a built-in
+value, so 自动审查 already has a shield+eye glyph; `permissive-full` gets the same glyph only
+because `npx dsh-perm-gate-patch-glyph` adds it to that map. That patch edits a **host**
+package, so it is lost on every DSH upgrade — see
+[After a DSH upgrade](./INSTALL.md#after-a-dsh-upgrade-re-apply-the-composer-glyph-patch).
 
 In `cordis.yml`:
 
@@ -247,7 +335,13 @@ optionally overridden with `classifierProvider` / `classifierModel`). A **health
 
 - `safe` → the call is auto-allowed (audited as the `classifier` source); no panel is shown.
 - `risky` + a **hard category** (`deletion`, `credential`, `remote`, `system`, `bulk`) → the call
-  is **auto-denied** without a panel; hard risks are never auto-allowed and never learned.
+  **keeps the human ask**. The classifier **never denies**: the deny path belongs to the
+  deterministic layers alone (P0 hard-deny, the deny-keyword blacklist, explicit `deny:` rules), so
+  a misgraded category is always negotiable instead of an unappealable block. Hard categories stay
+  distinct from `neutral` in one way that matters: they are **never learned**, so repeated
+  approvals can never sediment them into an auto-allow.
+  (Denying on the model's word was measured live: a benign `git commit -F …` graded `remote`
+  produced an auto-deny with no panel and no grant to retry with.)
 - `risky:neutral` → with `riskLearning` enabled (Settings card, off by default), each human
   approval that actually executes (settled via the host's `tools/result` event) counts toward
   a `tool|category` key; once the count reaches `riskThreshold` (default 3) **and** the new
@@ -280,8 +374,9 @@ channel existed), with `tools/result` settling the same ask as a fallback when t
 correlate it. Approvals report the post-approval learning progress (`n`/threshold), and the notice
 strip labels all three terminal states.
 
-The tier draws no icon in the permission picker: the composer's glyphs are keyed to the three
-built-in values, so a plugin-contributed tier is text-only on every surface.
+自动审查 and 自动审查（高权限） both draw the shield+eye glyph in the picker — the first from DSH's
+built-in map, the second from the host patch the installation guide describes. Without that patch
+the second tier is text-only on every surface; its label and its gating are unaffected.
 
 ### A selectable session tier
 
@@ -293,16 +388,17 @@ built-ins (`read-only` / `workspace-write` / `danger-full-access`, from
 session permission picker offers 自动审查 as an independent selectable approval tier, not a
 generic "auto-approval" mode.
 
-The gate is active **only in the tiers listed in `gatePresets`** (default `['permissive']`, the
-tier this plugin adds). In every other tier — Read Only, Workspace Write, Full access,
-`custom` — the gate's decision flow does not run at all: no allow, no ask, no deny, no P0
-hard-deny, no deny-keyword veto, and no audit event. The selected tier's own policy governs the
-call, which is the point: `danger-full-access` is defined as "full access without approval
-prompts", so overruling it with an ask (unanswerable there — the approval seam rejects before any
-answerer runs, producing `the user rejected tool "..."` with no panel) or with a hard-deny would
-silently contradict the tier the user chose. `gatePresets: ['*']` makes the gate global again
-(hard-deny included); inside an active tier an `ask` is still degraded to passthrough when the
-session's effective approval policy is `never`.
+The gate is active **only in the tiers listed in `gatePresets`** (default
+`['permissive', 'permissive-full']`, the two tiers this plugin adds). In every other tier —
+Read Only, Workspace Write, Full access, `custom` — the gate's decision flow does not run at all:
+no allow, no ask, no deny, no P0 hard-deny, no deny-keyword veto, and no audit event. The
+selected tier's own policy governs the call, which is the point: the built-in
+`danger-full-access` is defined as "full access without approval prompts", so overruling it with
+an ask (unanswerable there — the approval seam rejects before any answerer runs, producing
+`the user rejected tool "..."` with no panel) or with a hard-deny would silently contradict the
+tier the user chose. `gatePresets: ['*']` makes the gate global again (hard-deny included);
+inside an active tier an `ask` is still degraded to passthrough when the session's effective
+approval policy is `never` — which is why both 自动审查 tiers declare `approval: ask`.
 
 ### Configurable in the UI
 
@@ -311,6 +407,21 @@ The tier is also adjustable at runtime from **Settings → Plugins → 自动审
 `permissive`, and four toggles edit the backend `permissiveStrategies`. The host reads the
 namespace live, so a change applies to the next tool call without a restart. This is an
 independent approval class, NOT a generic "auto-approval" mode.
+
+### Rule test (dry-run)
+
+The same page carries a **Rule test** panel: type a tool name and a command, press Test, and the
+gate judges that call against the ruleset it currently has loaded — without running anything and
+without writing any rule. You get the verdict, the matched rule (index and action), the dimensions
+that rule constrains, and the reason.
+
+It reports the effective verdict (the whole P0 → P1 → P2 → P3 → P4 chain) *and* the rule layer's own
+answer, which are not the same thing: a P0 hard-deny or a preset deny-keyword fires before the rule
+chain and leaves no rule index behind, so the panel says "no rule matched" rather than naming an
+unrelated rule. A `0 rules loaded` note means the `rulesFile` path resolved to nothing.
+
+The panel talks to `POST /api/dsh-perm-gate/dry-run`, which is **read-only by construction** — it
+has no write form at all, so testing a rule can never change it.
 
 ## CLI
 

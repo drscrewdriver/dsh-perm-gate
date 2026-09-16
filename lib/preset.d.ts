@@ -28,3 +28,16 @@ export interface SessionEventLike {
 export declare function permissionPresetOf(events: readonly SessionEventLike[] | undefined): string | undefined;
 /** Whether one preset name is covered by a configured scope list. */
 export declare function presetInScope(preset: string | undefined, scope: readonly string[]): boolean;
+/**
+ * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
+ * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
+ * same approval behaviour) — so a user can have the gate without inheriting a
+ * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
+ * preset, including the hard-deny layer).
+ *
+ * Lives in this dependency-free module (not `config.ts`) so the browser half can
+ * render the scope without pulling schemastery into the client bundle.
+ */
+export declare const DEFAULT_GATE_PRESETS: readonly string[];
+/** Normalize the gate scope: an unset/empty list means the default. */
+export declare function resolveGatePresets(configured?: readonly string[]): readonly string[];

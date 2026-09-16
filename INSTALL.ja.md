@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` バージョン **2.0.0**。判定チェーン、ルールファイル形式、自动审查
+`dsh-perm-gate` バージョン **2.4.1**。判定チェーン、ルールファイル形式、自动审查
 ティアについては [日本語 README](./README.ja.md) を参照してください。
 
 ## 必要条件
@@ -31,8 +31,7 @@
 
 | DSH のバージョン | インストール方法 |
 |-----------------|-----------------|
-| `0.1.5-rc.1` 以上 | `dsh plugin --profile web add dsh-perm-gate@dsh-0.1.5`（0.1.5 専用ライン、`3.x`） |
-| `0.1.2-alpha.1` 以上 | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`、`2.x`） |
+| `0.1.2-alpha.1` 以上（`0.1.5-rc.2` を含む） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
 | `0.1.1-rc.2` まで | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH は `engines.dsh` を強制しないため、tag が選択メカニズムであり、互換性ゲート
@@ -87,6 +86,56 @@ dsh plugin --profile web update dsh-perm-gate
 ```sh
 dsh profile reload --profile web
 ```
+
+## **DSH** アップグレード後：入力欄アイコンのパッチを再適用
+
+「自动审查（高权限）」が「自动审查」と同じ盾＋目のアイコンを表示するのは、
+`scripts/patch-permission-glyph.mjs` が **DSH ホストパッケージ内の閉じた Map** に
+その項目を追加したからにすぎません。DSH はプラグイン提供ティアに**設計上アイコンを
+与えません** —— その Map 自身のコメントが *"host-configured names outside the design
+set get none"* と述べています。プラグインが影響できる option オブジェクトは
+`{value, name, description}` しか運ばないため、代わりに使えるプラグイン側のシームは
+存在しません。
+
+このパッチは**ホスト**のファイルを書き換えるので、**DSH のアップグレードや再インストールで
+失われます**。*本プラグイン*のアップグレードでは失われません。アイコンは元々プラグインの
+ものではなく、プラグイン自身の寄与（`cordis.patch.yml` の `name:` / `description:`）は
+パッケージに同梱されています。
+
+```sh
+npx dsh-perm-gate-patch-glyph            # パッチを適用
+npx dsh-perm-gate-patch-glyph --check    # 確認のみ。グリフが失われていれば終了コード 1
+dsh profile reload --profile web
+```
+
+スクリプトは**このパッケージに同梱**されています —— `scripts/patch-permission-glyph.mjs`
+としても、`dsh-perm-gate-patch-glyph` bin としても —— ソースの checkout は不要です。
+**意図的に `postinstall` には接続していません**：これはホストパッケージを書き換えるもので、
+プラグインが許可なく自分の harness を書き換えてよい理由はありません。適用の有無にかかわらず
+DSH の動作に影響はなく、ティア自体はそのまま機能します。
+
+このスクリプトは冪等（2 回目は no-op）で、バックアップは 1 度だけ取り、壊れたスライスを
+書き込もうとしません —— 結果に対して `node --check` を実行し、失敗すればバックアップを
+復元します —— したがって DSH アップグレードのたびに無条件で再実行して安全です。
+実行中の `node` バイナリからパッケージを逆算するため、nvm のバージョン変更や
+インストール symlink の貼り替えでも壊れません。
+
+**プラグインを再インストールしてもアイコンは戻りません。**
+`dsh plugin --profile web add …` は profile ディレクトリ内の pnpm に引数を転送し、
+profile 自身の `node_modules` しか書き換えません（`-w` ＝ `--workspace-root` ですが、
+この profile の workspace は `packages: ['.']` そのものなので関係ありません）。
+アイコンは DSH インストール側にあります。標準的なインストールでは、以下の 3 つの
+パスは 3 つのコピーではなく **1 つの物理ファイル**です：
+
+| パス | 実体 |
+|------|------|
+| `dirname(node)/node_modules/@deepseek-ai/dsh` | DSH インストール先（symlink のことがある） |
+| `<profile>/node_modules/@deepseek-ai/dsh-client-ui-conversation` | そこへの**ジャンクション** |
+| `<dsh>/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/client.js` | パッチ対象のファイル |
+
+見るべき症状：ティアは動作しゲートも効いたままですが、入力欄のドロップダウンの行に
+アイコンがなく、折りたたまれたトリガーは他のティアがアイコン＋文字なのに対して
+文字だけになります。
 
 ## 分割プラグインからの移行
 
@@ -145,6 +194,12 @@ DSH の bundle patch は `permission.config.presets` を key 単位でマージ�
 します。profile を再読込して `cordis.patch.yml` を再適用し、後から読み込まれる
 プラグインが `presets` を上書きしていないか確認してください。
 
+**「自动审查（高权限）」の入力欄アイコンが消えた。**
+DSH のアップグレードまたは再インストールが、パッチを当てたホスト bundle を置き換え
+ました。プラグインを再インストールしても戻りません。
+`npx dsh-perm-gate-patch-glyph` を実行して再読込してください。
+ティア自体は影響を受けません —— パッチなしでもラベルとゲートは動作します。
+
 **ルールファイルがあるのに `--list` が `ruleCount: 0` を返す。**
 `rulesFile` はプラグイン ディレクトリではなく Harness プロセスの CWD から解決されます。
 絶対パスを使うか、シェルの CWD を確認してください。不正なドキュメントは読み込み時に
@@ -161,12 +216,6 @@ loud-fail し、暗黙に無効化されることはありません。
 イベントを一切記録しません —— 記録したいセッションで権限ピッカーから
 「自动审查」を選んでください。preset を一度も選んでいないセッションも対象外です。
 新しいセッションの初期ティアは `permission.defaultPreset` 設定で決まります。
-
-**DSH アップグレード後、クライアント側プラグインがすべて消える / ティアが見当たらない。**
-DSH の再ビルド後、web client のコンボがブラウザキャッシュから配信され、プラグインツリーが
-再アクティブ化に失敗することがあります。何かを再インストールする前に、ブラウザをハード
-リフレッシュ（Ctrl+Shift+R）するかサイトキャッシュを消してください —— これはホスト側の
-キャッシュ問題であり、プラグインの欠陥ではありません。
 
 **設定カードに「設定名前空間が利用できません」と出る。**
 プラグインが現在の profile に組み込まれていません。

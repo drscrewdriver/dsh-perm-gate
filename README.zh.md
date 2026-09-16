@@ -26,9 +26,8 @@
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
 > | 0.1.2-alpha.1+（含 0.1.5-rc.2） | `main` | `2.x` | `@latest` / `@dsh-0.1.2` （`@2.x` 是范围） |
-> | 0.1.5-rc.1+（专属版本线） | `compat/0.1.5` | `3.x` | `@dsh-0.1.5` |
 >
-> 版本序列号跟的是 **DSH 线**（`1.x` = DSH ≤ 0.1.1，`2.x` = DSH 0.1.2+，`3.x` = DSH 0.1.5+），各条大版本互
+> 版本序列号跟的是 **DSH 线**（`1.x` = DSH ≤ 0.1.1，`2.x` = DSH 0.1.2+），两条大版本互
 > 相隔离：锁在 `^1.x` 的安装绝不会解析到 `2.x`，反之亦然。`engines.dsh` 表达同样的
 > 分界，但 DSH 从不读取它——真正把旧 DSH 钉在 `1.x` 上的是版本范围与 dist-tag。
 >
@@ -40,7 +39,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **3.0.0** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.4.1** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 
@@ -63,7 +62,7 @@
 - **会话放行** — 精确的 `(工具, 规范化 fingerprint)` grant，带 `TTL` + `maxUses`；换目标绝不复用。子代理继承但不可自授。
 - **纯函数规则引擎** — glob/regex 编译 + ReDoS 上限、坏规则 loud fail、按源内容哈希缓存。
 - **审计** — 每次决策写为 `{ignorable:true}` 事件并带 `callId`；模型可见理由与记录一致。
-- **自动审查档位**（机器值 `permissive`）——一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。权限下拉框与设置行都按产品名「自动审查」显示，且不带图标。
+- **自动审查档位**（机器值 `permissive`）——一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。权限下拉框与设置行都按产品名「自动审查」显示；图标见下文（内置档自带，插件档需补丁）。
 - **沙箱提权自动答复**（`trustEscalation`）— 沙箱提权是从 shell / pwsh / edit 工具**体内部**（`tools/pre-execute` 之后）发出的，所以门禁从未见过它，一个它自动放行的调用仍会弹出确认。开启后，门禁以 `callId` 精确匹配已放行调用并直接答复。
 
 ## 安装
@@ -88,7 +87,7 @@ dsh plugin --profile web add dsh-perm-gate
     rulesFile: ./permissions.yaml   # 可选；默认 $DSH_HOME/perm-gate/rules.yml
     dshHome: $DSH_HOME
     defaultAction: ask
-    gatePresets: [permissive]       # 门禁生效的档位（默认值）
+    gatePresets: [permissive, permissive-full]   # 门禁生效的档位（默认值）
     sessionSweep: true              # 每小时清理已归档/已删除会话的门禁数据
 ```
 
@@ -101,18 +100,90 @@ dsh plugin --profile web add dsh-perm-gate
 审查页也不再保留其历史。活跃会话不受影响；无法归属的行（空 sessionId）永不删除；
 任何失败都 fail-open：本轮跳过，一小时后重试。设 `sessionSweep: false` 关闭；
 `workspaceStoreFile` 可覆盖存储路径。恢复归档会话不会找回已被清扫的历史。
+
 规则示例：见 [examples/permissions.example.yaml](./examples/permissions.example.yaml)。
+
+### 网络策略（可选开启）
+
+本地 HTTP/CONNECT 代理，用**同一份规则文件**审查 **shell 子进程**的出站流量，并对无规则
+覆盖的目标提供审批通道。**默认关闭** —— 开启后会绑定回环端口并改写子进程的代理环境变量，
+因此绝不隐式启用。
+
+```yaml
+- id: dsh-perm-gate
+  config:
+    networkEnabled: false          # 总开关（默认 false）
+    networkMode: whitelist         # deny-all | whitelist | allow-all
+    networkUnlisted: ask           # ask | deny —— 未列出目标的处理方式
+    networkUnattributed: allow     # allow | deny —— 无 shell 归属的流量
+    networkInjectEnv: true         # 为子进程改写 HTTP(S)_PROXY / ALL_PROXY
+    networkAskTimeoutMs: 120000    # 审批等待上限，超时按拒绝处理
+    networkGrantTtlMs: 1800000     # 一次批准的会话有效期
+```
+
+**分层行为**：没有 allow 规则，任何目标都出不去。未列出的目标会升级到交互审批，挂在该
+shell 命令的会话上；批准后该目标在本次会话内放行。**`deny` 规则永不升级为审批** —— 审批
+只能为「无规则禁止的目标」拓宽可达性，永远不能推翻一条说「不」的规则。
+
+**边界 —— 依赖它之前请先读这段**：代理是**协作式**策略层，不是强制边界。它只能看到
+**愿意读代理环境变量**的客户端的流量。
+
+| 客户端 | 能拦吗 |
+|--------|--------|
+| `curl`、`wget`、`git`、Go `net/http`、Python `requests` | ✅ |
+| **Node.js `http` / `https` / `fetch`** | ❌ **直连，代理看不到** |
+| Java（未加 `-D` 代理参数）、.NET `HttpClient` | ❌ |
+| 原始 socket、自写 TCP | ❌ |
+| DNS、QUIC/HTTP3、非 HTTP 协议 | ❌ |
+| 连接字面 IP | ❌ |
+
+因此 `node -e "require('http').get('http://host/')"` 这类命令**不会被拦截**。请把它当作
+「防误操作的护栏 + 声明意图的地方」，而不是密闭沙箱。
+
+DSH **自身**的网络流量 —— 内建网络工具与 LLM 传输 —— 刻意不管：这些连接不带 shell 归属，
+而 `networkUnattributed: allow`（默认）会直接放行。审查它们会导致宿主**把自己拦死**，
+那比漏拦严重得多。只有在你确定宿主的客户端不读代理环境变量时，才考虑改成 `deny`。
+
+实时状态查询：`GET /api/dsh-perm-gate/network`（模式 / 绑定 / 端口 / 代理存活 / 环境注入
+状态 / 阻断计数 / 最近阻断）。
 
 ## 自动审查档位（机器值 `permissive`）
 
 自动审查是权限下拉框里一个**独立审批档**，与只读 / 工作区内修改 / 完全权限 / 白名单平行。
 它不是泛化的"自动审批"、也不授予泛化权限：只会在人类/LLM 接缝**之前**收窄或放宽决策，
-P0 硬拒绝始终单调且不可协商。
+P0 硬拒绝在**本门禁自身的档位作用域内**始终单调且不可协商。
 
-下拉框里的名字是**宿主提供的产品名**，不是逐语言的字典项：DSH 0.1.2 对插件档位在**两个**权限界面上
+> **P0 是档位作用域内的，不是全局的。** 门禁只在会话权限档位属于 `gatePresets`
+> （默认 `permissive` / `permissive-full`）时生效。其他档位 —— 只读、工作区内修改、完全权限
+> —— 下**整个门禁停用，包括 P0 硬拒绝**，因为该档位自身的策略接管了这个会话。这是刻意设计
+> （见配置表的 `gatePresets`），但也就意味着「P0 不可协商」成立于**门禁的档位之内**，而非所有档位。
+> 停用**不是静默的**：每次会话档位切换会记录一条 `stand-down` 事件，浏览器在输入框上方常驻一条
+> **GATE OFF** 提示条。把 `gatePresets` 设为 `['*']` 可让 P0 重新变成全局。
+
+**提供两个变体** —— 因为预设的 `sandbox` 与 `approval` 是两根**独立**旋钮，把它们绑死会逼出
+一个糟糕的取舍：
+
+| 下拉框名称 | 机器值 | sandbox | approval |
+|-----------|--------|---------|----------|
+| 自动审查 | `permissive` | `workspace-write` | `ask` |
+| 自动审查（高权限） | `permissive-full` | `danger-full-access` | `ask` |
+
+普通档保留内置文件沙箱。而那个沙箱**同时**拒绝子进程启动所需的命名管道 —— 所以 `git clone`、
+MSYS2/Cygwin 的 `sh.exe`、ConPTY 都会以 `Win32 error 5` / `couldn't create signal pipe` 失败。
+又因为门禁**只在 `gatePresets` 列出的档位里生效**，想用门禁就必须接受这个限制。
+「自动审查（高权限）」解开了这个耦合：**审批行为完全相同，但不限制文件沙箱** —— 档位自带的描述已把代价
+写明：流程更顺畅、审批仍逐次生效，但**不再有系统沙箱兜底**。两者都在默认
+`gatePresets` 里，任选其一都能获得完整的 P0–P4 链路 —— 门禁只读预设的**名字**，从不读 sandbox 模式。
+
+下拉框里的名字是**宿主提供的产品名**，不是逐语言的字典项：DSH 对插件档位在**两个**权限界面上
 （通用设置默认档行、输入栏权限选择器）都原样渲染补丁里的 `name:`，只给三个内置档提供自己的本地化
-标签，因此 `cordis.patch.yml` 直接写中文名，对所有会话一致。该档位**不画图标**——选择器的图标只按
-三个内置值取。
+标签，因此 `cordis.patch.yml` 直接写中文名，对所有会话一致。
+
+**图标是另一回事。** 输入栏的图标表是闭合的，表自己的注释写明了规则：*host-configured names
+outside the design set get none*。`permissive` 是内置值，所以「自动审查」本来就有盾+眼图标；
+「自动审查（高权限）」能拿到同一个图标，靠的是 `npx dsh-perm-gate-patch-glyph` 往那张表里
+加了一项。该补丁改的是**宿主**包，每次 DSH 升级都会丢 —— 见
+[DSH 升级后：重打输入区图标补丁](./INSTALL.zh.md)。
 
 `cordis.yml`：
 
@@ -167,7 +238,8 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 `@deepseek-ai/dsh-base/cordis.patch.yml`）；`test/patch-presets.spec.ts` 固定了这份键集合。因此会话权限
 下拉里会出现「自动审查」这个**独立可选审批档**，而不是"auto-approval"档。
 
-门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive']`，即本插件新增的那一档）。在其余任何档位
+门禁**只在 `gatePresets` 列出的档位里生效**（默认 `['permissive', 'permissive-full']`，即本插件新增的
+两个档位）。在其余任何档位
 （Read Only、Workspace Write、Full access、`custom`）里，门禁的判定流程**完全不运行**：不放行、不弹审批、
 不拒绝、不执行 P0 硬拒绝、不做黑名单关键词拦截，也不写审计事件——该档位自己的策略说了算。这正是重点所在：
 `danger-full-access` 的定义就是"全权限、不弹审批"，用 ask 去覆盖它毫无意义（该档 `approval: never` 会让审批接缝
@@ -187,7 +259,8 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 开启 `llmAssist` 后，接收 LLM（自定义 OpenAI 兼容端点，或 DSH 宿主模型组——见上文）按结构化协议逐条评估 `ask`。**判定发生在门禁的 `tools/pre-execute` 瀑布内部、决策返回宿主之前**：`safe` 直接放行，审批面板根本不会出现；只有真正无法确定的判定才会弹到你面前。
 
 - `safe` → 自动放行（审计来源为 `classifier`），不弹面板。
-- `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ **自动拒绝**、不弹面板；硬风险永不自动放行、也永不进入学习。
+- `risky` + **硬风险类别**（`deletion`、`credential`、`remote`、`system`、`bulk`）→ **维持人工确认（ask）**。分类器**永不拒绝**：拒绝只属于确定性层（P0 硬拒绝、黑名单关键词、显式 `deny:` 规则），所以被误判的类别永远可协商，而不会变成无法申诉的封禁。硬类别与 `neutral` 仅保留一条关键区别：**永不进入学习**，因此反复确认也不可能把它沉淀成自动放行。
+  （拿模型的判断当拒绝依据是实测出来的问题：一条无害的 `git commit -F …` 被判 `remote`，直接自动拒绝——没有面板、也没有可重试的授权入口。）
 - `risky:neutral` → 若开启 `riskLearning`（设置卡片内，默认关闭），人工批准且真实执行的 neutral 风险会按 `tool|类别` 计数；计数达到 `riskThreshold`（默认 3）且新调用的操作指纹（命令词 + 目标基名）命中已确认样本时，**同一操作**自动放行。不同目标永不复用该放行。开启学习沉淀（`riskSediment`，默认开）后，满阈值 key 的确认样本会成为**确定性放行规则**：指纹精确命中即直接放行、无需再过 LLM——即使关闭 llmAssist 也继续生效；沉淀规则在设置卡片中可见、可管理（终止学习 / 删除样本）。
 - 超时（`riskTimeoutMs`，默认 20s，重试 1 次）、传输失败与协议外输出均维持原 `ask`——门禁绝不猜测。
 
@@ -202,7 +275,9 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 调用文本命中任一关键词（大小写不敏感子串）即直接拒绝，且先于白名单 / 授权 / LLM。黑名单在设置
 卡片中按列表查看与增删（预置条目带标签，可一键恢复预置）；未设置或为空时应用预置列表——黑名单
 不会静默关闭。
-该档位在权限选择器中**不显示图标**：选择器的图标只按三个内置值取，插件新增的档位是纯文字。
+「自动审查」与「自动审查（高权限）」在选择器里都画盾+眼图标 —— 前者来自 DSH 内置表，后者来自
+安装指南里描述的那次宿主补丁。没有该补丁时，第二个档位在所有界面上都是纯文字；它的标签与门禁
+不受影响。
 
 
 ## CLI（独立 dry-run）

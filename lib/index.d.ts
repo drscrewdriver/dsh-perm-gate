@@ -53,5 +53,5 @@ export declare function makeApprovalAnswerer(runtime: Pick<PermGateRuntime, 'set
  * `riskTimeoutMs` (default 20 s), and a grader failure keeps the original ask
  * (fail-closed).
  */
-export declare function makePreExecuteListener(runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk'>): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown>;
+export declare function makePreExecuteListener(runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'>): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown>;
 export declare function apply(ctx: Context, config?: Record<string, unknown>): PermGateRuntime;

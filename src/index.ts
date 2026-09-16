@@ -9,11 +9,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
-import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
+import { runDryRun } from './dry-run.js'
+import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { PermGateRuntime, type ApprovalRequestLike, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
+import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
+import { decideNetworkTarget, type NetworkTarget } from './network.js'
+import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
+import { RuleWatcher } from './watch.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -26,6 +30,9 @@ export const name = 'dsh-perm-gate'
 export const inject = ['tools', 'webServer', 'llm', 'agentDefaultModel']
 
 export { Config }
+
+/** The closed approval-outcome vocabulary (anything else is normalized to `unavailable`). */
+const APPROVAL_OUTCOMES: ReadonlySet<string> = new Set(['allowed-once', 'rejected', 'cancelled', 'unavailable'])
 
 /** Runtime settings namespace: `permissive` + `permissiveStrategies` (editable in the UI). */
 export const PERMISSIVE_NAMESPACE = 'dsh-perm-gate'
@@ -220,13 +227,18 @@ export function makeApprovalAnswerer(
  * (fail-closed).
  */
 export function makePreExecuteListener(
-  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk'>,
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'>,
 ): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
   return async (exec, next) => {
     const decision = runtime.decideExecution(exec)
     // Passthrough (allow / stand-down) and a hard-deny need no grading.
-    if (decision === undefined) return next()
-    if (decision.kind !== 'ask') return decision
+    if (decision === undefined) {
+      // The call proceeds: register it so a network connection made by its
+      // child process can be attributed back to this session.
+      runtime.beginShellExecution(exec)
+      return next()
+    }
+    if (decision.kind !== 'ask') return decision // deny: it never runs
     // A cancelled call is never worth a model round-trip; the registry rechecks
     // cancellation after this gate settles.
     if (exec.signal?.aborted === true) return decision
@@ -236,7 +248,14 @@ export function makePreExecuteListener(
     } catch {
       return decision // fail-closed: keep the human ask
     }
-    return refined ?? next()
+    if (refined === undefined) {
+      runtime.beginShellExecution(exec)
+      return next()
+    }
+    // Still an ask: the human decides. Register optimistically so a call they
+    // approve is attributable; a rejection is dropped by the abort/settle path.
+    if (refined.kind === 'ask') runtime.beginShellExecution(exec)
+    return refined
   }
 }
 
@@ -268,23 +287,70 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     : undefined
   const hostModelService = injected.agentDefaultModel ?? fallbackGet('agentDefaultModel')
 
+  // Host log channel, probed rather than assumed: cordis exposes `ctx.logger`,
+  // but the shape moved between DSH lines. Falls back to console so a warning
+  // is never silently dropped — and never throws, because these calls happen
+  // inside error handlers where a throw would escalate into a host crash.
+  const ctxLogger = (() => {
+    const candidate = (ctx as unknown as { logger?: unknown }).logger
+    if (candidate !== null && typeof candidate === 'object' && typeof (candidate as { warn?: unknown }).warn === 'function') {
+      return candidate as { warn(message: string): void }
+    }
+    return undefined
+  })()
+  const loggerWarn = (message: string): void => {
+    try {
+      if (ctxLogger !== undefined) ctxLogger.warn(message)
+      else console.warn(message)
+    } catch {
+      // A throwing logger must never become an unhandled error.
+    }
+  }
+
   // The live approval service, captured by the optional inject below. Its
   // `effectivePolicy` tells the gate whether an ask can reach a human at all.
   //
-  // DUAL-VERSION NOTE (DSH 0.1.1-rc.2, 0.1.2-rc.1 and 0.1.5-rc.2): `effectivePolicy` is a
-  // **private** method of the user-approval service in ALL THREE versions
-  // (0.1.5: packages/interaction/user-approval/lib/types/index.js:145, verified
-  // present in the published @deepseek-ai/dsh@0.1.5-rc.2 bundle).
+  // DUAL-VERSION NOTE (DSH 0.1.1-rc.2 and 0.1.2-rc.1): `effectivePolicy` is a
+  // **private** method of the user-approval service in BOTH versions
+  // (packages/interaction/user-approval/src/index.ts, `private effectivePolicy`).
   // It is therefore a duck-typed, non-contract dependency: read it only through
   // a `typeof` probe, never assume it exists, and never let a failure escape
   // (a throw would be normalized by the approval seam into a rejection on the
   // human's behalf). The public fallback is the `agents.get(id).followup(...)`
   // channel in buildSessionSender.
-  let approvalService: { effectivePolicy?: (session: unknown) => unknown } | undefined
+  let approvalService: {
+    effectivePolicy?: (session: unknown) => unknown
+    /** Ask the composed answerers to decide one readonly request. */
+    request?: (req: unknown) => Promise<unknown>
+  } | undefined
 
   const runtime = new PermGateRuntime({
     ...config,
     hostLlm,
+    // Raise a network approval through the DSH approval seam. The service
+    // applies the session policy, routes the prompt to the agent, and appends
+    // the `approval/asked`/`approval/decided` audit pair. Everything that is
+    // not an explicit `allowed-once` fails closed to `unavailable`, and the
+    // gate turns that into a block.
+    requestApproval: async (req: NetworkApprovalRequest) => {
+      const svc = approvalService
+      if (svc === undefined || typeof svc.request !== 'function') return 'unavailable'
+      try {
+        const outcome = await svc.request({
+          agent: req.agent,
+          toolName: req.toolName,
+          ...(req.callId !== undefined ? { callId: req.callId } : {}),
+          reason: req.reason,
+          ...(req.signal !== undefined ? { signal: req.signal } : {}),
+        })
+        return APPROVAL_OUTCOMES.has(String(outcome))
+          ? outcome as 'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'
+          : 'unavailable'
+      } catch {
+        // No open turn, a missing answerer, or a seam failure: never an allow.
+        return 'unavailable'
+      }
+    },
     // Read the Permissive tier live so the UI card's switches take effect on
     // the next tool call (no reload). Falls back to the composition entry.
     readPermissive: (): PermissiveState => {
@@ -413,6 +479,27 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }, 'dsh-perm-gate: session sweep')
   }
 
+  /**
+   * The network-relevant slice of a settings surface, as a comparison key.
+   * Used to decide whether a settings edit needs a proxy rebind at all — an
+   * unrelated edit (say, the allowlist) must not close and reopen the proxy.
+   */
+  const networkKeyOf = (source: unknown): string => {
+    const s = (source ?? {}) as Record<string, unknown>
+    return JSON.stringify([
+      s.networkEnabled, s.networkMode, s.networkUnlisted, s.networkLoopback,
+      s.networkBind, s.networkPort, s.networkNoProxy, s.networkInjectEnv,
+    ])
+  }
+  // Forward references, resolved during apply before any UI edit can fire:
+  // the settings watch only ever runs on a later user action. Held in an
+  // object so the mutable slots stay lint-clean and the intent is explicit.
+  const networkRefs: {
+    rebind?: () => void
+    snapshot?: () => unknown
+    appliedKey?: string
+  } = {}
+
   installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
     setSource: (source) => {
       current = source
@@ -431,6 +518,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         const next = asSurface(scope.get())
         if (next !== undefined && Array.isArray(next.allowlist)) {
           runtime.setAllowlist(next.allowlist.filter((x): x is string => typeof x === 'string'))
+        }
+        // A network knob changed: re-mount the proxy so the card's switches
+        // take effect without a plugin reload. Only a rebind-relevant edit
+        // triggers it.
+        const key = networkKeyOf(next)
+        if (networkRefs.appliedKey !== undefined && networkRefs.appliedKey !== key) {
+          networkRefs.appliedKey = key
+          networkRefs.rebind?.()
+        } else if (networkRefs.appliedKey === undefined) {
+          networkRefs.appliedKey = key
         }
       })
     },
@@ -472,6 +569,31 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       if (offLearning !== undefined) ctx.effect(() => () => { offLearning() }, 'dsh-perm-gate: learning route')
       const offHealth = registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
       if (offHealth !== undefined) ctx.effect(() => () => { offHealth() }, 'dsh-perm-gate: health route')
+      // Network diagnostics: mode, bind, port, proxy liveness, env injection,
+      // block counters and recent blocks. Read-only.
+      const offNetwork = registerNetworkRoute(webServer, {
+        snapshot: () => networkRefs.snapshot?.() ?? { enabled: false, proxyActive: false },
+      })
+      if (offNetwork !== undefined) ctx.effect(() => () => { offNetwork() }, 'dsh-perm-gate: network route')
+      // Rule test (dry-run): evaluate one would-be call against the ruleset the
+      // gate currently has loaded, and report both the effective verdict and the
+      // rule layer's own answer. Read-only — the route has no write form, so
+      // testing a rule can never change it. It runs against the LIVE runtime
+      // rather than a fresh one so the panel tests the rules in force, not a
+      // re-derivation of them (a fresh runtime would also re-resolve the chain
+      // from a different root and could silently answer about a different file).
+      const offDryRun = registerDryRunRoute(webServer, {
+        run: (request) =>
+          runDryRun(
+            {
+              tool: request.tool,
+              args: request.args,
+              ...(request.permissive !== undefined ? { permissive: request.permissive } : {}),
+            },
+            runtime,
+          ),
+      })
+      if (offDryRun !== undefined) ctx.effect(() => () => { offDryRun() }, 'dsh-perm-gate: dry-run route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null
@@ -520,7 +642,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // Fallback terminal-answer channel: settle the ask from the call's result,
   // and settle a pending learning candidate (a result for one means the human
   // approved it and it executed — one confirmation).
-  host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => { runtime.settleExecution(exec, result) }) as never)
+  host.on('tools/result', ((exec: ToolExecutionLike, result: ToolResultLike) => {
+    // The call settled: it is no longer in flight, so a later connection must
+    // not be attributed to it.
+    runtime.endShellExecution(exec)
+    runtime.settleExecution(exec, result)
+  }) as never)
 
   // Approval channel: answer an escalation the gate already cleared, and settle
   // the outcome of an ask the gate did raise. Registered `prepend` so it sits at
@@ -547,6 +674,105 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       approvalService = undefined
     }, 'dsh-perm-gate: approval answerer')
   })
+
+  // ─── Network proxy (Phase 2, T2.12 + rebind) ────────────────────────
+  // T2.10 escape hatch: default OFF. The network proxy is opt-in — enabling
+  // it binds a loopback port and rewrites proxy env vars, so it must never
+  // be turned on implicitly.
+  //
+  // The lifecycle lives in NetworkLifecycle: one persistent teardown effect,
+  // serialized (re)binds, and a diagnostics snapshot. A settings change calls
+  // rebind(), so the card's switches take effect without a plugin reload.
+  const readNetworkConfig = (): NetworkConfigSnapshot => {
+    const live = current() as Record<string, unknown>
+    const str = (key: string, fallback: string): string =>
+      typeof live[key] === 'string' && live[key] !== '' ? live[key] as string : fallback
+    const num = (key: string, fallback: number): number =>
+      typeof live[key] === 'number' ? live[key] as number : fallback
+    const bool = (key: string, fallback: boolean): boolean =>
+      typeof live[key] === 'boolean' ? live[key] as boolean : fallback
+    return {
+      enabled: bool('networkEnabled', false),
+      mode: str('networkMode', 'whitelist') as 'deny-all' | 'whitelist' | 'allow-all',
+      unlisted: str('networkUnlisted', 'ask') as 'ask' | 'deny',
+      unattributed: str('networkUnattributed', 'allow') as 'allow' | 'deny',
+      loopback: str('networkLoopback', 'allow') as 'allow' | 'policy',
+      bind: str('networkBind', '127.0.0.1'),
+      port: num('networkPort', 0),
+      noProxy: str('networkNoProxy', 'clear') as 'clear' | 'preserve',
+      injectEnv: bool('networkInjectEnv', true),
+      askTimeoutMs: num('networkAskTimeoutMs', 120_000),
+    }
+  }
+  const networkLogger: { warn(message: string): void; info?(message: string): void } =
+    ctxLogger !== undefined ? ctxLogger : { warn: (msg: string) => console.warn(msg) }
+  const networkLifecycle = new NetworkLifecycle({
+    effect: (disposeFactory, label) => { ctx.effect(disposeFactory, label) },
+    readConfig: readNetworkConfig,
+    decide: (target: NetworkTarget) => {
+      const cfg = readNetworkConfig()
+      return decideNetworkTarget(runtime.compiledRuleset, target, {
+        mode: cfg.mode,
+        unlisted: cfg.unlisted,
+        loopback: cfg.loopback,
+        // Attribution decides whether this connection is a shell subprocess
+        // (the gate's business) or DSH's own client (left alone by default).
+        attributed: runtime.currentAttribution() !== undefined,
+        unattributed: cfg.unattributed,
+      })
+    },
+    attribution: () => runtime.currentAttribution(),
+    // An `ask` verdict escalates to the interactive approval seam, raised on
+    // behalf of the shell command that opened the connection. A `deny` verdict
+    // never reaches here — approval widens reach but cannot override a rule.
+    escalate: async (target: NetworkTarget, decision) => {
+      const where = `${target.scheme ?? 'https'}://${target.host}${target.port !== undefined ? `:${target.port}` : ''}`
+      const why = decision.matched && decision.ruleIndex !== undefined
+        ? `rule #${decision.ruleIndex + 1} asks about it`
+        : `${decision.mode} mode has no allow rule for it`
+      return runtime.askNetwork(
+        target,
+        `a shell subprocess wants to reach ${where} — ${why}. Approve to let this command use the network for this target.`,
+        readNetworkConfig().askTimeoutMs,
+      )
+    },
+    logger: networkLogger,
+  })
+  // Never awaited at apply(): a slow or failing bind must not block plugin
+  // load. attach() degrades to "no proxy" internally.
+  void networkLifecycle.attach().catch((error: unknown) => {
+    loggerWarn(`[dsh-perm-gate] network proxy attach failed: ${String(error)}`)
+  })
+  // Resolve the forward reference and seed the change-detection key from the
+  // config actually applied, so the first UI edit is compared against it.
+  networkRefs.rebind = () => {
+    void networkLifecycle.rebind().catch((error: unknown) => {
+      loggerWarn(`[dsh-perm-gate] network proxy rebind failed: ${String(error)}`)
+    })
+  }
+  networkRefs.snapshot = () => networkLifecycle.snapshot()
+  if (networkRefs.appliedKey === undefined) networkRefs.appliedKey = networkKeyOf(current())
+  // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────
+  const watchEnabled = typeof config.watch === 'boolean' ? config.watch : true
+  if (watchEnabled) {
+    const watchDebounceMs = typeof config.watchDebounceMs === 'number' ? config.watchDebounceMs : 300
+    const ruleWatcher = new RuleWatcher({
+      debounceMs: watchDebounceMs,
+      logger: { warn: (msg: string) => console.warn(msg) },
+    })
+    // Watch the effective rules file for the current workspace.
+    const rulesFile = resolveRulesFile(
+      typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
+      dataDir,
+    )
+    const cwd = typeof config.cwd === 'string' ? config.cwd : process.cwd()
+    ruleWatcher.watch(cwd, [rulesFile], () => {
+      runtime.reload()
+    })
+    ctx.effect(() => () => {
+      ruleWatcher.closeAll()
+    }, 'dsh-perm-gate: rule watcher')
+  }
 
   return runtime
 }

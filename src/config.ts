@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
+import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js'
 
 /**
  * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
@@ -127,6 +128,91 @@ export interface PermGateConfig {
   readonly sessionSweep?: boolean
   /** Path to DSH's workspace store; defaults to `<dshHome>/storages/workspace.json`. Read-only to the gate. */
   readonly workspaceStoreFile?: string
+  // ─── Rule chain (T1.9) ──────────────────────────────────────────────
+  /**
+   * Whether to enable multi-file rule chain resolution. When true, the gate
+   * searches up directory ancestors for the rules file. Default false.
+   */
+  readonly searchUp?: boolean
+  /** Fallback rules file path when no file is found in the chain search. */
+  readonly fallbackPath?: string
+  /** Error policy for malformed files in the chain: `fail` (throw) or `warn` (skip). Default fail. */
+  readonly badFilePolicy?: 'fail' | 'warn'
+  /** Maximum number of files in the rule chain. Default 10. */
+  readonly maxChainLength?: number
+  // ─── Network (Phase 2) ───────────────────────────────────────────────
+  /**
+   * Master network switch. **Default false** — the network proxy is an
+   * opt-in capability, not part of the baseline gate.
+   *
+   * When false: no proxy is started, no environment variables are injected,
+   * and no network interception occurs — zero behavior change from the
+   * pre-network baseline.
+   *
+   * Enable it from the settings card only after verifying it in your
+   * environment. The proxy binds a loopback port and rewrites proxy env
+   * vars for subprocesses, so it must never be enabled implicitly.
+   */
+  readonly networkEnabled?: boolean
+  /** Network policy mode when auto-mapping from sandbox is not used. Default 'whitelist'. */
+  readonly networkMode?: import('./network.js').NetworkMode
+  /** How unlisted targets are handled in whitelist mode.
+   *
+   * - `'deny'` — block outright, never prompt.
+   * - `'ask'`  — raise an interactive approval for the attributed shell command;
+   *              approve to let THIS target through for this session.
+   *
+   * A `deny` rule always wins: approval can widen reach for a target no rule
+   * allows, but it can never override a rule that says no.
+   */
+  readonly networkUnlisted?: import('./network.js').UnlistedAction
+  /**
+   * How traffic with **no shell attribution** is handled. Default `'allow'`.
+   *
+   * A connection that cannot be tied to an in-flight shell execution did not
+   * come from a subprocess this gate manages — it is DSH's own client (a
+   * built-in network tool, the LLM transport). The proxy is a *subprocess*
+   * policy surface, so reviewing the host's own traffic risks the host
+   * blocking itself, which is far worse than a missed block. `'deny'` reviews
+   * it anyway, and would break DSH if a built-in client ever honors the proxy
+   * environment (e.g. Node 24+ with `NODE_USE_ENV_PROXY=1`).
+   */
+  readonly networkUnattributed?: import('./network.js').UnattributedAction
+  /** Loopback handling: 'allow' short-circuits before rules; 'policy' evaluates normally. Default 'allow'. */
+  readonly networkLoopback?: 'allow' | 'policy'
+  /** Proxy bind address. Default '127.0.0.1'. */
+  readonly networkBind?: string
+  /** Proxy bind port. Default 0 (ephemeral). */
+  readonly networkPort?: number
+  /** NO_PROXY handling: 'clear' empties it so policy cannot be bypassed; 'preserve' keeps ambient values. Default 'clear'. */
+  readonly networkNoProxy?: 'clear' | 'preserve'
+  /**
+   * Rewrite `HTTP(S)_PROXY` / `ALL_PROXY` for subprocesses so their traffic
+   * reaches the proxy. Default true.
+   *
+   * Turn it off to run the proxy WITHOUT touching `process.env` — the
+   * listener still adjudicates whatever is explicitly pointed at it, but no
+   * ambient state is rewritten. Useful when the environment is managed
+   * elsewhere or when verifying the proxy in isolation.
+   */
+  readonly networkInjectEnv?: boolean
+  /**
+   * How long an unlisted-target approval waits for a human before failing
+   * closed to a block (ms). Default 120000 (2 min).
+   */
+  readonly networkAskTimeoutMs?: number
+  /**
+   * How long one approved network target stays approved for the session (ms).
+   * One shell command routinely opens many connections to the same host, so
+   * without this the human would be prompted once per connection.
+   * Default 1800000 (30 min).
+   */
+  readonly networkGrantTtlMs?: number
+  // ─── Hot reload (Phase 3) ──────────────────────────────────────────
+  /** Enable file watching for rule hot-reload. Default true. */
+  readonly watch?: boolean
+  /** Debounce interval for rule file changes in ms. Default 300. */
+  readonly watchDebounceMs?: number
 }
 
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -165,17 +251,10 @@ export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
   trustEscalation: true,
 }
 
-/**
- * Presets in which the gate is active. It owns the `permissive` tier; `'*'`
- * makes it global (every preset, including the hard-deny layer).
- */
-export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive']
-
-/** Normalize the gate scope: an unset/empty list means the default. */
-export function resolveGatePresets(configured?: readonly string[]): readonly string[] {
-  if (configured === undefined || configured.length === 0) return DEFAULT_GATE_PRESETS
-  return configured.filter((name) => typeof name === 'string' && name !== '')
-}
+// The scope constants live in the dependency-free `preset` module (the browser
+// half renders them); bound locally AND re-exported so every existing
+// `./config.js` import keeps resolving.
+export { DEFAULT_GATE_PRESETS, resolveGatePresets }
 
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
 export function resolvePermissiveStrategies(bag: Partial<PermissiveStrategies> = {}): PermissiveStrategies {
@@ -219,6 +298,26 @@ export const Config: z<PermGateConfig> = z.object({
   autoAllowTools: z.array(z.string()),
   sessionSweep: z.boolean().default(true),
   workspaceStoreFile: z.string(),
+  // Rule chain (T1.9)
+  searchUp: z.boolean().default(false),
+  fallbackPath: z.string(),
+  badFilePolicy: z.union(['fail', 'warn'] as const).default('fail'),
+  maxChainLength: z.number().min(1).max(50).default(10),
+  // Network (Phase 2)
+  networkEnabled: z.boolean().default(false),
+  networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
+  networkUnlisted: z.union(['ask', 'deny'] as const).default('ask'),
+  networkUnattributed: z.union(['allow', 'deny'] as const).default('allow'),
+  networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
+  networkBind: z.string().default('127.0.0.1'),
+  networkPort: z.number().min(0).max(65535).default(0),
+  networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
+  networkInjectEnv: z.boolean().default(true),
+  networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000),
+  networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000),
+  // Hot reload (Phase 3)
+  watch: z.boolean().default(true),
+  watchDebounceMs: z.number().min(50).max(5000).default(300),
 })
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>

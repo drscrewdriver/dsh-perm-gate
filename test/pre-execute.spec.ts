@@ -89,17 +89,17 @@ describe('pre-execute listener: llmAssist is awaited before the decision is retu
     expect(terminal?.risk).toBe('safe')
   })
 
-  it('auto-denies a hard-risk category without asking', async () => {
+  it('keeps the ask for a hard-risk category instead of denying on the classifier word', async () => {
     const { runtime, dir } = setup({ kind: 'risky', category: 'credential' })
     const exec = execOf(dir)
     const { next, state } = nextSpy()
 
     const decision = await makePreExecuteListener(runtime)(exec, next)
 
-    expect(decision).toMatchObject({ kind: 'deny' })
-    expect(state.calls).toBe(0)
-    expect(runtime.pendingAskCount()).toBe(0)
-    expect(eventsOf(runtime).at(-1)?.verdict).toBe('llm-deny')
+    expect(decision).toMatchObject({ kind: 'ask' })
+    expect(state.calls).toBe(0) // still not executed
+    expect(runtime.pendingAskCount()).toBe(1)
+    expect(eventsOf(runtime).some((e) => e.verdict === 'llm-deny')).toBe(false)
   })
 
   it('keeps the ask for a neutral verdict (the uncertain case)', async () => {

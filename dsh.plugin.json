@@ -1,0 +1,22 @@
+{
+  "id": "dsh-perm-gate",
+  "name": "dsh-perm-gate",
+  "version": "2.6.0",
+  "description": {
+    "en": "Deterministic-first, fail-closed permission gate for DeepSeek Harness 0.1.2+: a P0 hard-deny -> P1 precise session grant -> P2 static allow/deny rule chain -> P3 optional LLM classifier -> P4 ask pipeline over the tools/pre-execute waterfall, with a standalone CLI dry-run evaluator and an auditable decision log. It only vetoes with deny/ask and always delegates otherwise, and unknown or malformed rules fail loud instead of silently standing the gate down.",
+    "zh": "面向 DeepSeek Harness 0.1.2+ 的确定性优先、失败即拒的权限闸门：在 tools/pre-execute 瀑布上串起 P0 硬拒绝 → P1 精确会话授权 → P2 静态 allow/deny 规则链 → P3 可选 LLM 语义分类 → P4 ask，并附带独立 CLI 干跑评估器与可审计的决策日志。只以 deny/ask 否决、其余一律放行，规则未知或非法时直接报错，绝不静默失效。"
+  },
+  "homepage": "https://github.com/drscrewdriver/dsh-perm-gate",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/drscrewdriver/dsh-perm-gate.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "dsh": ">=0.1.2-alpha.1"
+  },
+  "components": {
+    "host": "lib/index.js",
+    "client": "lib/client.js"
+  }
+}

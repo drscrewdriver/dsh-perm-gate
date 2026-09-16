@@ -6,8 +6,13 @@
  *
  *   safe                      → the gate may auto-allow the ask
  *   risky:<hard category>     → deletion / credential / remote / system / bulk —
- *                               auto-deny: the operation is clearly dangerous,
- *                               no popup or human review needed
+ *                               the operation looks dangerous; the gate KEEPS the
+ *                               human ask and never learns these into an
+ *                               auto-allow. It is NOT an auto-deny: denying is
+ *                               reserved for the deterministic layers (P0,
+ *                               deny-keywords, `deny:` rules), because a
+ *                               probabilistic verdict must not be able to hand
+ *                               down an unappealable block.
  *   risky:neutral             → no hard-risk signal but not clearly safe; the
  *                               verdict-learning path may auto-allow after
  *                               enough human confirmations
@@ -25,9 +30,18 @@ export type RiskCategory = 'deletion' | 'credential' | 'remote' | 'system' | 'bu
 /**
  * Categories that always route to the human seam regardless of learning state
  * or any later LLM opinion. Order-stable for prompts and event payloads.
+ *
+ * "Hard" means *never auto-allowed and never learned* — the gate keeps asking.
+ * It does not mean auto-denied: the deny path belongs to the deterministic
+ * layers alone (P0 hard-deny, the deny-keyword blacklist, explicit `deny:`
+ * rules), so a misgraded category can always be negotiated instead of becoming
+ * an unappealable block.
  */
 export declare const HARD_RISK_CATEGORIES: readonly RiskCategory[];
-/** Whether a category must never be auto-allowed. Unknown categories are hard too (fail-closed). */
+/**
+ * Whether a category must never be auto-allowed — and never learned into one.
+ * Unknown categories are hard too (fail-closed).
+ */
 export declare function isHardRisk(category: string): boolean;
 /**
  * A graded verdict for one tool call. `unresolved` covers every failure mode —

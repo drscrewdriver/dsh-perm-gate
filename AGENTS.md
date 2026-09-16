@@ -30,9 +30,19 @@ records repo-local decisions.
 - Waterfall listener (`tools/pre-execute`) always delegates via `next()` on allow/passthrough; it
   vetoes only with `deny`/`ask`.
 - Deny wins over allow: blacklist first, then allow list, then ask list.
+- **Only the deterministic layers may deny**: P0 hard-deny, the deny-keyword blacklist, and
+  explicit `deny:` rules. The P3 LLM classifier is **escalate-only** — it may auto-allow
+  (`safe`) and may keep/raise an ask, but it may never produce a `deny`. A probabilistic verdict
+  must not be able to hand down an unappealable block (measured: a benign `git commit -F …`
+  graded `remote` produced an auto-deny with no panel and no grant). Hard risk categories stay
+  distinct from `neutral` only by being **never learnable**.
 - Unknown or malformed config/rules fail loud at load (never silently disabled).
 - Grants are precise and bounded; a different target is never covered (no cross-target replay).
-- P0 (hard-deny) is monotonic and never negotiated by any later stage.
+- P0 (hard-deny) is monotonic and never negotiated by any later stage — **within the gate's own
+  preset scope**. The scope (`gatePresets`, default `permissive` / `permissive-full`) is the outer
+  boundary: outside it the gate stands down entirely, P0 included, because the selected permission
+  tier owns that session. A stand-down is never silent — it records exactly one `stand-down` notice
+  per (session, preset) transition, and the client shows a sticky `GATE OFF` strip.
 - Host-contract reads are version-tolerant and probe-only: a renamed/removed host accessor must
   never silently stand the gate down (`gatePresets` scoping reads the session log through every
   known accessor shape), and `cordis.patch.yml` `permission.config.presets` values stay the machine
