@@ -124,8 +124,12 @@ dsh-perm-gate/
 定义集中在 `src/events.ts`；注册入口 `registerEventsRoute` / `registerReviewRoutes` / `registerLearningRoute` / `registerHealthRoute` / `registerNetworkRoute` / `registerReceiverRoute` / **`registerDryRunRoute`**。
 
 > `/dry-run` **没有写形态**：它不碰规则、授权、学习状态与 settings 命名空间，未知 body 字段直接丢弃。
-> 测试规则的动作本身不能改变规则。注意宿主对**所有 POST** 统一返回 401（未带凭据时），
-> 因此用命令行探测该路由**无法区分「路由不存在」与「未鉴权」**——浏览器内设置卡的 fetch 才是有效路径。
+> 测试规则的动作本身不能改变规则。
+>
+> **复核路由是否存在的方法（实测得出，别再用错）**：宿主对**未注册路径**一律回 **401**，而不是 404；
+> 已注册的插件路由则**完全可达**（`GET /network` → 200、`POST /network` → 405、`POST /learning` → 400）。
+> 因此 **401 是「路由未注册」的信号，不是鉴权**。判定某路由是否生效：`GET` 它——注册了会走本插件的
+> method 检查（GET 不被接受时回 405），未注册则回 401。
 
 ### 2.5 水闸事件
 

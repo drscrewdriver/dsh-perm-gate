@@ -11,6 +11,22 @@ export interface DryRunInput {
     readonly cwd?: string;
     /** Evaluate with the independent Permissive tier on. */
     readonly permissive?: boolean;
+    /**
+     * Also run the **host-facing** decision path and report its own view.
+     *
+     * That path appends audit entries, records decision events, tracks asks and
+     * clears call clearances — so it is opt-in, and a read-only caller must never
+     * request it against a live runtime. Only the CLI asks for it, to keep its
+     * historic output byte for byte.
+     */
+    readonly hostView?: boolean;
+}
+/** The host-facing decision path's own view (`decideExecution`) and its audit count. */
+export interface DryRunHostView {
+    readonly verdict: RuleAction;
+    /** The waterfall's reason, or the historic `(default/passthrough)` placeholder. */
+    readonly reason: string;
+    readonly audited: number;
 }
 /** The P2 rule chain's own verdict, with the rule that produced it. */
 export interface DryRunRuleLayer {
@@ -30,15 +46,22 @@ export interface DryRunRuleLayer {
 export interface DryRunResult {
     readonly tool: string;
     readonly rulesFile?: string;
-    /** Effective verdict of the full chain; `allow` also covers "no decision". */
+    /**
+     * The **policy** verdict: what the chain decides for this call, independent of
+     * the session a caller does not have. See {@link PermGateRuntime.explainCall}
+     * for why the session layers are excluded rather than guessed.
+     */
     readonly verdict: RuleAction;
+    /** Why, in the chain's own words — never a bare placeholder. */
     readonly reason: string;
-    /** Entries the decision wrote to the throwaway runtime's audit mirror (0 or 1). */
-    readonly audited: number;
+    /** Which layer produced `verdict`. */
+    readonly source: string;
     readonly defaultAction: RuleAction;
     readonly ruleCount: number;
     readonly permissive: boolean;
     readonly ruleLayer: DryRunRuleLayer;
+    /** Present only when `input.hostView` was set. */
+    readonly host?: DryRunHostView;
 }
 export interface DryRunOptions {
     readonly rulesFile?: string;

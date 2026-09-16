@@ -68,6 +68,34 @@ function findRuleByIndex(ruleset: CompiledRuleset, index: number): CompiledRuleE
   )
 }
 
+/** Which layer of the chain produced a decision, from its stage. */
+function sourceOfStage(stage: FinalDecision['stage'], reason: string): DecisionSource {
+  switch (stage) {
+    case 'hard-deny':
+      return 'hard-deny'
+    case 'grant':
+      return 'grant'
+    case 'rule':
+      return 'rule'
+    case 'classifier':
+      return 'classifier'
+    default:
+      return reason.startsWith('permissive') ? 'permissive' : 'default'
+  }
+}
+
+/**
+ * The pure policy outcome for one call, as reported by
+ * {@link PermGateRuntime.explainCall}. Same chain as the host-facing decision,
+ * minus every side effect and minus the session-state layers.
+ */
+export interface CallExplanation {
+  readonly action: RuleAction
+  readonly reason: string
+  readonly source: DecisionSource | 'deny-keyword' | 'cleanup-safe'
+  readonly ruleIndex?: number
+}
+
 export interface ToolExecutionLike {
   readonly name: string
   readonly arguments: Record<string, unknown>
@@ -1176,7 +1204,6 @@ export class PermGateRuntime {
       return undefined
     }
 
-    const ctx = this.ctxFor(exec)
     const callId = randomId()
 
     // Preset deny-keyword layer (deny wins over allow): a dangerous-keyword hit
@@ -1190,13 +1217,9 @@ export class PermGateRuntime {
       return { kind: 'deny', reason }
     }
 
-    const grantResolver: GrantResolver = (tool, args) => {
-      if (exec.parentAuthorized === false) return 'no-match'
-      return this.grants.decide(tool, args)
-    }
-
-    const raw = decide(ctx, { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
-    const decision = this.applyPermissive(raw)
+    // The same chain `explainCall` reports, evaluated once here so the two views
+    // cannot drift; this caller adds the side effects and the session layers.
+    const decision = this.applyPermissive(this.rawPolicy(exec))
 
     // Deterministic cleanup pre-screen: if a deletion command targets a
     // regenerable/temporary artifact inside the workspace, allow it directly.
@@ -1267,6 +1290,62 @@ export class PermGateRuntime {
     // rather than prompted. Reached only after the two passthrough early-returns.
     this.clearCall(exec, decision.reason, source, source)
     return undefined
+  }
+
+  /**
+   * The **pure policy** outcome for one call: the same chain
+   * {@link decideExecution} runs, with every side effect and every session-state
+   * layer removed.
+   *
+   * Side effects removed — no audit entry, no event, no ask tracking, no call
+   * clearance, no learning. A rule-test panel must be able to run on every
+   * keystroke without writing to the live decision feed.
+   *
+   * Session-state layers removed — the preset stand-down and the
+   * `approval: never` ask degradation both describe a session a session-less
+   * caller does not have. Including them is not harmless: the degradation turns
+   * every "the rules would ask a human" into a reported **allow**, which is the
+   * opposite of the truth for exactly the rules someone opens the panel to
+   * review (measured on the live host: `shell ls -la` reported `allow` while the
+   * rule layer said `ask`).
+   *
+   * `reason` is never collapsed: "allow" has causes worth naming (a rule, a
+   * grant, cleanup-safety, the permissive default).
+   */
+  explainCall(exec: ToolExecutionLike): CallExplanation {
+    const keyword = this.denyKeywordHit(exec)
+    if (keyword !== undefined) {
+      return {
+        action: 'deny',
+        reason: `deny-keyword: matches preset blacklist entry "${keyword}"`,
+        source: 'deny-keyword',
+      }
+    }
+    const decision = this.applyPermissive(this.rawPolicy(exec))
+    if (decision.action === 'ask') {
+      const cleanupSafe = isCleanupSafe(exec)
+      if (cleanupSafe !== undefined) {
+        return { action: 'allow', reason: `cleanup-safe: ${cleanupSafe}`, source: 'cleanup-safe' }
+      }
+    }
+    return {
+      action: decision.action,
+      reason: decision.reason,
+      source: sourceOfStage(decision.stage, decision.reason),
+      ...(decision.ruleIndex !== undefined ? { ruleIndex: decision.ruleIndex } : {}),
+    }
+  }
+
+  /**
+   * P0 hard-deny → P1 session grant → P2 rules → P4 ask, as a value. Shared by
+   * the host-facing decision and {@link explainCall} so the two cannot drift.
+   */
+  private rawPolicy(exec: ToolExecutionLike): FinalDecision {
+    const grantResolver: GrantResolver = (tool, args) => {
+      if (exec.parentAuthorized === false) return 'no-match'
+      return this.grants.decide(tool, args)
+    }
+    return decide(this.ctxFor(exec), { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
   }
 
   /**

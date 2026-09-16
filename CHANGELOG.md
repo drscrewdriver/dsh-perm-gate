@@ -16,14 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   empty dimension constrains nothing, and `command` matches the decomposed command **word** only, so
   a plausible-looking rule can be dead on arrival.
 
-  The report keeps two answers apart on purpose. **`verdict`** is the effective result of the whole
-  chain (P0 hard-deny → P1 grant → P2 rules → P3 classifier → P4 ask). **`ruleLayer`** is what the
-  `permissions` chain decides on its own, and only that layer can name a rule index: a P0 hard-deny
-  or a preset deny-keyword fires *before* it and leaves no rule behind, so the panel says so instead
-  of attributing an unrelated rule. `matchedDimensions` likewise lists the dimensions the matched
-  rule *constrains* rather than the one that "caused" the match — dimensions are ANDed, so a single
-  cause cannot honestly be named. A `ruleCount` of 0 is surfaced as "0 rules loaded, check the
-  rulesFile path" rather than as "nothing matched".
+  The report keeps two answers apart on purpose. **`verdict`** is the policy result of the whole
+  chain (P0 hard-deny → deny-keyword → P1 grant → P2 rules → P4 ask → permissive).
+  **`ruleLayer`** is what the `permissions` chain decides on its own, and only that layer can name a
+  rule index: a P0 hard-deny or a preset deny-keyword fires *before* it and leaves no rule behind, so
+  the panel says so instead of attributing an unrelated rule. `matchedDimensions` likewise lists the
+  dimensions the matched rule *constrains* rather than the one that "caused" the match — dimensions
+  are ANDed, so a single cause cannot honestly be named. A `ruleCount` of 0 is surfaced as "0 rules
+  loaded, check the rulesFile path" rather than as "nothing matched".
 
 - **`POST /api/dsh-perm-gate/dry-run`** — the panel's endpoint. **Read-only by construction**: it
   has no write form, unknown body keys are dropped rather than forwarded, and it never touches
@@ -33,9 +33,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer about a different file.
 
 - **`src/dry-run.ts`** — `runDryRun` / `createDryRunRuntime`, the shared evaluator for the CLI and
-  the route, plus `PermGateRuntime.explainRules`, the read-only rule-layer report. `src/cli.ts` is
-  now a thin wrapper over it; its output is unchanged across nine replayed invocations, verified
-  byte for byte (including the `--list`, no-tool, bad-JSON and write-path cases).
+  the route, plus `PermGateRuntime.explainRules` (read-only rule-layer report) and
+  `PermGateRuntime.explainCall` (pure policy evaluation). `src/cli.ts` is now a thin wrapper over it;
+  its output is unchanged across nine replayed invocations, verified byte for byte (including the
+  `--list`, no-tool, bad-JSON and write-path cases).
+
+### Fixed
+
+- **The rule-test panel reported `allow` for calls the rules send to a human.** The first version
+  evaluated through the host-facing path, which applies the session layers — the preset stand-down
+  and the `approval: never` ask degradation. A session-less dry-run has no session, so the policy
+  reader answered "never", every `ask` degraded to a passthrough, and the panel showed **allow** for
+  exactly the rules someone opens it to review. Measured on the live host: `shell ls -la` showed
+  `allow` while the rule layer on the same card said `ask`.
+
+  `runDryRun` now reports the **pure policy** verdict from `explainCall`: the same
+  P0 → deny-keyword → P1 → P2 → P4 chain with the session-state layers excluded rather than guessed,
+  and with `reason` never collapsed to a bare `(default/passthrough)`. The host-facing view remains
+  available under `input.hostView`; the CLI asks for it, so its historic output stays byte for byte
+  identical (re-verified: 9/9 cases, SHA256 per case).
+
+- **The "read-only" route was not read-only.** It ran the host-facing decision path against the live
+  runtime, which appends audit entries and records decision events — opening the rule-test panel
+  wrote to the live decision feed. The pure path appends nothing, and `test/dry-run.spec.ts` now
+  asserts that a call the host path *would* record leaves the audit mirror at zero.
 
 ## [2.5.0] - 2026-09-17
 

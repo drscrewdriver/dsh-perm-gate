@@ -158,10 +158,46 @@ describe('runDryRun — read-only', () => {
     const { dir, file } = rulesFile(RULES)
     const result = runDryRun({ tool: 'webfetch', args: {}, rulesFile: file })
 
-    // The audit mirror is the throwaway runtime's own; nothing is persisted.
-    expect(result.audited).toBeLessThanOrEqual(1)
+    // No host view was requested, so nothing ran the side-effecting path.
+    expect(result.host).toBeUndefined()
     expect(existsSync(join(dir, 'events.jsonl'))).toBe(false)
     expect(readdirSync(dir)).toEqual(['rules.yml'])
+  })
+
+  it("leaves the runtime's audit mirror untouched", () => {
+    const { file } = rulesFile(RULES)
+    const gate = createDryRunRuntime({ rulesFile: file })
+    expect(gate.auditEntries.length).toBe(0)
+
+    // A call the host-facing path WOULD record an entry for (it denies).
+    const result = runDryRun({ tool: 'webfetch', args: {} }, gate)
+
+    expect(result.verdict).toBe('deny')
+    // The property that matters: a read-only caller running on a live runtime
+    // must not append a single audit entry or decision event.
+    expect(gate.auditEntries.length).toBe(0)
+  })
+
+  it('reports the policy verdict even when the session could not deliver an ask', () => {
+    const { file } = rulesFile(RULES)
+    // A runtime whose session cannot answer an ask (`approval: never`). The
+    // host-facing path degrades that ask to a passthrough and reports "allow";
+    // the policy answer is still "ask". Showing the degraded form in the panel
+    // states the opposite of the truth for every rule a human opens it to
+    // review — measured on the live host: `shell ls -la` reported `allow` while
+    // the rule layer said `ask`.
+    const gate = createDryRunRuntime({ rulesFile: file })
+    const internals = gate as unknown as { options: Record<string, unknown> }
+    internals.options = { ...internals.options, readApprovalPolicy: () => 'never' }
+
+    const result = runDryRun({ tool: 'unknown_tool', args: {}, hostView: true }, gate)
+
+    expect(result.verdict).toBe('ask')
+    expect(result.reason).toContain('no rule matched')
+    // The host view stays available and still disagrees — both are reported
+    // rather than one silently replacing the other.
+    expect(result.host?.verdict).toBe('allow')
+    expect(result.host?.reason).toBe('(default/passthrough)')
   })
 
   it('is repeatable — the same input yields the same report', () => {

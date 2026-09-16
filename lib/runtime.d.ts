@@ -1,4 +1,4 @@
-import { type AuditEntry } from './audit.js';
+import { type AuditEntry, type DecisionSource } from './audit.js';
 import { type PermGateConfig, type PermissiveStrategies } from './config.js';
 import type { ClassifierConfig } from './classifier.js';
 import { EventLog } from './events.js';
@@ -25,6 +25,17 @@ export interface RuleExplanation {
     readonly ruleIndex: number | undefined;
     readonly rule: CompiledRuleEntry | undefined;
     readonly defaultAction: RuleAction;
+}
+/**
+ * The pure policy outcome for one call, as reported by
+ * {@link PermGateRuntime.explainCall}. Same chain as the host-facing decision,
+ * minus every side effect and minus the session-state layers.
+ */
+export interface CallExplanation {
+    readonly action: RuleAction;
+    readonly reason: string;
+    readonly source: DecisionSource | 'deny-keyword' | 'cleanup-safe';
+    readonly ruleIndex?: number;
 }
 export interface ToolExecutionLike {
     readonly name: string;
@@ -443,6 +454,32 @@ export declare class PermGateRuntime {
      * the human seam.
      */
     decideExecution(exec: ToolExecutionLike): PreToolDecisionLike | undefined;
+    /**
+     * The **pure policy** outcome for one call: the same chain
+     * {@link decideExecution} runs, with every side effect and every session-state
+     * layer removed.
+     *
+     * Side effects removed — no audit entry, no event, no ask tracking, no call
+     * clearance, no learning. A rule-test panel must be able to run on every
+     * keystroke without writing to the live decision feed.
+     *
+     * Session-state layers removed — the preset stand-down and the
+     * `approval: never` ask degradation both describe a session a session-less
+     * caller does not have. Including them is not harmless: the degradation turns
+     * every "the rules would ask a human" into a reported **allow**, which is the
+     * opposite of the truth for exactly the rules someone opens the panel to
+     * review (measured on the live host: `shell ls -la` reported `allow` while the
+     * rule layer said `ask`).
+     *
+     * `reason` is never collapsed: "allow" has causes worth naming (a rule, a
+     * grant, cleanup-safety, the permissive default).
+     */
+    explainCall(exec: ToolExecutionLike): CallExplanation;
+    /**
+     * P0 hard-deny → P1 session grant → P2 rules → P4 ask, as a value. Shared by
+     * the host-facing decision and {@link explainCall} so the two cannot drift.
+     */
+    private rawPolicy;
     /**
      * Rule-layer explanation for one would-be call: what the `permissions` chain
      * decides on its own, before P0 hard-deny, P1 session grants, the P3
