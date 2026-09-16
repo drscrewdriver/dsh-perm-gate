@@ -1,3 +1,4 @@
+import type { RulesView } from './rules-view.js';
 /** One gate decision event. `kind` drives the client notice strip styling. */
 export interface GateEvent {
     /** Monotonic id (resumed from the file across restarts). */
@@ -136,6 +137,7 @@ export declare const REVERT_ROUTE = "/api/dsh-perm-gate/revert";
 export declare const SNAPSHOTS_STATS_ROUTE = "/api/dsh-perm-gate/snapshots-stats";
 export declare const SNAPSHOTS_CLEAR_ROUTE = "/api/dsh-perm-gate/snapshots-clear";
 export declare const DRY_RUN_ROUTE = "/api/dsh-perm-gate/dry-run";
+export declare const RULES_ROUTE = "/api/dsh-perm-gate/rules";
 /**
  * Register `GET /api/dsh-perm-gate/events?sessionId=&since=` on the webServer
  * service. Returns whether the route was registered (false when the service is
@@ -227,6 +229,27 @@ export interface DryRunRouteProvider {
  * Returns whether the route was registered.
  */
 export declare function registerDryRunRoute(server: unknown, provider: DryRunRouteProvider): (() => void) | undefined;
+/**
+ * The permissions-file face the settings card calls. `view` reads the rules file
+ * the gate is loading; it must never write it.
+ */
+export interface RulesRouteProvider {
+    view(): RulesView;
+}
+/**
+ * Register `GET /api/dsh-perm-gate/rules` — the panel's view of the permissions
+ * YAML the gate actually loads.
+ *
+ * **Read-only by construction**, like {@link registerDryRunRoute}: there is no
+ * write form. The card could already *edit* this file — the allowlist section
+ * appends and replaces patterns — but had no way to display it, so an operator
+ * changing rules through the panel could not see the document being changed.
+ * Reading must not be the risky act, and a viewer that could write would make
+ * "let me just look at the rules" a mutation.
+ *
+ * Returns whether the route was registered.
+ */
+export declare function registerRulesRoute(server: unknown, provider: RulesRouteProvider): (() => void) | undefined;
 /**
  * Register the learning-store routes on the webServer service:
  * `GET  /api/dsh-perm-gate/learning` → the store snapshot + live threshold,
