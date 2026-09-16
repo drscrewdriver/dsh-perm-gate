@@ -454,6 +454,7 @@ export const DIFF_ROUTE = '/api/dsh-perm-gate/diff'
 export const REVERT_ROUTE = '/api/dsh-perm-gate/revert'
 export const SNAPSHOTS_STATS_ROUTE = '/api/dsh-perm-gate/snapshots-stats'
 export const SNAPSHOTS_CLEAR_ROUTE = '/api/dsh-perm-gate/snapshots-clear'
+export const DRY_RUN_ROUTE = '/api/dsh-perm-gate/dry-run'
 
 /**
  * Register `GET /api/dsh-perm-gate/events?sessionId=&since=` on the webServer
@@ -794,6 +795,75 @@ export interface LearningRouteProvider {
   snapshot(): unknown
   threshold(): number
   reset(key: string, fp?: string): void
+}
+
+/** One rule-test request: the call to evaluate, nothing else. */
+export interface DryRunRequest {
+  readonly tool: string
+  readonly args: Record<string, unknown>
+  readonly permissive?: boolean
+}
+
+/**
+ * The rule-test face the settings card calls. `run` evaluates one call against
+ * the ruleset the gate currently has loaded and returns the report from
+ * `dryRunResult`. It must not change any state — see {@link registerDryRunRoute}.
+ */
+export interface DryRunRouteProvider {
+  run(request: DryRunRequest): unknown
+}
+
+/**
+ * Register `POST /api/dsh-perm-gate/dry-run` — the rule-test panel's endpoint.
+ * Body `{ tool, args?, permissive? }`; the response carries the effective
+ * verdict plus the rule layer's own answer.
+ *
+ * **Read-only by construction.** Unlike `/learning` (GET reads, POST resets), this
+ * route has no write form: it never edits rules, grants, learning state or the
+ * settings namespace, and the provider it delegates to evaluates against a
+ * throwaway or live read path only. Testing a rule must not be able to change
+ * the ruleset — otherwise "test it first" would itself be the risky action.
+ *
+ * Returns whether the route was registered.
+ */
+export function registerDryRunRoute(server: unknown, provider: DryRunRouteProvider): (() => void) | undefined {
+  const ws = routeServer(server)
+  if (ws === undefined) return undefined
+  return ws.register({
+    kind: 'exact',
+    path: DRY_RUN_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as RouteReq
+      const res = rawRes as RouteRes
+      if (req.method !== 'POST') {
+        json(res, 405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      void (async () => {
+        try {
+          const parsed = await readBody(req)
+          const tool = parsed.tool
+          if (typeof tool !== 'string' || tool === '') {
+            json(res, 400, { ok: false, error: 'missing tool' })
+            return
+          }
+          const args = parsed.args
+          if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {
+            json(res, 400, { ok: false, error: 'args must be an object' })
+            return
+          }
+          const result = provider.run({
+            tool,
+            args: (args ?? {}) as Record<string, unknown>,
+            ...(typeof parsed.permissive === 'boolean' ? { permissive: parsed.permissive } : {}),
+          })
+          json(res, 200, { ok: true, result })
+        } catch (e: unknown) {
+          json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) })
+        }
+      })()
+    },
+  })
 }
 
 /**

@@ -22,7 +22,15 @@ import { ArtifactRegistry } from './path.js'
 import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } from './risk.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
-import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
+import {
+  compileDocument,
+  documentHash,
+  extractPathCandidates,
+  parsePermissionsDocument,
+  type CompiledRuleEntry,
+  type CompiledRuleset,
+  type RuleAction,
+} from './rule.js'
 import { decomposeShellCommand } from './shell.js'
 import type { NetworkTarget } from './network.js'
 import { extractAgentCandidates } from './agent-identity.js'
@@ -34,6 +42,30 @@ import { resolveGatePresets } from './config.js'
 export interface PreToolDecisionLike {
   kind: 'deny' | 'ask'
   reason: string
+}
+
+/**
+ * The P2 rule chain's own verdict for one call, as reported by
+ * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
+ * verdict: a P0 hard-deny or a preset deny-keyword fires *before* this layer and
+ * never leaves a rule index behind, so a differing pair is information rather
+ * than a contradiction.
+ */
+export interface RuleExplanation {
+  readonly action: RuleAction
+  readonly reason: string
+  readonly ruleIndex: number | undefined
+  readonly rule: CompiledRuleEntry | undefined
+  readonly defaultAction: RuleAction
+}
+
+/** Locate a rule by its chain-wide index (deny entries first, then allow, then ask). */
+function findRuleByIndex(ruleset: CompiledRuleset, index: number): CompiledRuleEntry | undefined {
+  return (
+    ruleset.deny.find((entry) => entry.index === index) ??
+    ruleset.allow.find((entry) => entry.index === index) ??
+    ruleset.ask.find((entry) => entry.index === index)
+  )
 }
 
 export interface ToolExecutionLike {
@@ -1235,6 +1267,29 @@ export class PermGateRuntime {
     // rather than prompted. Reached only after the two passthrough early-returns.
     this.clearCall(exec, decision.reason, source, source)
     return undefined
+  }
+
+  /**
+   * Rule-layer explanation for one would-be call: what the `permissions` chain
+   * decides on its own, before P0 hard-deny, P1 session grants, the P3
+   * classifier and the P4 ask ever get a say.
+   *
+   * This is the read-only half of a dry-run. It appends nothing to the audit
+   * mirror, records no event, mints no grant and touches no learning store, so a
+   * "rule test" panel may call it on every keystroke without leaving a trace in
+   * the decision feed. It answers a narrower question than
+   * {@link decideExecution} and says so: `ruleIndex` identifies a rule in the
+   * chain, which only this layer can attribute.
+   */
+  explainRules(exec: ToolExecutionLike): RuleExplanation {
+    const decision = decideRules(this.ruleset, this.ctxFor(exec))
+    return {
+      action: decision.action,
+      reason: decision.reason,
+      ruleIndex: decision.ruleIndex,
+      rule: decision.ruleIndex === undefined ? undefined : findRuleByIndex(this.ruleset, decision.ruleIndex),
+      defaultAction: this.ruleset.defaultAction,
+    }
   }
 
   /**

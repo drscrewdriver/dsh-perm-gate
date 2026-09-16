@@ -5,12 +5,26 @@ import { EventLog } from './events.js';
 import { RiskLearning } from './learning.js';
 import { type RiskRequest, type RiskVerdict } from './risk.js';
 import { type HostLlmLike, type HostModelSelection } from './host-llm.js';
-import { type CompiledRuleset } from './rule.js';
+import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import type { NetworkTarget } from './network.js';
 import { type SessionEventLike } from './preset.js';
 export interface PreToolDecisionLike {
     kind: 'deny' | 'ask';
     reason: string;
+}
+/**
+ * The P2 rule chain's own verdict for one call, as reported by
+ * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
+ * verdict: a P0 hard-deny or a preset deny-keyword fires *before* this layer and
+ * never leaves a rule index behind, so a differing pair is information rather
+ * than a contradiction.
+ */
+export interface RuleExplanation {
+    readonly action: RuleAction;
+    readonly reason: string;
+    readonly ruleIndex: number | undefined;
+    readonly rule: CompiledRuleEntry | undefined;
+    readonly defaultAction: RuleAction;
 }
 export interface ToolExecutionLike {
     readonly name: string;
@@ -429,6 +443,19 @@ export declare class PermGateRuntime {
      * the human seam.
      */
     decideExecution(exec: ToolExecutionLike): PreToolDecisionLike | undefined;
+    /**
+     * Rule-layer explanation for one would-be call: what the `permissions` chain
+     * decides on its own, before P0 hard-deny, P1 session grants, the P3
+     * classifier and the P4 ask ever get a say.
+     *
+     * This is the read-only half of a dry-run. It appends nothing to the audit
+     * mirror, records no event, mints no grant and touches no learning store, so a
+     * "rule test" panel may call it on every keystroke without leaving a trace in
+     * the decision feed. It answers a narrower question than
+     * {@link decideExecution} and says so: `ruleIndex` identifies a rule in the
+     * chain, which only this layer can attribute.
+     */
+    explainRules(exec: ToolExecutionLike): RuleExplanation;
     /**
      * Apply the Permissive tier to a raw decision. Hard-deny and minted-grant
      * outcomes are never touched (fail-closed). `alwaysConfirm` escalates a

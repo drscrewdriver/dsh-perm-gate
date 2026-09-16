@@ -51,16 +51,17 @@ dsh-perm-gate/
 │   ├── events.ts                   837 行  # 决策事件 JSONL + snapshot/diff/revert + 9 条 HTTP 路由注册
 │   ├── audit.ts                     64 行  # 审计条目 + MemoryAuditMirror
 │   ├── risk 配套: deny-defaults.ts  20 行 · llm-presets.ts 22 行 · receiver-info.ts 112 行
-│   ├── cli.ts                       85 行  # 独立 dry-run CLI
+│   ├── cli.ts                       77 行  # 独立 dry-run CLI（薄壳，逻辑在 dry-run.ts）
+│   ├── dry-run.ts                  164 行  # 规则测试的共享判定层 + 只读规则层报告
 │   └── client/                             # browser 半（tsdown 打包为 lib/client.js）
-│       ├── card.tsx                918 行  # 自动审查设置卡（主 UI：四策略 + 网络开关 + 学习/阈值）
+│       ├── card.tsx               1073 行  # 自动审查设置卡（主 UI：四策略 + 网络开关 + 学习/阈值 + 规则测试）
 │       ├── history.tsx             633 行  # 审批历史视图（时间线 + diff + snapshot）
-│       ├── locales.ts              483 行  # 四语字典，zh 为键集源，**115 key**
+│       ├── locales.ts              564 行  # 四语字典，zh 为键集源，**135 key**
 │       ├── feed.ts                 257 行  # Feed 组件 + session 解析 + diff/revert 网络层
 │       ├── notice.tsx              154 行  # 通知条（conversation.input.dock）
 │       ├── sediment.tsx            141 行  # 沉淀学习可视化子组件
 │       └── index.ts                128 行  # locales 注册 + 3 个 slot 注册
-├── test/                                   # vitest：43 文件 / 491 测试
+├── test/                                   # vitest：45 文件 / 511 测试
 ├── scripts/
 │   ├── patch-permission-glyph.mjs          # opt-in：为 permissive-full 补 composer 图标（含 bin）
 │   └── verify-line.mjs                     # 双线校验
@@ -105,7 +106,7 @@ dsh-perm-gate/
 | `conversation.input.dock` | `dsh-perm-gate.notice` | `NoticeStrip` | 30 |
 | `conversation.view` | `dsh-perm-gate.history` | `HistoryView` | 20 |
 
-### 2.4 HTTP 端点（9 条，全部 `/api/dsh-perm-gate/*`）
+### 2.4 HTTP 端点（10 条，全部 `/api/dsh-perm-gate/*`）
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
@@ -118,8 +119,13 @@ dsh-perm-gate/
 | `POST` | `/health` | health test |
 | `GET` | `/receiver` | llmAssist receiver 元数据 |
 | `GET` | `/network` | 网络诊断（模式 / 代理端口 / 绑定状态） |
+| `POST` | `/dry-run` | **只读**规则测试：`{tool, args?, permissive?}` → 裁决 + 规则层命中 |
 
-定义集中在 `src/events.ts:448-456`；注册入口 `registerEventsRoute` / `registerReviewRoutes` / `registerLearningRoute` / `registerHealthRoute` / `registerNetworkRoute` / `registerReceiverRoute`。
+定义集中在 `src/events.ts`；注册入口 `registerEventsRoute` / `registerReviewRoutes` / `registerLearningRoute` / `registerHealthRoute` / `registerNetworkRoute` / `registerReceiverRoute` / **`registerDryRunRoute`**。
+
+> `/dry-run` **没有写形态**：它不碰规则、授权、学习状态与 settings 命名空间，未知 body 字段直接丢弃。
+> 测试规则的动作本身不能改变规则。注意宿主对**所有 POST** 统一返回 401（未带凭据时），
+> 因此用命令行探测该路由**无法区分「路由不存在」与「未鉴权」**——浏览器内设置卡的 fetch 才是有效路径。
 
 ### 2.5 水闸事件
 
@@ -180,7 +186,7 @@ cd E:\test\rewrite-agently\mine-dsh-plugins\dsh-perm-gate
 npm install
 npm run typecheck   # tsc --noEmit + tsc -p tsconfig.client.json --noEmit
 npm run lint        # eslint src test scripts tsdown.config.ts eslint.config.mjs
-npm test            # vitest run —— 43 文件 / 491 用例
+npm test            # vitest run —— 45 文件 / 511 用例
 npm run build       # tsc -p tsconfig.build.json && tsdown → lib/
 ```
 
@@ -201,11 +207,13 @@ npm test                              # 全量
 npx vitest run test/proxy-errors.spec.ts   # 单文件
 ```
 
-43 个测试文件，按主题分：
+45 个测试文件，按主题分：
 
 | 主题 | 文件 |
 |---|---|
 | P0/P1/P2 决策 | `engine` · `evaluate` · `rule` · `rule-dims` · `compiler` · `shadow` · `shell` |
+| 规则链 / 维度 | `rule-chain` · `branch-dimension` · `pipeline-dimension` |
+| 规则测试（dry-run） | `dry-run`（判定层） · `dry-run-route`（只读路由契约） |
 | 门控运行时 | `runtime` · `runtime-risk` · `permissive` · `pre-execute` · `preset-scope` · `session-resolution` |
 | 网络 | `network` · `network-approval` · `network-lifecycle` · `proxy-errors` |
 | 命令解析 | `command-parsers` · `git-protected-push` |
@@ -235,15 +243,18 @@ npx vitest run test/proxy-errors.spec.ts   # 单文件
 | `AGENTS.md` | 开发铁律 | 持续维护 |
 | `tasks.md` / `findings.md` / `checklist.md`（仓库根） | 2026-09-06 建线记录 | **已归档**，见文件顶部指针 |
 
-> 兼容线：`compat/0.1.5` = DSH 0.1.5 专用线（3.x 系列），由主线经 PR 同步。当前该线落后主线 33 提交，且**未承诺 0.1.5 100% 可用**。
+> 兼容线：`compat/0.1.5` = DSH 0.1.5 专用线（3.x 系列），由主线经 PR 同步。当前该线落后主线，且**未承诺 0.1.5 100% 可用**。
+> 2026-09-17：其 `lib/` 被 `.gitignore` 排除、导致 `github:` 安装得到空包的问题**已修复**（`91d0752`，产物入库，
+> 全新 clone 的 `lib/` = 48 文件；该分支 `npm test` = 30 文件 / 279 用例全绿）。宿主兼容性仍**未验证**。
 
 ---
 
 ## 8. 待办 / 路线图
 
 ### 近期（有明确规划）
-- **规则测试 UI** —— 把 CLI dry-run 接到设置卡，输入命令即时看命中结果
-- **`compat/0.1.5` 收口** —— 落后主线 33 提交；其 `lib/` 被 `.gitignore` 排除导致无法 `github:` 安装
+- **`compat/0.1.5` 收口** —— 落后主线；`lib/` 无法 `github:` 安装的问题已修（`91d0752`），宿主兼容性待验
+- **规则链的绝对路径缺陷** —— `findChainEntries` 把 `rulesFile` 直接 `join` 到每个目录上，而 `resolveRulesFile` 永远给绝对路径，
+  于是 `searchUp: true` 下**静默得到空规则集**。文档宣传的「多文件规则链」在现有接线方式下不可用（待裁定）
 
 ### 中期
 - 可视化规则编辑器（`docs/ui-gap-analysis-and-branch-permissions.md` Phase 1–3）
@@ -270,5 +281,5 @@ npx vitest run test/proxy-errors.spec.ts   # 单文件
 
 ---
 
-*初版：2026-09-09 · 本次重写：2026-09-17（版本 2.0.0 → 2.4.1；用例 23/199 → 43/491；补网络执行面、热重载、6 扩展维度、命令分类器）*
+*初版：2026-09-09 · 本次重写：2026-09-17（版本 2.0.0 → 2.6.0；用例 23/199 → 45/511；补网络执行面、热重载、11 维度、命令分类器、规则测试 UI）*
 *参照标准：`improve-dsh-plugins/02-handover-markdown-pattern.md`*

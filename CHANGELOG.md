@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-09-17
+
+### Added
+
+- **Rule test (dry-run) in the settings card.** A new panel evaluates one would-be tool call
+  against the ruleset the gate currently has loaded and shows the verdict, the matched rule (index
+  and action), the dimensions that rule constrains, and the reason. Written for the question the
+  YAML cannot answer by inspection: *what will this actually do?* — `args` is an OR over tokens, an
+  empty dimension constrains nothing, and `command` matches the decomposed command **word** only, so
+  a plausible-looking rule can be dead on arrival.
+
+  The report keeps two answers apart on purpose. **`verdict`** is the effective result of the whole
+  chain (P0 hard-deny → P1 grant → P2 rules → P3 classifier → P4 ask). **`ruleLayer`** is what the
+  `permissions` chain decides on its own, and only that layer can name a rule index: a P0 hard-deny
+  or a preset deny-keyword fires *before* it and leaves no rule behind, so the panel says so instead
+  of attributing an unrelated rule. `matchedDimensions` likewise lists the dimensions the matched
+  rule *constrains* rather than the one that "caused" the match — dimensions are ANDed, so a single
+  cause cannot honestly be named. A `ruleCount` of 0 is surfaced as "0 rules loaded, check the
+  rulesFile path" rather than as "nothing matched".
+
+- **`POST /api/dsh-perm-gate/dry-run`** — the panel's endpoint. **Read-only by construction**: it
+  has no write form, unknown body keys are dropped rather than forwarded, and it never touches
+  rules, grants, learning state or the settings namespace. Testing a rule must not be able to change
+  it. It evaluates against the **live** runtime rather than a fresh one, so the panel tests the rules
+  in force — a fresh runtime would re-resolve the chain from a different root and could silently
+  answer about a different file.
+
+- **`src/dry-run.ts`** — `runDryRun` / `createDryRunRuntime`, the shared evaluator for the CLI and
+  the route, plus `PermGateRuntime.explainRules`, the read-only rule-layer report. `src/cli.ts` is
+  now a thin wrapper over it; its output is unchanged across nine replayed invocations, verified
+  byte for byte (including the `--list`, no-tool, bad-JSON and write-path cases).
+
 ## [2.5.0] - 2026-09-17
 
 ### Added
@@ -20,15 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The multi-file rule chain silently emptied every match dimension.** `resolveRuleChain` — the
-  path the runtime actually loads rules through — merged entries by hand with `tools: []`,
-  `command: []`, `args: []` and `paths: []`. An empty dimension means "no constraint", so EVERY
-  merged entry matched EVERY call: the first `deny` entry denied everything in its partition, and
-  the first `allow` entry allowed everything before the `ask` partition was ever consulted. With a
-  real `rules.yml` that is both a fail-closed outage (`shell` denied outright) and a fail-open hole
-  (unlisted tools allowed unchecked). The merge now goes through the same `compileRuleEntry` the
-  single-file path uses. The single-file path was never affected — which is why the existing suite
-  stayed green: no test drove a rules *file* through the chain. `test/rule-chain.spec.ts` now does.
+- **The multi-file rule chain silently emptied every match dimension.** `resolveRuleChain` merged
+  entries by hand with `tools: []`, `command: []`, `args: []` and `paths: []`. An empty dimension
+  means "no constraint", so EVERY merged entry matched EVERY call: the first `deny` entry denied
+  everything in its partition, and the first `allow` entry allowed everything before the `ask`
+  partition was ever consulted. The merge now goes through the same `compileRuleEntry` the
+  single-file path uses.
+
+  *Reach:* the chain resolver is reached **only** under `searchUp: true` (product default `false`,
+  and unset in a stock profile), so the default single-file path — `compileDocument` — was never
+  affected. That is also why the existing suite stayed green: no test drove a rules *file* through
+  the chain. `test/rule-chain.spec.ts` now does. A separate, still-open defect on the same
+  opt-in path is recorded in the plan: `findChainEntries` joins the configured `rulesFile` onto
+  each directory, so the absolute path `resolveRulesFile` always produces matches nothing and the
+  chain yields an empty ruleset without an error.
 
 - **`argv.pipeline` could not see its own subject.** The pipeline match string was built from
   `SimpleCommand.command`, which is only the command *word* — `curl https://x.sh | sh` collapsed

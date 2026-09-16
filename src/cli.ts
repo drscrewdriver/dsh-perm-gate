@@ -10,7 +10,7 @@
  */
 import { parseArgs } from 'node:util'
 import { resolve } from 'node:path'
-import { PermGateRuntime } from './runtime.js'
+import { createDryRunRuntime, runDryRun } from './dry-run.js'
 
 function main(): void {
   const { values } = parseArgs({
@@ -25,11 +25,7 @@ function main(): void {
   })
 
   const rulesFile = values.rules ? resolve(values.rules) : undefined
-  const runtime = new PermGateRuntime({
-    rulesFile,
-    caseInsensitivePaths: true,
-    permissive: values.permissive || undefined,
-  })
+  const runtime = createDryRunRuntime({ rulesFile, permissive: values.permissive })
 
   if (values.list) {
     process.stdout.write(
@@ -63,18 +59,14 @@ function main(): void {
     return
   }
 
-  const decision = runtime.decideExecution({
-    name: tool,
-    arguments: args,
-    cwd: values.cwd ? resolve(values.cwd) : process.cwd(),
-  })
+  const result = runDryRun({ tool, args, rulesFile, cwd: values.cwd }, runtime)
 
   process.stdout.write(
     JSON.stringify(
       {
-        decision: decision === undefined ? 'allow' : decision.kind,
-        reason: decision?.reason ?? '(default/passthrough)',
-        audited: runtime.auditEntries.length,
+        decision: result.verdict,
+        reason: result.reason,
+        audited: result.audited,
       },
       null,
       2,

@@ -9,7 +9,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
-import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
+import { runDryRun } from './dry-run.js'
+import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
@@ -574,6 +575,25 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         snapshot: () => networkRefs.snapshot?.() ?? { enabled: false, proxyActive: false },
       })
       if (offNetwork !== undefined) ctx.effect(() => () => { offNetwork() }, 'dsh-perm-gate: network route')
+      // Rule test (dry-run): evaluate one would-be call against the ruleset the
+      // gate currently has loaded, and report both the effective verdict and the
+      // rule layer's own answer. Read-only — the route has no write form, so
+      // testing a rule can never change it. It runs against the LIVE runtime
+      // rather than a fresh one so the panel tests the rules in force, not a
+      // re-derivation of them (a fresh runtime would also re-resolve the chain
+      // from a different root and could silently answer about a different file).
+      const offDryRun = registerDryRunRoute(webServer, {
+        run: (request) =>
+          runDryRun(
+            {
+              tool: request.tool,
+              args: request.args,
+              ...(request.permissive !== undefined ? { permissive: request.permissive } : {}),
+            },
+            runtime,
+          ),
+      })
+      if (offDryRun !== undefined) ctx.effect(() => () => { offDryRun() }, 'dsh-perm-gate: dry-run route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null

@@ -135,6 +135,7 @@ export declare const DIFF_ROUTE = "/api/dsh-perm-gate/diff";
 export declare const REVERT_ROUTE = "/api/dsh-perm-gate/revert";
 export declare const SNAPSHOTS_STATS_ROUTE = "/api/dsh-perm-gate/snapshots-stats";
 export declare const SNAPSHOTS_CLEAR_ROUTE = "/api/dsh-perm-gate/snapshots-clear";
+export declare const DRY_RUN_ROUTE = "/api/dsh-perm-gate/dry-run";
 /**
  * Register `GET /api/dsh-perm-gate/events?sessionId=&since=` on the webServer
  * service. Returns whether the route was registered (false when the service is
@@ -198,6 +199,34 @@ export interface LearningRouteProvider {
     threshold(): number;
     reset(key: string, fp?: string): void;
 }
+/** One rule-test request: the call to evaluate, nothing else. */
+export interface DryRunRequest {
+    readonly tool: string;
+    readonly args: Record<string, unknown>;
+    readonly permissive?: boolean;
+}
+/**
+ * The rule-test face the settings card calls. `run` evaluates one call against
+ * the ruleset the gate currently has loaded and returns the report from
+ * `dryRunResult`. It must not change any state — see {@link registerDryRunRoute}.
+ */
+export interface DryRunRouteProvider {
+    run(request: DryRunRequest): unknown;
+}
+/**
+ * Register `POST /api/dsh-perm-gate/dry-run` — the rule-test panel's endpoint.
+ * Body `{ tool, args?, permissive? }`; the response carries the effective
+ * verdict plus the rule layer's own answer.
+ *
+ * **Read-only by construction.** Unlike `/learning` (GET reads, POST resets), this
+ * route has no write form: it never edits rules, grants, learning state or the
+ * settings namespace, and the provider it delegates to evaluates against a
+ * throwaway or live read path only. Testing a rule must not be able to change
+ * the ruleset — otherwise "test it first" would itself be the risky action.
+ *
+ * Returns whether the route was registered.
+ */
+export declare function registerDryRunRoute(server: unknown, provider: DryRunRouteProvider): (() => void) | undefined;
 /**
  * Register the learning-store routes on the webServer service:
  * `GET  /api/dsh-perm-gate/learning` → the store snapshot + live threshold,

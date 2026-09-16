@@ -42,7 +42,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.5.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.6.0** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -407,6 +407,21 @@ The tier is also adjustable at runtime from **Settings → Plugins → 自动审
 `permissive`, and four toggles edit the backend `permissiveStrategies`. The host reads the
 namespace live, so a change applies to the next tool call without a restart. This is an
 independent approval class, NOT a generic "auto-approval" mode.
+
+### Rule test (dry-run)
+
+The same page carries a **Rule test** panel: type a tool name and a command, press Test, and the
+gate judges that call against the ruleset it currently has loaded — without running anything and
+without writing any rule. You get the verdict, the matched rule (index and action), the dimensions
+that rule constrains, and the reason.
+
+It reports the effective verdict (the whole P0 → P1 → P2 → P3 → P4 chain) *and* the rule layer's own
+answer, which are not the same thing: a P0 hard-deny or a preset deny-keyword fires before the rule
+chain and leaves no rule index behind, so the panel says "no rule matched" rather than naming an
+unrelated rule. A `0 rules loaded` note means the `rulesFile` path resolved to nothing.
+
+The panel talks to `POST /api/dsh-perm-gate/dry-run`, which is **read-only by construction** — it
+has no write form at all, so testing a rule can never change it.
 
 ## CLI
 
