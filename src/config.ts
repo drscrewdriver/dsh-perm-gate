@@ -316,7 +316,7 @@ export const Config: z<PermGateConfig> = z.object({
   networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000),
   networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000),
   // Hot reload (Phase 3)
-  watch: z.boolean().default(true),
+  watch: z.boolean().default(false),
   watchDebounceMs: z.number().min(50).max(5000).default(300),
 })
 
