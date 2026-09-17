@@ -6,9 +6,9 @@
  * and a stray default would discard the metadata).
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
@@ -25,9 +25,13 @@ import { RuleWatcher } from './watch.js'
 // The DSH framework (or other plugins) may scan dataDir during plugin
 // registration — before our apply() entry point runs. If the directory
 // is missing at that point, the scan throws and the plugin (or the
-// entire profile) fails to load. This must be a module-level side
-// effect, not deferred to apply().
-try { mkdirSync(resolveDataDir(), { recursive: true }) } catch { /* best-effort */ }
+// entire profile) fails to load.
+//
+// This is a belt-and-suspenders approach:
+//   1. Module-level: ensure dataDir exists at import time (earliest possible)
+//   2. Read paths: check dataDirReady() → return empty defaults if missing
+//   3. Write paths: call ensureDataDir() before first write
+ensureDataDir(resolveDataDir())
 
 export const name = 'dsh-perm-gate'
 /**

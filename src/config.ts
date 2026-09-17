@@ -3,6 +3,7 @@
  * loader validates and fills defaults before `apply`. Invalid values fail loud.
  */
 import { homedir } from 'node:os'
+import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
@@ -24,6 +25,39 @@ export function resolveDshHome(configured?: string): string {
 /** This plugin's data directory (`<dshHome>/perm-gate`), always defined. */
 export function resolveDataDir(configured?: string): string {
   return join(resolveDshHome(configured), 'perm-gate')
+}
+
+/**
+ * Lazily ensure the data directory exists. Safe to call repeatedly —
+ * `mkdirSync({recursive:true})` is a no-op when the directory already
+ * exists. Returns `true` if the directory is now available, `false`
+ * if creation failed (caller should degrade to empty defaults).
+ *
+ * Used by every write path. Read paths should call `dataDirReady()`
+ * instead to avoid creating the directory as a side effect of reading.
+ */
+let _dataDirReady = false
+export function ensureDataDir(dataDir: string): boolean {
+  if (_dataDirReady) return true
+  try {
+    mkdirSync(dataDir, { recursive: true })
+    _dataDirReady = true
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Check whether the data directory exists without creating it. */
+export function dataDirReady(dataDir: string): boolean {
+  if (_dataDirReady) return true
+  try {
+    statSync(dataDir)
+    _dataDirReady = true
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

@@ -14,6 +14,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { ensureDataDir } from './config.js'
 import type { RulesView } from './rules-view.js'
 
 /** One gate decision event. `kind` drives the client notice strip styling. */
