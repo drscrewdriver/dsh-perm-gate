@@ -100,6 +100,13 @@ export declare class EventLog {
     /** Snapshot directory; `undefined` disables diff/revert support. */
     private readonly snapshotsDir;
     private seq;
+    /**
+     * Live subscribers, notified once per successfully appended event. They exist
+     * so a browser half can be pushed to instead of re-reading the whole JSONL on
+     * a timer; a subscriber that throws is dropped from the notification only, it
+     * never costs the append its event.
+     */
+    private readonly listeners;
     constructor(
     /** JSONL path; `undefined` disables event recording entirely. */
     filePath: string | undefined, now?: () => number, 
@@ -107,6 +114,15 @@ export declare class EventLog {
     snapshotsDir?: string | undefined);
     /** Append one event; returns it, or undefined when recording is disabled/failed. */
     append(input: GateEventInput): GateEvent | undefined;
+    /**
+     * Watch events as they are appended. The listener is called once per event,
+     * after the JSONL write, from inside `append` — so it runs on the gate's own
+     * decision path and must stay cheap and non-throwing.
+     *
+     * @param listener - receives each appended event.
+     * @returns the unsubscribe.
+     */
+    subscribe(listener: (event: GateEvent) => void): () => void;
     /** Events with `id > since`, optionally filtered to one session. */
     query({ sessionId, since }?: {
         sessionId?: string;
@@ -128,6 +144,7 @@ export interface WebServerLike {
     }): () => void;
 }
 export declare const EVENTS_ROUTE = "/api/dsh-perm-gate/events";
+export declare const STREAM_ROUTE = "/api/dsh-perm-gate/stream";
 export declare const LEARNING_ROUTE = "/api/dsh-perm-gate/learning";
 export declare const HEALTH_ROUTE = "/api/dsh-perm-gate/health";
 export declare const NETWORK_ROUTE = "/api/dsh-perm-gate/network";
@@ -144,6 +161,24 @@ export declare const RULES_ROUTE = "/api/dsh-perm-gate/rules";
  * unavailable — the host keeps running, only the HTTP API is missing).
  */
 export declare function registerEventsRoute(server: unknown, log: EventLog): (() => void) | undefined;
+/**
+ * Register `GET /api/dsh-perm-gate/stream?sessionId=&since=` on the webServer
+ * service: the same events {@link registerEventsRoute} serves, but pushed.
+ *
+ * The response is `text/event-stream`. On connect the backlog after `since` is
+ * written as one `data: {"events":[…],"backlog":true}` frame, then each event
+ * appended from that moment on is written as it lands as `data: {"events":[…]}` —
+ * so the browser half is never forced to re-read the whole JSONL on a timer.
+ * `: ping` comments hold the connection open while nothing is being decided.
+ *
+ * The session filter applies to both the backlog and the live pushes. Nothing
+ * is buffered for a disconnected client: it reconnects with its own cursor and
+ * the backlog frame restores it.
+ *
+ * Returns the unregister, or `undefined` when the webServer service is
+ * unavailable — the host keeps running, only the HTTP API is missing.
+ */
+export declare function registerStreamRoute(server: unknown, log: EventLog): (() => void) | undefined;
 /** Delivers a revert instruction into the conversation (see index.ts wiring). */
 export type SessionSender = (sessionId: string, content: string) => Promise<{
     ok: boolean;

@@ -12,7 +12,7 @@ import { parse } from 'yaml'
 import { Config, RULES_NAMESPACE, RulesSchema, isRulesConfigured, readRulesFromSettings, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { appendAllowToSettings, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
 import { runDryRun } from './dry-run.js'
-import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
+import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, registerStreamRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
@@ -620,6 +620,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     if (webServer !== undefined && runtime.eventLog !== undefined) {
       const offEvents = registerEventsRoute(webServer, runtime.eventLog)
       if (offEvents !== undefined) ctx.effect(() => () => { offEvents() }, 'dsh-perm-gate: events route')
+      // Push plane: the browser half follows decisions over one SSE connection
+      // instead of re-reading the event log on a timer.
+      const offStream = registerStreamRoute(webServer, runtime.eventLog)
+      if (offStream !== undefined) ctx.effect(() => () => { offStream() }, 'dsh-perm-gate: stream route')
     }
     // Review-page plane (diff / revert / snapshot stats / snapshot clear): the
     // approval-history view's file chips and snapshot bar drive these.

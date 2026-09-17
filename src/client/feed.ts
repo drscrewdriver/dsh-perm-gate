@@ -67,6 +67,120 @@ export async function fetchEvents(sessionId: string, since: number): Promise<Gat
   return Array.isArray(body.events) ? (body.events as GateEvent[]) : []
 }
 
+/** The host's push route (see src/events.ts); the browser half prefers it to polling. */
+export const STREAM_ROUTE = '/api/dsh-perm-gate/stream'
+
+/** Stream attempts before the route is written off as unsupported and polling takes over. */
+const STREAM_RETRIES = 3
+const STREAM_RETRY_MS = 3_000
+/**
+ * Degraded path only: a host predating the stream route still gets a servable
+ * strip. Deliberately slower than the old 2 s tick — it now also pauses while
+ * the tab is hidden, so a backgrounded page costs nothing.
+ */
+const FALLBACK_POLL_MS = 5_000
+
+/** One delivery of the feed: either the connect-time replay, or decisions as they land. */
+export interface GateFeedBatch {
+  readonly events: readonly GateEvent[]
+  /**
+   * True for a connect-time catch-up batch (the stream's backlog, or the
+   * fallback's first poll). Callers sync their cursor with it but must not
+   * surface it — replaying a session's history as fresh notices is noise.
+   */
+  readonly backlog: boolean
+}
+
+/**
+ * Follow one session's decision feed until the returned close is called.
+ *
+ * Prefers the host's `text/event-stream` route, which pushes each decision as
+ * the gate appends it — no timer, no repeated re-read of the event log. When
+ * the stream is unavailable (an older host, a proxy that buffers it) this
+ * degrades to polling the JSON route, gated on page visibility.
+ *
+ * @param sessionId - the session whose decisions to follow.
+ * @param getSince - cursor supplier, read at connect and on every fallback poll.
+ * @param onBatch - receives the backlog, then live batches.
+ * @returns the close: ends the stream and any fallback timer.
+ */
+export function followEvents(
+  sessionId: string,
+  getSince: () => number,
+  onBatch: (batch: GateFeedBatch) => void,
+): () => void {
+  let closed = false
+  let source: EventSource | null = null
+  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let retries = 0
+  let polls = 0
+
+  const stopPolling = (): void => {
+    if (pollTimer === null) return
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+
+  const poll = (): void => {
+    if (closed) return
+    // A hidden tab does not need the strip kept warm; the next visible tick catches up.
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    const backlog = polls === 0
+    polls += 1
+    fetchEvents(sessionId, getSince())
+      .then((events) => { if (!closed) onBatch({ events, backlog }) })
+      .catch(() => {}) // route missing / transient failure: stay quiet
+  }
+
+  const startPolling = (): void => {
+    if (closed || pollTimer !== null) return
+    polls = 0
+    poll()
+    pollTimer = setInterval(poll, FALLBACK_POLL_MS)
+  }
+
+  const connect = (): void => {
+    if (closed) return
+    const query = `?sessionId=${encodeURIComponent(sessionId)}&since=${getSince()}`
+    const next = new EventSource(`${STREAM_ROUTE}${query}`)
+    source = next
+    next.onopen = () => {
+      retries = 0
+      stopPolling()
+    }
+    next.onmessage = (message: MessageEvent<string>) => {
+      try {
+        const body = JSON.parse(message.data) as { events?: unknown; backlog?: unknown }
+        if (Array.isArray(body.events)) {
+          onBatch({ events: body.events as GateEvent[], backlog: body.backlog === true })
+        }
+      } catch {
+        // an unreadable frame is dropped; the next decision still arrives
+      }
+    }
+    next.onerror = () => {
+      if (source === next) source = null
+      next.close()
+      if (closed) return
+      retries += 1
+      // The route may be missing or the connection may have dropped: poll meanwhile,
+      // and retry the stream a bounded number of times before settling for polling.
+      startPolling()
+      if (retries <= STREAM_RETRIES) setTimeout(connect, STREAM_RETRY_MS)
+    }
+  }
+
+  if (typeof EventSource === 'undefined') startPolling()
+  else connect()
+
+  return () => {
+    closed = true
+    source?.close()
+    source = null
+    stopPolling()
+  }
+}
+
 /** Resolve the current session id from slot props (top level, nested, or hook). */
 export function resolveSessionId(props: FeedSlotsProps | undefined): string | null {
   const direct = props?.sessionId

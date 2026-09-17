@@ -8,7 +8,7 @@
  * learning.json store the gate reads); actions POST back. Best-effort: a
  * missing route renders the empty state, never an error.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -24,8 +24,6 @@ interface LearningBody {
   readonly confirmed?: Record<string, number>
   readonly samples?: Record<string, LearningSample[]>
 }
-
-const POLL_MS = 5_000
 
 const itemStyle: CSSProperties = {
   display: 'flex',
@@ -62,6 +60,8 @@ export type SedimentSectionProps = PropsLocale<'dsh-perm-gate'>
 
 export function SedimentSection({ t }: SedimentSectionProps): JSX.Element | null {
   const [body, setBody] = useState<LearningBody | null>(null)
+  /** Latest loader, so a mutation can refresh the list without owning the fetch. */
+  const reloadRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     let alive = true
@@ -71,11 +71,21 @@ export function SedimentSection({ t }: SedimentSectionProps): JSX.Element | null
         .then((data: LearningBody) => { if (alive) setBody(data) })
         .catch(() => { if (alive) setBody({}) })
     }
+    reloadRef.current = load
     load()
-    const timer = setInterval(load, POLL_MS)
+    // Deliberately no timer: the store only moves when this section mutates it or
+    // the gate confirms a sample mid-session, so loading on mount, after every
+    // action, and on return to the page covers it at zero idle cost.
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') load()
+    }
+    window.addEventListener('focus', onVisible)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       alive = false
-      clearInterval(timer)
+      reloadRef.current = () => {}
+      window.removeEventListener('focus', onVisible)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
 
@@ -84,7 +94,7 @@ export function SedimentSection({ t }: SedimentSectionProps): JSX.Element | null
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
-    }).catch(() => {})
+    }).then(() => { reloadRef.current() }).catch(() => {})
   }
 
   const threshold = body?.threshold ?? 3

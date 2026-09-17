@@ -2,7 +2,8 @@
  * Approval-history view — the `conversation.view` face of dsh-perm-gate,
  * following the session-scoped review-page pattern demonstrated by
  * dsh-approval-gate: a timeline of every gate decision in the current
- * conversation, newest first, refreshed by polling.
+ * conversation, newest first, loaded once and then extended by the host's push
+ * feed (see `followEvents`).
  *
  * Beyond the decision timeline this view owns the review data plane: a snapshot
  * inventory bar (with session/all clearing), per-event file chips, and a diff
@@ -24,6 +25,7 @@ import {
   fetchEvents,
   fetchSnapshotStats,
   fmtBytes,
+  followEvents,
   presentation,
   resolveSessionId,
   sendRevert,
@@ -32,11 +34,10 @@ import {
   type DiffResponse,
   type FeedSlotsProps,
   type GateEvent,
+  type GateFeedBatch,
   type SnapshotStats,
 } from './feed.ts'
 import type { PermissiveKey } from './locales.ts'
-
-const POLL_MS = 5_000
 
 /** Tag text per event kind, keyed into the plugin dictionary. */
 const TAG_KEYS = {
@@ -434,31 +435,52 @@ export function HistoryView({ t, ...props }: HistoryViewProps): JSX.Element | nu
     setEvents(null)
     setError(null)
     setStats(null)
-    let alive = true
-    // Full refetch per tick (the reference's approach): the feed is small and
-    // this keeps the view self-healing around missed polls.
-    const load = (): void => {
-      void fetchSnapshotStats(sessionId).then((next) => { if (alive) setStats(next) })
-      if (sessionId === null) {
-        setEvents([])
-        return
-      }
-      fetchEvents(sessionId, 0)
-        .then((loaded) => {
-          if (!alive) return
-          setEvents([...loaded].sort((a, b) => b.id - a.id))
-          setError(null)
-        })
-        .catch((e: unknown) => {
-          if (!alive) return
-          setError(String((e as Error)?.message ?? e))
-        })
+    if (sessionId === null) {
+      setEvents([])
+      return
     }
-    load()
-    const timer = setInterval(load, POLL_MS)
+    let alive = true
+    let cursor = 0
+    let closeStream: (() => void) | null = null
+    void fetchSnapshotStats(sessionId).then((next) => { if (alive) setStats(next) })
+
+    /**
+     * Decisions landing after the initial load. Both the stream's pushes and the
+     * fallback's ticks carry only events past the cursor, so they merge the same
+     * way; a batch is also the point where the snapshot inventory can have grown.
+     */
+    const onBatch = (batch: GateFeedBatch): void => {
+      if (!alive || batch.events.length === 0) return
+      for (const ev of batch.events) if (ev.id > cursor) cursor = ev.id
+      setEvents((current) => {
+        const known = new Set((current ?? []).map((ev) => ev.id))
+        const added = batch.events.filter((ev) => !known.has(ev.id))
+        return added.length === 0 ? current : [...added, ...(current ?? [])].sort((a, b) => b.id - a.id)
+      })
+      setError(null)
+      void fetchSnapshotStats(sessionId).then((next) => { if (alive) setStats(next) })
+    }
+
+    // One REST load for the list (so a failure is reportable, not silently an
+    // empty page); everything after it is pushed rather than re-fetched on a timer.
+    fetchEvents(sessionId, 0)
+      .then((loaded) => {
+        if (!alive) return
+        setEvents([...loaded].sort((a, b) => b.id - a.id))
+        setError(null)
+        cursor = loaded.reduce((max, ev) => (ev.id > max ? ev.id : max), 0)
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(String((e as Error)?.message ?? e))
+      })
+      .finally(() => {
+        // Opens with the cursor the load settled on, so no history is replayed.
+        if (alive) closeStream = followEvents(sessionId, () => cursor, onBatch)
+      })
+
     return () => {
       alive = false
-      clearInterval(timer)
+      closeStream?.()
     }
   }, [sessionId])
 

@@ -3,10 +3,11 @@
  * dsh-perm-gate (a simplified version of the review-feed pattern demonstrated
  * by dsh-approval-gate).
  *
- * Polls the host's `GET /api/dsh-perm-gate/events?sessionId=&since=` feed every
- * 2 s and shows the latest decision above the conversation input: auto-allows
- * (green) and denies (red) auto-dismiss after a few seconds; an ask (amber)
- * stays until the next event because it needs the human's attention.
+ * Follows the host's decision feed (`GET /api/dsh-perm-gate/stream`, an SSE
+ * push; see `followEvents` for the older-host polling fallback) and shows the
+ * latest decision above the conversation input: auto-allows (green) and denies
+ * (red) auto-dismiss after a few seconds; an ask (amber) stays until the next
+ * event because it needs the human's attention.
  *
  * Everything is best-effort: no session id, a missing route, or any fetch
  * failure simply means "render nothing". No @deepseek-ai value imports.
@@ -14,9 +15,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import { fetchEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent } from './feed.ts'
+import { followEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent, type GateFeedBatch } from './feed.ts'
 
-const POLL_MS = 2_000
 const AUTO_HIDE_MS = 4_000
 
 /** Full props: the locale seat + the session-id carriers the slot delivers. */
@@ -44,43 +44,32 @@ export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | nu
     if (sessionId === null) return
 
     let alive = true
-    let timer: ReturnType<typeof setInterval> | null = null
 
-    const startPolling = (): void => {
-      if (!alive) return
-      timer = setInterval(() => {
-        fetchEvents(sessionId, sinceRef.current)
-          .then((events) => {
-            if (!alive || events.length === 0) return
-            const last = events[events.length - 1]
-            if (last === undefined || last.id <= shownIdRef.current) return
-            shownIdRef.current = last.id
-            sinceRef.current = last.id
-            setNotice(last)
-            if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current)
-            if (!presentation(last.kind).sticky) {
-              hideTimerRef.current = setTimeout(() => { setNotice(null) }, AUTO_HIDE_MS)
-            }
-          })
-          .catch(() => {}) // route missing / transient failure: keep quiet
-      }, POLL_MS)
+    const onBatch = (batch: GateFeedBatch): void => {
+      if (!alive || batch.events.length === 0) return
+      const last = batch.events[batch.events.length - 1]
+      if (last === undefined) return
+      if (last.id > sinceRef.current) sinceRef.current = last.id
+      // On session open the stream replays history: advance the cursor past it
+      // silently, so switching sessions never pops a stale decision.
+      if (batch.backlog) {
+        shownIdRef.current = sinceRef.current
+        return
+      }
+      if (last.id <= shownIdRef.current) return
+      shownIdRef.current = last.id
+      setNotice(last)
+      if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current)
+      if (!presentation(last.kind).sticky) {
+        hideTimerRef.current = setTimeout(() => { setNotice(null) }, AUTO_HIDE_MS)
+      }
     }
 
-    // On session open, advance the cursor silently past history (no replay popups).
-    fetchEvents(sessionId, 0)
-      .then((events) => {
-        if (!alive) return
-        if (events.length > 0) {
-          sinceRef.current = events[events.length - 1]?.id ?? 0
-          shownIdRef.current = sinceRef.current
-        }
-        startPolling()
-      })
-      .catch(startPolling)
+    const close = followEvents(sessionId, () => sinceRef.current, onBatch)
 
     return () => {
       alive = false
-      if (timer !== null) clearInterval(timer)
+      close()
       if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current)
     }
   }, [sessionId])
