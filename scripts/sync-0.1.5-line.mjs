@@ -56,7 +56,7 @@ export const LINE_015 = {
    * from THIS commit is an undeclared edit to the line, while commits after it
    * are simply newer work waiting to be synced.
    */
-  syncedFrom: '1072a244b635890f804966dc92d00908de0f2825',
+  syncedFrom: '9f27f885a04106ba56695b65ff43df45bb8e5f07',
   /** `package.json` top-level scalars, as `[key, expected]`. */
   fields: [
     ['version', '3.0.0'],
@@ -80,6 +80,14 @@ export const LINE_015 = {
    * hand-maintained patch rots silently as the host changes.
    */
   absentPaths: ['spec.md', 'tasks.md', 'checklist.md', 'findings.md', 'patches/add-permissive-glyph.patch'],
+  /**
+   * Tracked files the 0.1.5 line DELIBERATELY rewrites, beyond `package.json`:
+   * the README/INSTALL/CHANGELOG docs speak of the 0.1.5 line instead of the
+   * 0.1.2+ one, and `dsh.plugin.json` mirrors the manifest's version/engines
+   * for the host's plugin loader. Without this list the tree check would call
+   * the line's own docs drift.
+   */
+  deltaPaths: ['CHANGELOG.md', 'INSTALL.md', 'INSTALL.ja.md', 'INSTALL.ko.md', 'INSTALL.zh.md', 'README.md', 'dsh.plugin.json'],
   /**
    * Tracked files that MIRROR `package.json` and therefore may differ from the
    * sync point without being a hand edit — the lockfile's `version`, `engines`
@@ -179,7 +187,7 @@ export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.bra
   // on the 0.1.5 line passed with "carries exactly the declared difference"
   // printed over it. `package.json` is always permitted because its contents
   // were already judged above; mirrors are permitted because they are derived.
-  const permitted = new Set(['package.json', ...LINE_015.mirrorPaths, ...LINE_015.absentPaths])
+  const permitted = new Set(['package.json', ...LINE_015.mirrorPaths, ...LINE_015.deltaPaths, ...LINE_015.absentPaths])
   for (const path of changed) {
     if (!permitted.has(path)) {
       problems.push(`${label}: ${path} differs from the sync point but is not part of the declared difference`)
