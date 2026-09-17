@@ -165,6 +165,18 @@ export function parsePermissionsDocument(text: string): PermissionsDoc {
   } catch (error) {
     throw new RuleError(`invalid YAML: ${String(error)}`)
   }
+  return parsePermissionsObject(raw)
+}
+
+/**
+ * Parse a permissions document given as an already-parsed object — the shape
+ * the DSH settings namespace stores (the JSON twin of the YAML file). Accepts
+ * both the bare `{ defaultAction, deny, allow, ask }` form and the file's
+ * `permissions:`-wrapped form. Malformed input fails loud, exactly like the
+ * YAML path, so a settings doc that cannot compile is a state the operator
+ * sees, never a silent ruleset change.
+ */
+export function parsePermissionsObject(raw: unknown): PermissionsDoc {
   if (raw === null || raw === undefined) {
     return { defaultAction: 'ask', deny: [], allow: [], ask: [] }
   }
@@ -311,6 +323,16 @@ export function compileDocument(doc: PermissionsDoc, opts: CompileOptions = {}):
     ask: comp(doc.ask, 'ask', doc.deny.length + doc.allow.length),
     caseInsensitivePaths: opts.caseInsensitivePaths ?? false,
   }
+}
+
+/**
+ * Compile rules given as a structured settings object (already parsed — no
+ * YAML in the loop). The settings-first half of the dual-source read path:
+ * `parsePermissionsObject` validates the JSON form exactly as strictly as the
+ * YAML path, then the standard `compileDocument` runs.
+ */
+export function compileRulesObject(root: unknown, opts: CompileOptions = {}): CompiledRuleset {
+  return compileDocument(parsePermissionsObject(root), opts)
 }
 
 /** SHA-256 hash of the raw document (compile-cache key without recompiling). */

@@ -92,6 +92,15 @@ export declare class RuleError extends Error {
 /** Parse a raw YAML permissions document; malformed files fail loud at load. */
 export declare function parsePermissionsDocument(text: string): PermissionsDoc;
 /**
+ * Parse a permissions document given as an already-parsed object — the shape
+ * the DSH settings namespace stores (the JSON twin of the YAML file). Accepts
+ * both the bare `{ defaultAction, deny, allow, ask }` form and the file's
+ * `permissions:`-wrapped form. Malformed input fails loud, exactly like the
+ * YAML path, so a settings doc that cannot compile is a state the operator
+ * sees, never a silent ruleset change.
+ */
+export declare function parsePermissionsObject(raw: unknown): PermissionsDoc;
+/**
  * Compile one parsed entry into a hot-path rule.
  *
  * Exported because the multi-file rule chain (`rule-chain.ts`) merges entries
@@ -102,6 +111,13 @@ export declare function parsePermissionsDocument(text: string): PermissionsDoc;
 export declare function compileRuleEntry(entry: RuleEntryDoc, action: RuleAction, index: number, opts?: CompileOptions): CompiledRuleEntry;
 /** Compile a validated document into hot-path rules. */
 export declare function compileDocument(doc: PermissionsDoc, opts?: CompileOptions): CompiledRuleset;
+/**
+ * Compile rules given as a structured settings object (already parsed — no
+ * YAML in the loop). The settings-first half of the dual-source read path:
+ * `parsePermissionsObject` validates the JSON form exactly as strictly as the
+ * YAML path, then the standard `compileDocument` runs.
+ */
+export declare function compileRulesObject(root: unknown, opts?: CompileOptions): CompiledRuleset;
 /** SHA-256 hash of the raw document (compile-cache key without recompiling). */
 export declare function documentHash(text: string): string;
 export declare function extractPathCandidates(args: Record<string, unknown>): string[];

@@ -56,7 +56,7 @@ export const LINE_015 = {
    * from THIS commit is an undeclared edit to the line, while commits after it
    * are simply newer work waiting to be synced.
    */
-  syncedFrom: '42dabae1b43ebfb28e34256dae8c7e923207e27b',
+  syncedFrom: '1072a244b635890f804966dc92d00908de0f2825',
   /** `package.json` top-level scalars, as `[key, expected]`. */
   fields: [
     ['version', '3.0.0'],
