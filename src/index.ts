@@ -6,7 +6,7 @@
  * and a stray default would discard the metadata).
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { runDryRun } from './dry-run.js'
@@ -269,6 +269,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
   // entry that omits `config` still records events, snapshots and learning.
   const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
+  // Ensure the data directory exists before any read or write path touches it.
+  // The old code only created it lazily in EventLog.append() / RiskLearning.persist(),
+  // so a cold start with no prior writes left the directory missing and could cause
+  // chokidar EPERM or other downstream failures.
+  try { mkdirSync(dataDir, { recursive: true }) } catch { /* best-effort */ }
 
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same
