@@ -12,37 +12,32 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` version **2.4.1**. Continue with the [README](./README.md) for the
+`dsh-perm-gate` version **3.0.0**. Continue with the [README](./README.md) for the
 decision chain, the rules file format and the 自动审查 tier.
 
 ## Requirements
 
 - An existing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installation.
-- Node.js **>= 20** (see `engines` in `package.json`).
+- Node.js **>= 24** (see `engines` in `package.json`).
 - The `dsh` CLI on your `PATH`.
 - A profile to install into — the browser half only ships for the `web` profile
   (`dsh.client.platform = "web"` in `package.json`).
 
-## Pick the tag for your DSH version
+## Pick the line for your DSH version
 
-One build serves both DSH lines, so either tag installs working code — the tag
-exists so a version you pin stays meaningful per line.
+Two long-lived branches serve two DSH lines: `main` (2.x) and
+`sync/0.1.5-from-main` (3.x, the DSH 0.1.5 packaging variant — `compat/0.1.5`
+points at the same tree).
 
 | Your DSH | Install |
 |----------|---------|
-| `0.1.5-rc.1` or newer | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` — the `3.x` line; its `dsh-0.1.5` dist-tag is not published yet, so `dsh-perm-gate@latest` (the `2.x` packaging of the same code) is the registry alternative |
-| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`, the 2.x line) |
+| `0.1.5-rc.1` or newer | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` (the 3.x line; no npm dist-tag yet — `@latest` installs the same code with 2.x packaging) |
 | up to `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
-DSH does not enforce `engines.dsh`, so the tags are the selection mechanism rather
-than a compatibility gate. See [RELEASING.md](./RELEASING.md) for why one artifact
-covers both lines and how the tags are published.
-
-> **The `3.x` line has no npm release yet.** No `3.x` version and no `dsh-0.1.5`
-> dist-tag exist on the registry — `dsh-perm-gate@dsh-0.1.5` cannot resolve today.
-> On a `0.1.5-rc.x` host, install from the branch above, or take `@latest`: the code
-> is identical and only the packaging (`engines.dsh`, the tag a version pin resolves
-> to) differs.
+DSH does not enforce `engines.dsh`, so tags and refs are the selection mechanism
+rather than a compatibility gate. See [RELEASING.md](./RELEASING.md) for how the
+lines and tags are laid out.
 
 ## Install with the official CLI
 
@@ -79,6 +74,12 @@ Add the plugin to your profile's `cordis.yml`:
     defaultAction: ask              # allow | ask | deny
     gatePresets: [permissive]       # tiers where the gate is active at all (default)
 ```
+
+Rules are stored in the `dsh-perm-gate-rules` settings namespace, and every
+change recompiles the gate in place. The YAML file above is optional: it is only
+read while the namespace is untouched, and the first rules write from the plugin
+(an allowlist approval, or an edit in the settings UI) absorbs the file's rules
+automatically.
 
 Start from [examples/permissions.example.yaml](./examples/permissions.example.yaml),
 then reload the profile.
