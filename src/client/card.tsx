@@ -83,9 +83,6 @@ export interface PermissiveCardValue {
   networkMode?: 'deny-all' | 'whitelist' | 'allow-all'
   /** Rewrite HTTP(S)_PROXY / ALL_PROXY for subprocesses. Default true. */
   networkInjectEnv?: boolean
-  // ─── Hot reload (Phase 3) ──────────────────────────────────────────
-  /** Enable file watching for rule hot-reload. */
-  watch?: boolean
 }
 
 /** One injected face: the plugin's own settings scope. */
@@ -1161,35 +1158,27 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <p style={hintStyle}>{t('card.networkRebindNote')}</p>
                   </section>
 
-                  {/* ─── Network env injection (Phase 2) ─── */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
-                    <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <input
-                        type="checkbox"
-                        checked={value.networkInjectEnv !== false}
-                        disabled={readonly}
-                        onChange={(event) => { void scope.set('networkInjectEnv', event.currentTarget.checked) }}
-                      />
-                      <span style={{ fontSize: '13px' }}>{value.networkInjectEnv !== false ? 'ON' : 'OFF'}</span>
-                    </div>
-                  </section>
-
-                  {/* ─── Hot reload switch (Phase 3) ─── */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.watch')}</p>
-                    <p style={hintStyle}>{t('card.watchHint')}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <input
-                        type="checkbox"
-                        checked={value.watch !== false}
-                        disabled={readonly}
-                        onChange={(event) => { void scope.set('watch', event.currentTarget.checked) }}
-                      />
-                      <span style={{ fontSize: '13px' }}>{value.watch !== false ? 'ON' : 'OFF'}</span>
-                    </div>
-                  </section>
+                  {/* ─── Network env injection (Phase 2) ───
+                      Only meaningful while interception runs: with the master
+                      switch off no proxy starts, so there is no environment to
+                      rewrite — the block is hidden rather than shown dead. */}
+                  {value.networkEnabled === true
+                    ? (
+                        <section style={sectionStyle}>
+                          <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
+                          <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                            <input
+                              type="checkbox"
+                              checked={value.networkInjectEnv !== false}
+                              disabled={readonly}
+                              onChange={(event) => { void scope.set('networkInjectEnv', event.currentTarget.checked) }}
+                            />
+                            <span style={{ fontSize: '13px' }}>{value.networkInjectEnv !== false ? 'ON' : 'OFF'}</span>
+                          </div>
+                        </section>
+                      )
+                      : null}
 
                   {!snapshot.writable
                     && <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('card.readonly')}</p>}
