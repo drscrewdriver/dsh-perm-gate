@@ -13,7 +13,8 @@
  * (`allowlist.ts`, the settings namespace).
  */
 import { readFileSync, statSync } from 'node:fs'
-import { RuleError, compileDocument, documentHash, parsePermissionsDocument, type RuleAction } from './rule.js'
+import { stringify } from 'yaml'
+import { RuleError, compileDocument, compileRulesObject, documentHash, parsePermissionsDocument, type RuleAction } from './rule.js'
 
 /** Rules per action, so the panel can say "3 deny / 7 allow / 1 ask" at a glance. */
 export interface RulesViewCounts {
@@ -40,6 +41,10 @@ export interface RulesView {
   readonly counts: RulesViewCounts
   /** Why the document could not be shown or parsed. Absent when all is well. */
   readonly error?: string
+  /** Where the rules were read from. Absent on views produced before the settings migration. */
+  readonly source?: 'file' | 'settings'
+  /** The structured rules object the settings namespace stores (settings source only). */
+  readonly rules?: unknown
 }
 
 /** Beyond this the panel would be rendering a log, not a rules file. */
@@ -95,6 +100,7 @@ export function readRulesView(rulesFile: string): RulesView {
       raw: shown, truncated,
       defaultAction: ruleset.defaultAction,
       counts: { allow: ruleset.allow.length, deny: ruleset.deny.length, ask: ruleset.ask.length },
+      source: 'file',
     }
   } catch (e: unknown) {
     const detail = e instanceof RuleError ? e.message : String((e as Error)?.message ?? e)
@@ -103,6 +109,53 @@ export function readRulesView(rulesFile: string): RulesView {
       raw: shown, truncated,
       counts: NO_COUNTS,
       error: `does not compile: ${detail}`,
+      source: 'file',
+    }
+  }
+}
+
+/** The pseudo-path a settings view reports (there is no file to name). */
+export const SETTINGS_RULES_VIEW_PATH = 'settings:dsh-perm-gate-rules'
+
+/**
+ * Render the settings-sourced rules for display — the read-only face of the
+ * `dsh-perm-gate-rules` namespace, the twin of {@link readRulesView}.
+ *
+ * The YAML rendering of the structured object fills `raw`, so the settings card
+ * shows the document in the same format the file view used; `rules` carries the
+ * structured object itself and `source: 'settings'` states the provenance.
+ *
+ * Never throws: a doc that fails `compileRulesObject` is a state the panel has
+ * to render (the `error` field), not an error that should blank the section.
+ */
+export function readRulesViewFromSettings(rules: unknown): RulesView {
+  let raw = ''
+  try {
+    raw = stringify(rules ?? {})
+  } catch {
+    raw = ''
+  }
+  const lines = raw === '' ? 0 : raw.split('\n').length
+  const hash = documentHash(JSON.stringify(rules ?? {}))
+  try {
+    const ruleset = compileRulesObject(rules)
+    return {
+      path: SETTINGS_RULES_VIEW_PATH, exists: true, bytes: raw.length, hash, lines,
+      raw, truncated: false,
+      defaultAction: ruleset.defaultAction,
+      counts: { allow: ruleset.allow.length, deny: ruleset.deny.length, ask: ruleset.ask.length },
+      source: 'settings',
+      rules,
+    }
+  } catch (e: unknown) {
+    const detail = e instanceof RuleError ? e.message : String((e as Error)?.message ?? e)
+    return {
+      path: SETTINGS_RULES_VIEW_PATH, exists: true, bytes: raw.length, hash, lines,
+      raw, truncated: false,
+      counts: NO_COUNTS,
+      error: `does not compile: ${detail}`,
+      source: 'settings',
+      rules,
     }
   }
 }

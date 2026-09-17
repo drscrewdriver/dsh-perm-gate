@@ -2,11 +2,133 @@
  * Durable allowlist (whitelist) writes for dsh-perm-gate.
  *
  * The "allow everywhere" approval action appends a matched command pattern to
- * the rules file's `allow` list and reloads, so a human-approved command is
+ * the rules' `allow` list and reloads, so a human-approved command is
  * persistently whitelisted across sessions — not just granted once.
+ *
+ * Two storage backs, per the dual-source migration:
+ * - **settings** (`appendAllowToSettings` / `replaceAllowInSettings`) — the
+ *   `dsh-perm-gate-rules` namespace; the primary write path once the settings
+ *   service is available.
+ * - **rules file** (`appendAllowCommand` / `replaceAllowCommands`) — the legacy
+ *   path, kept as the fallback when no settings scope is wired (and as the
+ *   migration seed: the first settings write carries the file document along so
+ *   file-defined deny/ask rules are not shadowed).
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { parse, stringify } from 'yaml'
+import { isRulesConfigured } from './config.js'
+
+/**
+ * Minimal face of the DSH settings scope the rules namespace is bound to
+ * (`scope.get()` / `scope.update(patch)`; the host merges a patch into the
+ * user layer, replacing arrays wholesale).
+ */
+export interface SettingsRulesScope {
+  get(): unknown
+  update(patch: object): Promise<unknown> | unknown
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** Accept both the bare rules form and the file's `permissions:`-wrapped form. */
+function unwrapPermissions(seed: unknown): Record<string, unknown> {
+  if (!isRecord(seed)) return {}
+  return isRecord(seed['permissions']) ? seed['permissions'] : seed
+}
+
+/** The file document a first write should migrate into the namespace, or bare defaults. */
+function seedOrDefaults(seed: unknown): Record<string, unknown> {
+  const root = unwrapPermissions(seed)
+  return {
+    defaultAction: typeof root['defaultAction'] === 'string' ? root['defaultAction'] : 'ask',
+    deny: Array.isArray(root['deny']) ? root['deny'] : [],
+    allow: Array.isArray(root['allow']) ? root['allow'] : [],
+    ask: Array.isArray(root['ask']) ? root['ask'] : [],
+  }
+}
+
+function allowEntriesOf(section: Record<string, unknown>): unknown[] {
+  const allow = section['allow']
+  return Array.isArray(allow) ? allow : []
+}
+
+function commandEntries(patterns: readonly string[], reason: string): unknown[] {
+  return patterns.map((pattern) => ({ command: [pattern], reason }))
+}
+
+/** The allow-list command patterns currently in the settings rules document (read-only). */
+export function listAllowFromRulesDoc(doc: unknown): string[] {
+  const section = unwrapPermissions(doc)
+  const out: string[] = []
+  for (const entry of allowEntriesOf(section)) {
+    if (!isRecord(entry)) continue
+    const command = entry['command']
+    if (typeof command === 'string') {
+      out.push(command)
+      continue
+    }
+    if (!Array.isArray(command)) continue
+    for (const c of command) if (typeof c === 'string') out.push(c)
+  }
+  return out
+}
+
+/**
+ * Append one command pattern as a new `allow` entry in the settings rules
+ * namespace. When the namespace is still unconfigured (bare defaults) and a
+ * file document is supplied, the namespace is seeded from it first — the
+ * implicit migration — so the first settings write cannot shadow file-defined
+ * deny/ask rules. Returns false when the scope rejects the write.
+ */
+export async function appendAllowToSettings(
+  scope: SettingsRulesScope,
+  pattern: string,
+  reason = 'permissive allow-everywhere',
+  seed?: unknown,
+): Promise<boolean> {
+  try {
+    const current = scope.get()
+    const section = isRulesConfigured(current) && isRecord(current)
+      ? { ...current }
+      : seedOrDefaults(seed)
+    const allow = allowEntriesOf(section)
+    allow.push({ command: [pattern], reason })
+    section['allow'] = allow
+    await scope.update(section)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Replace the settings rules namespace's `allow` whitelist with exactly the
+ * given command patterns (one allow entry per pattern); empty clears it.
+ * Other sections (deny / ask / defaultAction) are preserved — seeded from the
+ * file document on the namespace's first write. Returns false when the scope
+ * rejects the write.
+ */
+export async function replaceAllowInSettings(
+  scope: SettingsRulesScope,
+  patterns: readonly string[],
+  reason = 'permissive allowlist',
+  seed?: unknown,
+): Promise<boolean> {
+  try {
+    if (patterns === undefined) return false
+    const current = scope.get()
+    const section = isRulesConfigured(current) && isRecord(current)
+      ? { ...current }
+      : seedOrDefaults(seed)
+    section['allow'] = commandEntries(patterns, reason)
+    await scope.update(section)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
  * Append one command pattern as a new `allow` entry in the rules file.

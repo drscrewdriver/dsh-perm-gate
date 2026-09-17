@@ -10,9 +10,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { makeEntry, MemoryAuditMirror, type AuditEntry, type AuditOutcome, type DecisionSource } from './audit.js'
-import { resolvePermissiveStrategies, type PermGateConfig, type PermissiveStrategies } from './config.js'
+import { resolvePermissiveStrategies, type PermGateConfig, type PermissiveStrategies, type RulesConfig } from './config.js'
 import type { ClassifierConfig } from './classifier.js'
-import { appendAllowCommand, listAllowCommands, replaceAllowCommands } from './allowlist.js'
+import { appendAllowCommand, listAllowCommands, listAllowFromRulesDoc, replaceAllowCommands } from './allowlist.js'
 import { decide, CONTENT_ARG_KEYS, type FinalDecision, type GrantResolver } from './engine.js'
 import { EventLog, type GateEvent, saveEventSnapshots } from './events.js'
 import { decideRules, type ToolCallContext } from './evaluate.js'
@@ -24,6 +24,7 @@ import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSe
 import { chatCompletion } from './classifier.js'
 import {
   compileDocument,
+  compileRulesObject,
   documentHash,
   extractPathCandidates,
   parsePermissionsDocument,
@@ -286,6 +287,25 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * Default 30 minutes.
    */
   readonly networkGrantTtlMs?: number
+  // ─── Rules in the settings namespace (dual-source) ──────────────────
+  /**
+   * Live settings-sourced rules document (the `dsh-perm-gate-rules` namespace),
+   * read on every (re)compile. When it carries a real configuration — entries or
+   * a non-default `defaultAction` — it takes precedence over `rulesFile` and the
+   * rule chain (settings first, file fallback); `undefined` means "namespace
+   * still at bare defaults", and the file paths run unchanged.
+   */
+  readonly readRulesDocument?: () => RulesConfig | undefined
+  /**
+   * Settings-backed allowlist writer. When wired (the settings service is
+   * available), {@link approveAllowEverywhere} / {@link setAllowlist} go through
+   * it instead of rewriting the rules file; a falsy verdict (no scope, rejected
+   * write) falls back to the file path.
+   */
+  readonly allowlistWriter?: {
+    readonly append: (pattern: string, reason: string) => boolean
+    readonly replace: (patterns: readonly string[], reason: string) => boolean
+  }
 }
 
 export type CallDecision = 'allow' | 'deny' | 'ask'
@@ -562,6 +582,24 @@ export class PermGateRuntime {
       defaultAction: options.defaultAction ?? 'ask',
       deny: [], allow: [], ask: [],
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
+    }
+
+    // Settings-first (dual-source): a configured `dsh-perm-gate-rules`
+    // namespace overrides every file path — the gate then loads with zero
+    // filesystem dependency. Bare defaults (nothing configured) fall through
+    // to the file sources below. Compile errors propagate: the constructor
+    // fails loud, and `reload()` keeps the previous rules on a hot change.
+    const settingsDoc = options.readRulesDocument?.()
+    if (settingsDoc !== undefined) {
+      const hash = documentHash(JSON.stringify(settingsDoc))
+      const hit = this.cache.get(hash)
+      if (hit !== undefined) return hit
+      const compiled = compileRulesObject(settingsDoc, {
+        maxGlobStars: 2,
+        caseInsensitivePaths: options.caseInsensitivePaths ?? true,
+      })
+      this.cache.set(hash, compiled)
+      return compiled
     }
 
     // Chain mode: when searchUp is enabled, use the multi-file chain resolver.
@@ -1734,26 +1772,40 @@ export class PermGateRuntime {
 
   /**
    * Grant "allow every occurrence of this command" (the always-confirm panel's
-   * second extended allow button): persist the command into the rules file's
-   * `allow` whitelist and reload. Returns the reload result.
+   * second extended allow button): persist the command into the rules' `allow`
+   * whitelist and reload. Prefers the settings-backed writer (the namespace's
+   * watch triggers the reload once the write lands); falls back to the rules
+   * file when no settings scope is wired. Returns the write verdict.
    */
   approveAllowEverywhere(commandWord: string, reason = 'permissive allow-everywhere'): boolean {
+    const writer = this.options.allowlistWriter
+    if (writer !== undefined && writer.append(commandWord, reason)) return true
     if (!this.options.rulesFile) return false
     if (!appendAllowCommand(this.options.rulesFile, commandWord, reason)) return false
     return this.reload()
   }
 
-  /** Read-only view of the current allow-list command patterns (whitelist). */
+  /**
+   * Read-only view of the current allow-list command patterns (whitelist).
+   * Reads the settings document when the namespace is configured, else the
+   * rules file.
+   */
   allowlist(): readonly string[] {
+    const doc = this.options.readRulesDocument?.()
+    if (doc !== undefined) return listAllowFromRulesDoc(doc)
     if (!this.options.rulesFile) return []
     return listAllowCommands(this.options.rulesFile)
   }
 
   /**
    * Replace the whitelist with exactly the given command patterns and reload.
-   * Returns the reload result (false when no rulesFile or the write failed).
+   * Prefers the settings-backed writer; falls back to the rules file when no
+   * settings scope is wired. Returns the write verdict (false when neither
+   * sink is available or the write failed).
    */
   setAllowlist(patterns: readonly string[]): boolean {
+    const writer = this.options.allowlistWriter
+    if (writer !== undefined && writer.replace(patterns, 'permissive allowlist')) return true
     if (!this.options.rulesFile) return false
     if (!replaceAllowCommands(this.options.rulesFile, patterns)) return false
     return this.reload()

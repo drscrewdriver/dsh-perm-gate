@@ -1,5 +1,5 @@
 import { type AuditEntry, type DecisionSource } from './audit.js';
-import { type PermGateConfig, type PermissiveStrategies } from './config.js';
+import { type PermGateConfig, type PermissiveStrategies, type RulesConfig } from './config.js';
 import type { ClassifierConfig } from './classifier.js';
 import { EventLog } from './events.js';
 import { RiskLearning } from './learning.js';
@@ -178,6 +178,24 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      * Default 30 minutes.
      */
     readonly networkGrantTtlMs?: number;
+    /**
+     * Live settings-sourced rules document (the `dsh-perm-gate-rules` namespace),
+     * read on every (re)compile. When it carries a real configuration — entries or
+     * a non-default `defaultAction` — it takes precedence over `rulesFile` and the
+     * rule chain (settings first, file fallback); `undefined` means "namespace
+     * still at bare defaults", and the file paths run unchanged.
+     */
+    readonly readRulesDocument?: () => RulesConfig | undefined;
+    /**
+     * Settings-backed allowlist writer. When wired (the settings service is
+     * available), {@link approveAllowEverywhere} / {@link setAllowlist} go through
+     * it instead of rewriting the rules file; a falsy verdict (no scope, rejected
+     * write) falls back to the file path.
+     */
+    readonly allowlistWriter?: {
+        readonly append: (pattern: string, reason: string) => boolean;
+        readonly replace: (patterns: readonly string[], reason: string) => boolean;
+    };
 }
 export type CallDecision = 'allow' | 'deny' | 'ask';
 /** The effective Permissive tier state read per tool call. */
@@ -572,15 +590,23 @@ export declare class PermGateRuntime {
     approveRepeat(exec: ToolExecutionLike, maxUses?: number, ttlMs?: number): void;
     /**
      * Grant "allow every occurrence of this command" (the always-confirm panel's
-     * second extended allow button): persist the command into the rules file's
-     * `allow` whitelist and reload. Returns the reload result.
+     * second extended allow button): persist the command into the rules' `allow`
+     * whitelist and reload. Prefers the settings-backed writer (the namespace's
+     * watch triggers the reload once the write lands); falls back to the rules
+     * file when no settings scope is wired. Returns the write verdict.
      */
     approveAllowEverywhere(commandWord: string, reason?: string): boolean;
-    /** Read-only view of the current allow-list command patterns (whitelist). */
+    /**
+     * Read-only view of the current allow-list command patterns (whitelist).
+     * Reads the settings document when the namespace is configured, else the
+     * rules file.
+     */
     allowlist(): readonly string[];
     /**
      * Replace the whitelist with exactly the given command patterns and reload.
-     * Returns the reload result (false when no rulesFile or the write failed).
+     * Prefers the settings-backed writer; falls back to the rules file when no
+     * settings scope is wired. Returns the write verdict (false when neither
+     * sink is available or the write failed).
      */
     setAllowlist(patterns: readonly string[]): boolean;
 }

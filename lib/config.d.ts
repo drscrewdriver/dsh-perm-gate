@@ -187,9 +187,9 @@ export interface PermGateConfig {
      * Default 1800000 (30 min).
      */
     readonly networkGrantTtlMs?: number;
-    /** Enable file watching for rule hot-reload. Default true. */
+    /** @deprecated Rules now live in the `dsh-perm-gate-rules` settings namespace; file watching was removed. Accepted (ignored) for composition compatibility. */
     readonly watch?: boolean;
-    /** Debounce interval for rule file changes in ms. Default 300. */
+    /** @deprecated See {@link watch}. */
     readonly watchDebounceMs?: number;
 }
 /** Backend combinable approval strategies for the Permissive tier (all opt-in). */
@@ -221,6 +221,75 @@ export declare const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategie
 export { DEFAULT_GATE_PRESETS, resolveGatePresets };
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
 export declare function resolvePermissiveStrategies(bag?: Partial<PermissiveStrategies>): PermissiveStrategies;
+/**
+ * One rule entry as stored in settings. Deliberately permissive (`z.any()`
+ * fields): strict validation happens in `parseRuleEntry` at compile time (fail
+ * loud), and the stored form must round-trip BOTH the raw YAML shape (string
+ * scalars, `params` as a key→patterns mapping) and the parsed document shape
+ * (parsed dimensions), so a file migration can be seeded without lossy
+ * normalization. Schemastery preserves unknown keys in non-strict object mode.
+ */
+export declare const RuleEntrySchema: z<unknown>;
+/**
+ * The rules structure stored in the DSH settings namespace — the JSON form of
+ * rules.yml. Unknown extra keys on the document itself are preserved too.
+ */
+export declare const RulesSchema: z<RulesConfig>;
+/** One rule entry in the settings-stored rules document (JSON form; all optional). */
+export interface RulesEntryConfig {
+    readonly tools?: readonly string[];
+    readonly command?: readonly string[];
+    readonly args?: readonly string[];
+    readonly paths?: readonly string[];
+    readonly params?: unknown;
+    readonly absent?: readonly string[];
+    readonly agents?: readonly string[];
+    readonly when?: unknown;
+    readonly argv?: unknown;
+    readonly network?: {
+        readonly domains?: readonly string[];
+        readonly ips?: readonly string[];
+        readonly ports?: readonly string[];
+        readonly schemes?: readonly string[];
+    };
+    readonly branch?: {
+        readonly target?: readonly string[];
+        readonly remote?: readonly string[];
+        readonly shared?: boolean;
+    };
+    readonly reason?: string;
+    readonly enabled?: boolean;
+}
+/**
+ * The rules document stored in the settings namespace. The action lists are
+ * `unknown[]` on purpose: entries may be the raw YAML shape or the parsed
+ * document shape, and strict validation belongs to `parseRuleEntry` at compile
+ * time — see {@link RulesEntryConfig} for the documented JSON form. (Mutable
+ * arrays: the type doubles as the Schemastery input face of {@link RulesSchema},
+ * which validates in place.)
+ */
+export interface RulesConfig {
+    readonly defaultAction?: RuleAction;
+    readonly deny?: unknown[];
+    readonly allow?: unknown[];
+    readonly ask?: unknown[];
+}
+/** Settings namespace for rules (separate from the main perm-gate namespace). */
+export declare const RULES_NAMESPACE = "dsh-perm-gate-rules";
+/**
+ * Whether a settings-sourced rules document carries a REAL configuration —
+ * entries or a non-default `defaultAction`. A namespace still holding bare
+ * schema defaults is "not configured" and must not shadow the rules file
+ * (the dual-source contract: settings first, file fallback).
+ */
+export declare function isRulesConfigured(value: unknown): boolean;
+/**
+ * Read the rules from a settings scope: the document when the namespace is
+ * configured, otherwise `undefined` so the caller falls back to the rules file.
+ */
+export declare function readRulesFromSettings(scope: {
+    get(): unknown;
+} | undefined): RulesConfig | undefined;
 export declare const Config: z<PermGateConfig>;
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>> & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'> & {
     readonly permissiveStrategies: PermissiveStrategies;
