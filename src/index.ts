@@ -20,6 +20,15 @@ import { decideNetworkTarget, type NetworkTarget } from './network.js'
 import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
 import { RuleWatcher } from './watch.js'
 
+// ─── Cold-start directory bootstrap ─────────────────────────────────────────
+// Ensure the plugin data directory exists BEFORE cordis calls apply().
+// The DSH framework (or other plugins) may scan dataDir during plugin
+// registration — before our apply() entry point runs. If the directory
+// is missing at that point, the scan throws and the plugin (or the
+// entire profile) fails to load. This must be a module-level side
+// effect, not deferred to apply().
+try { mkdirSync(resolveDataDir(), { recursive: true }) } catch { /* best-effort */ }
+
 export const name = 'dsh-perm-gate'
 /**
  * The `tools` service drives `tools/pre-execute`/`tools/result` (dsh-tools).
@@ -269,11 +278,6 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
   // entry that omits `config` still records events, snapshots and learning.
   const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
-  // Ensure the data directory exists before any read or write path touches it.
-  // The old code only created it lazily in EventLog.append() / RiskLearning.persist(),
-  // so a cold start with no prior writes left the directory missing and could cause
-  // chokidar EPERM or other downstream failures.
-  try { mkdirSync(dataDir, { recursive: true }) } catch { /* best-effort */ }
 
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same
