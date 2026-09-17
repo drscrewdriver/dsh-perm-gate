@@ -31,12 +31,18 @@
 
 | DSH 버전 | 설치 방법 |
 |----------|-----------|
-| `0.1.2-alpha.1` 이상 (`0.1.5-rc.2` 포함) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.5-rc.1` 이상 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` —— `3.x` 라인. `dsh-0.1.5` dist-tag는 **아직 게시되지 않았으므로**, 레지스트리 대안은 `dsh-perm-gate@latest`(동일 코드의 `2.x` 패키징)입니다 |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
 | `0.1.1-rc.2` 이하 | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH는 `engines.dsh`를 강제하지 않으므로, tag는 선택 메커니즘이지 호환성 게이트가
 아닙니다. 단일 아티팩트가 두 라인을 커버하는 이유와 tag가 게시되는 방식에 대해서는
 [RELEASING.md](./RELEASING.md)를 참고하세요.
+
+> **`3.x` 라인은 아직 npm에 게시되지 않았습니다.** 레지스트리에 `3.x` 버전도,
+> `dsh-0.1.5` dist-tag도 없으므로 `dsh-perm-gate@dsh-0.1.5`는 현재 해석되지 않습니다.
+> `0.1.5-rc.x` 호스트에서는 위 브랜치에서 설치하거나 `@latest`를 사용하세요 —— 코드는
+> 동일하며 차이는 패키징(`engines.dsh`와 버전 pin이 해석하는 tag)뿐입니다.
 
 ## 공식 CLI로 설치
 

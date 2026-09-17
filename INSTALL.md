@@ -30,12 +30,19 @@ exists so a version you pin stays meaningful per line.
 
 | Your DSH | Install |
 |----------|---------|
-| `0.1.2-alpha.1` or newer (incl. `0.1.5-rc.2`) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.5-rc.1` or newer | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` — the `3.x` line; its `dsh-0.1.5` dist-tag is not published yet, so `dsh-perm-gate@latest` (the `2.x` packaging of the same code) is the registry alternative |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
 | up to `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH does not enforce `engines.dsh`, so the tags are the selection mechanism rather
 than a compatibility gate. See [RELEASING.md](./RELEASING.md) for why one artifact
 covers both lines and how the tags are published.
+
+> **The `3.x` line has no npm release yet.** No `3.x` version and no `dsh-0.1.5`
+> dist-tag exist on the registry — `dsh-perm-gate@dsh-0.1.5` cannot resolve today.
+> On a `0.1.5-rc.x` host, install from the branch above, or take `@latest`: the code
+> is identical and only the packaging (`engines.dsh`, the tag a version pin resolves
+> to) differs.
 
 ## Install with the official CLI
 

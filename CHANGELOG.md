@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-09-14
+
+### Changed
+
+- **This branch is the DSH 0.1.5 line: version series `3.x`, `engines.dsh`
+  `>=0.1.5-rc.1 <0.2.0-0`, npm dist-tag `dsh-0.1.5`.** It is a **packaging delta only** —
+  the code is `main`'s, aligned to `main@42dabae`; the major bump is the fence, so a `^2.x`
+  install never resolves `3.x` and vice versa.
+- `dsh.plugin.json` now carries the same version and range as `package.json` (it still said
+  `2.6.0` / `>=0.1.2-alpha.1`), and the README version reference follows.
+- **`3.x` is not on npm yet.** No `3.x` version and no `dsh-0.1.5` dist-tag have been
+  published, so `dsh-perm-gate@dsh-0.1.5` does not resolve; until the release is cut, a
+  `0.1.5-rc.x` host installs this branch directly
+  (`github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main`) or takes `@latest`.
+
 ## [2.6.0] - 2026-09-17
 
 ### Added

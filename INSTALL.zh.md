@@ -30,11 +30,17 @@
 
 | 你的 DSH | 安装方式 |
 |----------|----------|
-| `0.1.2-alpha.1` 或更高（含 `0.1.5-rc.2`） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| `0.1.5-rc.1` 或更高 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` —— `3.x` 线；其 `dsh-0.1.5` dist-tag **尚未发布**，因此 registry 侧的替代是 `dsh-perm-gate@latest`（同一份代码的 `2.x` 打包） |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
 | 不高于 `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH 不强制 `engines.dsh`，因此 tag 是选择机制而非兼容性关卡。
 详见 [RELEASING.md](./RELEASING.md) 了解为何单一制品覆盖两条线以及 tag 的发布方式。
+
+> **`3.x` 线尚未发布到 npm。** registry 上既没有 `3.x` 版本，也没有 `dsh-0.1.5`
+> 这个 dist-tag —— `dsh-perm-gate@dsh-0.1.5` 目前无法解析。在 `0.1.5-rc.x` 宿主上，
+> 请用上面的分支直装；或直接用 `@latest`：代码完全相同，差别只在打包
+> （`engines.dsh`，以及版本 pin 会解析到哪个 tag）。
 
 ## 用官方 CLI 安装
 

@@ -31,12 +31,19 @@
 
 | DSH のバージョン | インストール方法 |
 |-----------------|-----------------|
-| `0.1.2-alpha.1` 以上（`0.1.5-rc.2` を含む） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| `0.1.5-rc.1` 以上 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` —— `3.x` ライン。`dsh-0.1.5` dist-tag は**未公開**のため、レジストリ側の代替は `dsh-perm-gate@latest`（同一コードの `2.x` パッケージング）です |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
 | `0.1.1-rc.2` まで | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
 DSH は `engines.dsh` を強制しないため、tag が選択メカニズムであり、互換性ゲート
 そのものではありません。単一ビルドが両ラインをカバーする理由と tag の公開方法については、
 [RELEASING.md](./RELEASING.md) を参照してください。
+
+> **`3.x` ラインはまだ npm に公開されていません。** レジストリには `3.x` のバージョンも
+> `dsh-0.1.5` dist-tag も存在せず、`dsh-perm-gate@dsh-0.1.5` は現在解決できません。
+> `0.1.5-rc.x` のホストでは上記のブランチからインストールするか、`@latest` を使ってください
+> —— コードは同一で、違いはパッケージング（`engines.dsh` と、バージョン pin が解決する
+> tag）だけです。
 
 ## 公式 CLI でインストール
 
