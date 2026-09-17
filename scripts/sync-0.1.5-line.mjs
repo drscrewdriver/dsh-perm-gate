@@ -183,11 +183,19 @@ export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.bra
   }
 
   // 3. Nothing else in the TREE may differ from the sync point. Sections 1-2
-  // read `package.json` and nothing else, so without this an edited `src/` file
+  // read `package.json` and nothing else, so without this an edited src/ file
   // on the 0.1.5 line passed with "carries exactly the declared difference"
   // printed over it. `package.json` is always permitted because its contents
   // were already judged above; mirrors are permitted because they are derived.
-  const permitted = new Set(['package.json', ...LINE_015.mirrorPaths, ...LINE_015.deltaPaths, ...LINE_015.absentPaths])
+  // The declaration file itself is permitted because it is self-referential:
+  // pinning a newer sync point than main's copy is its whole job.
+  const permitted = new Set([
+    'package.json',
+    'scripts/sync-0.1.5-line.mjs',
+    ...LINE_015.mirrorPaths,
+    ...LINE_015.deltaPaths,
+    ...LINE_015.absentPaths,
+  ])
   for (const path of changed) {
     if (!permitted.has(path)) {
       problems.push(`${label}: ${path} differs from the sync point but is not part of the declared difference`)
