@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 버전 **2.4.1**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
+`dsh-perm-gate` 버전 **2.6.0**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
 
 ## 요구 사항
@@ -23,20 +23,21 @@
 - 설치할 profile. 브라우저 절반은 `web` profile용으로만 빌드됩니다
   (`package.json`의 `dsh.client.platform = "web"`).
 
-## DSH 버전에 맞는 tag 선택
+## DSH 버전에 맞는 라인 선택
 
-단일 빌드는 두 DSH 라인을 모두 커버하므로, 어느 tag를 골라도 작동하는 코드가
-설치됩니다 —— tag를 유지하는 이유는 당신이 고정하는 버전이 각 라인에서 의미 있게
-유지되도록 하기 위함입니다.
+두 개의 장기 브랜치가 두 DSH 라인을 담당합니다: `main`(2.x)과
+`sync/0.1.5-from-main`(3.x, DSH 0.1.5 패키징 변형 —— `compat/0.1.5`는 같은 코드
+트리를 가리킵니다).
 
 | DSH 버전 | 설치 방법 |
 |----------|-----------|
-| `0.1.2-alpha.1` 이상 (`0.1.5-rc.2` 포함) | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`) |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate` (tag `latest`, 2.x 라인) |
+| `0.1.5-rc.1` 이상 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main` (3.x 라인; npm dist-tag 미게시 —— `@latest`는 동일 코드의 2.x 패키징을 설치) |
 | `0.1.1-rc.2` 이하 | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
-DSH는 `engines.dsh`를 강제하지 않으므로, tag는 선택 메커니즘이지 호환성 게이트가
-아닙니다. 단일 아티팩트가 두 라인을 커버하는 이유와 tag가 게시되는 방식에 대해서는
-[RELEASING.md](./RELEASING.md)를 참고하세요.
+DSH는 `engines.dsh`를 강제하지 않으므로, tag과 ref은 선택 메커니즘이지 호환성
+게이트가 아닙니다. 라인과 tag 게시 레이아웃은 [RELEASING.md](./RELEASING.md)를
+참고하세요.
 
 ## 공식 CLI로 설치
 
@@ -72,6 +73,11 @@ profile의 `cordis.yml`에 플러그인을 추가합니다:
     dshHome: $DSH_HOME              # 보호 대상 검사의 고정 루트
     defaultAction: ask              # allow | ask | deny
 ```
+
+2.6.0부터 규칙 본체는 `dsh-perm-gate-rules` settings 네임스페이스에 저장되며, 변경 시
+마다 게이트가 그 자리에서 다시 컴파일됩니다. 위의 YAML 파일은 선택 사항이 되었습니다.
+네임스페이스가 설정되지 않은 동안에만 읽히며, 플러그인이 처음으로 규칙을 쓸 때(허용
+목록 승인 또는 설정 UI에서의 편집) 파일의 규칙이 자동으로 흡수됩니다.
 
 [examples/permissions.example.yaml](./examples/permissions.example.yaml)에서 시작한 뒤
 profile을 다시 불러오세요.

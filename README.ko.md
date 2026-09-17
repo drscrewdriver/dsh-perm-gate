@@ -27,7 +27,8 @@
 > | DSH 버전 | 브랜치 | 버전 | npm 태그 |
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+ (0.1.5-rc.2 포함) | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x`는 범위) |
+> | 0.1.2-alpha.1 ~ 0.1.5-rc.0 | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x`는 범위) |
+> | 0.1.5-rc.1+ | `sync/0.1.5-from-main` (=`compat/0.1.5`) | `3.x` | GitHub ref 설치 (dist-tag 미게시) |
 >
 > 버전 계열은 **DSH 라인**을 따릅니다(`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+). 메이저
 > 버전이 서로를 차단하므로 `^1.x` 설치가 `2.x`를 해석하는 일은 없고 그 반대도
@@ -43,7 +44,7 @@
 > 모두에서 user-approval 서비스의 **개인** 메소드이므로 `typeof` 프로브를 통해
 > 읽으며, 누락되거나 예외 발생 시 "정책_unknown"으로 후퇴합니다.
 
-버전 **2.4.1** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
+버전 **2.6.0** — 변경 내역은 [한국어 changelog](./CHANGELOG.ko.md)를 참고하세요.
 
 DeepSeek Harness용 단일·자족적·결정론 우선·fail-closed 권한 게이트입니다.
 

@@ -25,7 +25,8 @@
 > | DSH 版本 | 分支 | 版本号 | npm 标签 |
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+（含 0.1.5-rc.2） | `main` | `2.x` | `@latest` / `@dsh-0.1.2` （`@2.x` 是范围） |
+> | 0.1.2-alpha.1 ~ 0.1.5-rc.0 | `main` | `2.x` | `@latest` / `@dsh-0.1.2` （`@2.x` 是范围） |
+> | 0.1.5-rc.1+ | `sync/0.1.5-from-main`（=`compat/0.1.5`） | `3.x` | GitHub ref 安装（暂无 dist-tag） |
 >
 > 版本序列号跟的是 **DSH 线**（`1.x` = DSH ≤ 0.1.1，`2.x` = DSH 0.1.2+），两条大版本互
 > 相隔离：锁在 `^1.x` 的安装绝不会解析到 `2.x`，反之亦然。`engines.dsh` 表达同样的
@@ -39,7 +40,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **2.4.1** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.6.0** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 

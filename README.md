@@ -26,7 +26,8 @@
 > | DSH version | Branch | Version | npm tag |
 > | --- | --- | --- | --- |
 > | 0.1.0-rc.7 ~ 0.1.1-rc.x | `legacy` | `1.x` | `@legacy` |
-> | 0.1.2-alpha.1+ (incl. 0.1.5-rc.2) | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x` is a range) |
+> | 0.1.2-alpha.1 ~ 0.1.5-rc.0 | `main` | `2.x` | `@latest` / `@dsh-0.1.2` (`@2.x` is a range) |
+> | 0.1.5-rc.1+ | `sync/0.1.5-from-main` (=`compat/0.1.5`) | `3.x` | GitHub ref install (no dist-tag yet) |
 >
 > The series number tracks the **DSH line** (`1.x` = DSH ≤ 0.1.1, `2.x` = DSH 0.1.2+),
 > and the majors fence each other: a `^1.x` install never resolves a `2.x` release and

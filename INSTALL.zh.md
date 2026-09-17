@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **2.4.1**。裁决链、规则文件格式与自动审查档位请见
+`dsh-perm-gate` 版本 **2.6.0**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件
@@ -23,18 +23,19 @@
 - 需要一个目标 profile —— 浏览器端只为 `web` profile 构建（`package.json`
   里 `dsh.client.platform = "web"`）。
 
-## 按你的 DSH 版本选择 tag
+## 按你的 DSH 版本选择安装线
 
-单一构建同时覆盖两条 DSH 线，所以任一 tag 安装的代码都能工作 —— 保留 tag
-是为了让你锁定的版本在每条线上都有意义。
+两条长期分支分别服务两条 DSH 线：`main`（2.x）与 `sync/0.1.5-from-main`
+（3.x，DSH 0.1.5 打包变体 —— `compat/0.1.5` 指向同一棵代码树）。
 
 | 你的 DSH | 安装方式 |
 |----------|----------|
-| `0.1.2-alpha.1` 或更高（含 `0.1.5-rc.2`） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
+| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`，2.x 线） |
+| `0.1.5-rc.1` 或更高 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main`（3.x 线；npm 尚无对应 dist-tag —— `@latest` 安装的是相同代码的 2.x 打包） |
 | 不高于 `0.1.1-rc.2` | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
-DSH 不强制 `engines.dsh`，因此 tag 是选择机制而非兼容性关卡。
-详见 [RELEASING.md](./RELEASING.md) 了解为何单一制品覆盖两条线以及 tag 的发布方式。
+DSH 不强制 `engines.dsh`，因此 tag 与 ref 是选择机制而非兼容性关卡。
+各线与 tag 的发布布局详见 [RELEASING.md](./RELEASING.md)。
 
 ## 用官方 CLI 安装
 
@@ -69,6 +70,10 @@ dsh plugin --profile web add .
     dshHome: $DSH_HOME              # 受保护目标检查的钉死根目录
     defaultAction: ask              # allow | ask | deny
 ```
+
+自 2.6.0 起，规则本体存储在 `dsh-perm-gate-rules` settings 命名空间中，每次变更都会
+就地重编译闸门。上面的 YAML 文件变为可选：只有命名空间未被配置时才会读取它，插件
+发起的首次规则写入（白名单批准或设置界面编辑）会自动收编文件中的规则。
 
 可从 [examples/permissions.example.yaml](./examples/permissions.example.yaml) 起步，
 然后重载 profile。
