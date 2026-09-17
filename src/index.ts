@@ -10,9 +10,10 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { runDryRun } from './dry-run.js'
-import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
+import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
+import { readRulesView } from './rules-view.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
@@ -594,6 +595,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           ),
       })
       if (offDryRun !== undefined) ctx.effect(() => () => { offDryRun() }, 'dsh-perm-gate: dry-run route')
+      // Permissions YAML view: the document the gate is actually loading, shown
+      // so the panel is never editing a file it cannot display. Read-only, and
+      // resolved exactly as the gate resolves it — a view that resolved its own
+      // path could describe a different file than the one in force.
+      const rulesFilePath = resolveRulesFile(
+        typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
+        dataDir,
+      )
+      const offRules = registerRulesRoute(webServer, { view: () => readRulesView(rulesFilePath) })
+      if (offRules !== undefined) ctx.effect(() => () => { offRules() }, 'dsh-perm-gate: rules route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null

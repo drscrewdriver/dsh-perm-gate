@@ -122,6 +122,28 @@ interface DryRunReport {
   }
 }
 
+/**
+ * The document served by GET /api/dsh-perm-gate/rules: the permissions YAML the
+ * gate is loading, plus what it parsed to.
+ *
+ * `error` is a rendered state, not a transport failure. A missing or
+ * uncompilable file is exactly what the operator opened this section to see —
+ * a viewer that only worked on healthy input would be useless precisely when it
+ * is needed.
+ */
+interface RulesViewBody {
+  readonly path?: string
+  readonly exists?: boolean
+  readonly bytes?: number
+  readonly hash?: string
+  readonly lines?: number
+  readonly raw?: string
+  readonly truncated?: boolean
+  readonly defaultAction?: string
+  readonly counts?: { readonly allow?: number; readonly deny?: number; readonly ask?: number }
+  readonly error?: string
+}
+
 const rowStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -244,6 +266,33 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
       .catch((e: unknown) => { setDryError(String((e as Error)?.message ?? e)) })
       .finally(() => { setDryBusy(false) })
   }
+  // Permissions YAML (read-only): the document the gate is actually loading, so
+  // the panel can never be editing a file it cannot display. Loaded on mount —
+  // a viewer you have to ask to load is one more reason not to look.
+  const [rulesBody, setRulesBody] = useState<RulesViewBody | null>(null)
+  const [rulesBusy, setRulesBusy] = useState(false)
+  const [rulesError, setRulesError] = useState<string | null>(null)
+  const loadRules = (): void => {
+    setRulesBusy(true)
+    setRulesError(null)
+    fetch('/api/dsh-perm-gate/rules', { headers: { 'cache-control': 'no-cache' } })
+      .then(async (r) => {
+        const text = await r.text()
+        if (r.status === 404) throw new Error(t('card.rulesStale'))
+        try {
+          return JSON.parse(text) as { ok?: boolean; result?: RulesViewBody; error?: string }
+        } catch {
+          throw new Error(text.trim().slice(0, 120) !== '' ? text.trim().slice(0, 120) : `HTTP ${r.status}`)
+        }
+      })
+      .then((res) => {
+        if (res.ok === true && res.result !== undefined) setRulesBody(res.result)
+        else setRulesError(res.error ?? t('card.rulesError'))
+      })
+      .catch((e: unknown) => { setRulesError(String((e as Error)?.message ?? e)) })
+      .finally(() => { setRulesBusy(false) })
+  }
+  useEffect(() => { loadRules() }, [])
   // Receiver introspection: the live provider/model-group catalog (host mode)
   // and the provider/model the gate will actually use right now.
   const receiverSource = (value.classifierSource ?? 'custom') === 'host' ? 'host' : 'custom'
@@ -783,6 +832,85 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                             <p style={{ ...hintStyle, margin: 0 }}>{t('card.dryRunNote')}</p>
                           </div>
                         )}
+                  </section>
+
+                  <section style={sectionStyle}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <p style={labelStyle}>{t('card.rules')}</p>
+                      <button
+                        type="button"
+                        disabled={rulesBusy}
+                        onClick={loadRules}
+                        style={{ ...controlStyle, flex: '0 0 auto', cursor: rulesBusy ? 'default' : 'pointer' }}
+                      >
+                        {rulesBusy ? t('card.rulesLoading') : t('card.rulesRefresh')}
+                      </button>
+                    </div>
+                    <p style={hintStyle}>{t('card.rulesHint')}</p>
+
+                    <div style={{ display: 'flex', gap: '8px', overflowWrap: 'anywhere', marginTop: '6px' }}>
+                      <span style={fieldLabelStyle}>{t('card.rulesPath')}</span>
+                      <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+                        {rulesBody?.path !== undefined && rulesBody.path !== '' ? rulesBody.path : t('card.rulesNone')}
+                      </code>
+                    </div>
+
+                    {rulesError !== null && (
+                      <p style={{ ...hintStyle, color: 'var(--dsw-alias-label-error, #c0392b)' }}>{t('card.rulesError')}{rulesError}</p>
+                    )}
+
+                    {rulesBody !== null && (
+                      <>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '4px' }}>
+                          <span>
+                            <span style={fieldLabelStyle}>{t('card.rulesCounts')} </span>
+                            <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+                              {`deny ${rulesBody.counts?.deny ?? 0} · allow ${rulesBody.counts?.allow ?? 0} · ask ${rulesBody.counts?.ask ?? 0}`}
+                            </code>
+                          </span>
+                          {rulesBody.defaultAction !== undefined && (
+                            <span>
+                              <span style={fieldLabelStyle}>{t('card.rulesDefault')} </span>
+                              <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+                                {rulesBody.defaultAction}
+                              </code>
+                            </span>
+                          )}
+                          <span style={fieldLabelStyle}>
+                            {t('card.rulesStats')
+                              .replace('%b', String(rulesBody.bytes ?? 0))
+                              .replace('%l', String(rulesBody.lines ?? 0))}
+                          </span>
+                        </div>
+
+                        {/* Why the document did not load or did not compile. The text below is still shown. */}
+                        {rulesBody.error !== undefined && (
+                          <p style={{ ...hintStyle, color: 'var(--dsw-alias-label-error, #c0392b)' }}>{rulesBody.error}</p>
+                        )}
+                        {rulesBody.exists === false && <p style={hintStyle}>{t('card.rulesMissing')}</p>}
+                        {rulesBody.truncated === true && <p style={hintStyle}>{t('card.rulesTruncated')}</p>}
+
+                        {(rulesBody.raw ?? '') !== '' && (
+                          <pre
+                            style={{
+                              margin: '6px 0 0',
+                              padding: '8px 10px',
+                              maxHeight: '260px',
+                              overflow: 'auto',
+                              borderRadius: '6px',
+                              border: '1px solid var(--dsw-alias-border-l2)',
+                              background: 'var(--dsw-alias-bg-surface, transparent)',
+                              font: '500 12px/18px var(--ds-font-family-code, monospace)',
+                              color: 'var(--dsw-alias-label-primary)',
+                              whiteSpace: 'pre',
+                            }}
+                          >
+                            {rulesBody.raw}
+                          </pre>
+                        )}
+                        <p style={{ ...hintStyle, margin: 0 }}>{t('card.rulesNote')}</p>
+                      </>
+                    )}
                   </section>
 
                   <section style={sectionStyle}>

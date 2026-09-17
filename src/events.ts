@@ -14,6 +14,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import type { RulesView } from './rules-view.js'
 
 /** One gate decision event. `kind` drives the client notice strip styling. */
 export interface GateEvent {
@@ -455,6 +456,7 @@ export const REVERT_ROUTE = '/api/dsh-perm-gate/revert'
 export const SNAPSHOTS_STATS_ROUTE = '/api/dsh-perm-gate/snapshots-stats'
 export const SNAPSHOTS_CLEAR_ROUTE = '/api/dsh-perm-gate/snapshots-clear'
 export const DRY_RUN_ROUTE = '/api/dsh-perm-gate/dry-run'
+export const RULES_ROUTE = '/api/dsh-perm-gate/rules'
 
 /**
  * Register `GET /api/dsh-perm-gate/events?sessionId=&since=` on the webServer
@@ -862,6 +864,49 @@ export function registerDryRunRoute(server: unknown, provider: DryRunRouteProvid
           json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) })
         }
       })()
+    },
+  })
+}
+
+/**
+ * The permissions-file face the settings card calls. `view` reads the rules file
+ * the gate is loading; it must never write it.
+ */
+export interface RulesRouteProvider {
+  view(): RulesView
+}
+
+/**
+ * Register `GET /api/dsh-perm-gate/rules` — the panel's view of the permissions
+ * YAML the gate actually loads.
+ *
+ * **Read-only by construction**, like {@link registerDryRunRoute}: there is no
+ * write form. The card could already *edit* this file — the allowlist section
+ * appends and replaces patterns — but had no way to display it, so an operator
+ * changing rules through the panel could not see the document being changed.
+ * Reading must not be the risky act, and a viewer that could write would make
+ * "let me just look at the rules" a mutation.
+ *
+ * Returns whether the route was registered.
+ */
+export function registerRulesRoute(server: unknown, provider: RulesRouteProvider): (() => void) | undefined {
+  const ws = routeServer(server)
+  if (ws === undefined) return undefined
+  return ws.register({
+    kind: 'exact',
+    path: RULES_ROUTE,
+    handler: (rawReq, rawRes) => {
+      const req = rawReq as RouteReq
+      const res = rawRes as RouteRes
+      if (req.method !== 'GET') {
+        json(res, 405, { ok: false, error: 'method not allowed' })
+        return
+      }
+      try {
+        json(res, 200, { ok: true, result: provider.view() })
+      } catch (e: unknown) {
+        json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) })
+      }
     },
   })
 }
