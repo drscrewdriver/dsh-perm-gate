@@ -10,6 +10,9 @@ import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js';
 export declare function resolveDshHome(configured?: string): string;
 /** This plugin's data directory (`<dshHome>/perm-gate`), always defined. */
 export declare function resolveDataDir(configured?: string): string;
+export declare function ensureDataDir(dataDir: string): boolean;
+/** Check whether the data directory exists without creating it. */
+export declare function dataDirReady(dataDir: string): boolean;
 /**
  * The permissions document the gate loads. An explicit `rulesFile` wins; unset
  * falls back to `<dataDir>/rules.yml`, so a rules file the user drops in the

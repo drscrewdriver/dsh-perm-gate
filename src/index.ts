@@ -8,12 +8,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Config, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, RULES_NAMESPACE, RulesSchema, readRulesFromSettings, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { readRulesView } from './rules-view.js'
+import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
@@ -278,6 +278,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // namespace layers on top and `current()` always reads the active section.
   let current: () => PermissiveSurface & Record<string, unknown> = () => config as never
 
+  // ─── Rules settings scope (dsh-perm-gate-rules namespace) ────────────────
+  // Holds the live settings-sourced rules document. When non-undefined, the
+  // runtime prefers it over the rules file on disk.
+  let rulesScope: { get(): unknown } | undefined
+  const readRulesDocument = (): ReturnType<typeof readRulesFromSettings> => readRulesFromSettings(rulesScope)
+
   // Plugin-owned data files live under $DSH_HOME (node_modules may be
   // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
   // entry that omits `config` still records events, snapshots and learning.
@@ -425,6 +431,8 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // `$DSH_HOME/perm-gate/rules.yml` the user writes is actually loaded without
     // also having to declare `rulesFile` in the composition entry.
     rulesFile: resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir),
+    // Settings-sourced rules take precedence over the file when present.
+    readRulesDocument,
     // The whole gate is scoped to the presets that opt into it (default: the
     // `permissive` tier this plugin adds); elsewhere it stands down entirely.
     gatePresets: resolveGatePresets(
@@ -547,6 +555,22 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     },
   })
 
+  // ─── Rules settings namespace (dsh-perm-gate-rules) ─────────────────────
+  // Registers the rules document in its own DSH settings namespace so the gate
+  // loads rules from settings (when configured) instead of the rules file.
+  installSettingsSection<Record<string, unknown>>(ctx, RULES_NAMESPACE, RulesSchema, {}, {
+    setSource: (source) => {
+      rulesScope = { get: source }
+    },
+    onChange: () => {},
+    onScope: (scope) => {
+      rulesScope = scope
+      // When rules change in settings, reload the runtime so the new ruleset
+      // takes effect on the next tool call.
+      scope.watch(() => { runtime.reload() })
+    },
+  })
+
   // Event feed HTTP API (best effort): the dsh webServer service exposes the
   // JSONL decision events to the browser half; without it events stay on disk.
   try {
@@ -608,15 +632,20 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           ),
       })
       if (offDryRun !== undefined) ctx.effect(() => () => { offDryRun() }, 'dsh-perm-gate: dry-run route')
-      // Permissions YAML view: the document the gate is actually loading, shown
-      // so the panel is never editing a file it cannot display. Read-only, and
-      // resolved exactly as the gate resolves it — a view that resolved its own
-      // path could describe a different file than the one in force.
+      // Permissions view: prefer the settings namespace (dsh-perm-gate-rules)
+      // when it carries a real configuration; fall back to the rules file.
       const rulesFilePath = resolveRulesFile(
         typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
         dataDir,
       )
-      const offRules = registerRulesRoute(webServer, { view: () => readRulesView(rulesFilePath) })
+      const offRules = registerRulesRoute(webServer, {
+        view: () => {
+          const settingsDoc = readRulesDocument()
+          return settingsDoc !== undefined
+            ? readRulesViewFromSettings(settingsDoc)
+            : readRulesView(rulesFilePath)
+        },
+      })
       if (offRules !== undefined) ctx.effect(() => () => { offRules() }, 'dsh-perm-gate: rules route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
