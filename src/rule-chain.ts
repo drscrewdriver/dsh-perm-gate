@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
-import { parsePermissionsDocument, compileDocument, compileRuleEntry, documentHash, type CompiledRuleEntry, type PermissionsDoc, type CompiledRuleset, type CompileOptions, type RuleAction } from './rule.js'
+import { parsePermissionsDocument, compileDocument, documentHash, type PermissionsDoc, type CompiledRuleset, type CompileOptions, type RuleAction } from './rule.js'
 import { hashText } from './compiler.js'
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -190,11 +190,11 @@ function mergeChain(
   // Flatten: deny entries from all files, then allow, then ask.
   // Index numbering is sequential across the entire chain.
   let index = 0
-  const deny = flattenEntries(denyDocs, 'deny', index, opts)
+  const deny = flattenEntries(denyDocs, 'deny', index)
   index += deny.length
-  const allow = flattenEntries(allowDocs, 'allow', index, opts)
+  const allow = flattenEntries(allowDocs, 'allow', index)
   index += allow.length
-  const ask = flattenEntries(askDocs, 'ask', index, opts)
+  const ask = flattenEntries(askDocs, 'ask', index)
 
   return {
     defaultAction: entries.length > 0 ? entries[0].doc.defaultAction : 'ask',
@@ -208,26 +208,34 @@ function mergeChain(
 /**
  * Flatten a list of PermissionDocs into a single list of CompiledRuleEntry
  * for a specific action partition.
- *
- * Every entry goes through `compileRuleEntry` — the exact compiler the
- * single-file path uses. Building entries by hand here previously left
- * `tools`/`command`/`args`/`paths` as empty arrays, and an empty dimension
- * means "no constraint", so EVERY entry matched EVERY call: the first deny
- * entry denied everything in its partition and the first allow entry allowed
- * everything before the `ask` partition was ever consulted.
  */
 function flattenEntries(
   docs: readonly PermissionsDoc[],
   action: RuleAction,
   startIndex: number,
-  opts: CompileOptions,
-): readonly CompiledRuleEntry[] {
-  const result: CompiledRuleEntry[] = []
+): readonly import('./rule.js').CompiledRuleEntry[] {
+  const result: import('./rule.js').CompiledRuleEntry[] = []
   let idx = startIndex
   for (const doc of docs) {
     const list = action === 'deny' ? doc.deny : action === 'allow' ? doc.allow : doc.ask
     for (const entry of list) {
-      result.push(compileRuleEntry(entry, action, idx++, opts))
+      result.push({
+        index: idx++,
+        action,
+        reason: entry.reason,
+        enabled: entry.enabled,
+        tools: [], // Will be compiled in the final merge step
+        command: [],
+        args: [],
+        paths: [],
+        params: entry.params,
+        absent: entry.absent,
+        agents: entry.agents,
+        when: entry.when,
+        argv: entry.argv,
+        network: entry.network,
+        source: entry,
+      })
     }
   }
   return result

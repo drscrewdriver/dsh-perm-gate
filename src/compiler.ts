@@ -224,23 +224,6 @@ export function compileDomainPattern(pattern: string): CompiledPattern {
 }
 
 /**
- * Compile a git branch-name pattern into a matcher.
- *
- * Branch names are path-like (`release/1.0`) but a rule author thinks in
- * segments-with-globs terms (`release*`), so this is a **non-segment** glob:
- * `*` crosses `/` on purpose, matching how `args` patterns behave.
- *
- * Rejects a pattern that is nothing but a separator so a typo can not degrade
- * into "matches everything".
- */
-export function compileBranchPattern(pattern: string): CompiledPattern {
-  if (!/[A-Za-z0-9_*?[\]]/.test(pattern)) {
-    throw new PatternError(`branch pattern ${JSON.stringify(pattern)} has no matchable character`)
-  }
-  return compileGlob(pattern, { segments: false, maxStars: DEFAULT_MAX_STARS })
-}
-
-/**
  * Compile a list of patterns (possibly `!`-prefixed) into param matchers.
  * Returns `{ pattern, negated, compiled }` entries for the params dimension.
  */

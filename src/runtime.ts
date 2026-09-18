@@ -10,9 +10,9 @@
  */
 import { readFileSync } from 'node:fs'
 import { makeEntry, MemoryAuditMirror, type AuditEntry, type AuditOutcome, type DecisionSource } from './audit.js'
-import { resolvePermissiveStrategies, type PermGateConfig, type PermissiveStrategies, type RulesConfig } from './config.js'
+import { resolvePermissiveStrategies, type PermGateConfig, type PermissiveStrategies } from './config.js'
 import type { ClassifierConfig } from './classifier.js'
-import { appendAllowCommand, listAllowCommands, listAllowFromRulesDoc, replaceAllowCommands } from './allowlist.js'
+import { appendAllowCommand, listAllowCommands, replaceAllowCommands } from './allowlist.js'
 import { decide, CONTENT_ARG_KEYS, type FinalDecision, type GrantResolver } from './engine.js'
 import { EventLog, type GateEvent, saveEventSnapshots } from './events.js'
 import { decideRules, type ToolCallContext } from './evaluate.js'
@@ -22,16 +22,7 @@ import { ArtifactRegistry } from './path.js'
 import { classifyRisk, classifyRiskWith, type RiskRequest, type RiskVerdict } from './risk.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
-import {
-  compileDocument,
-  compileRulesObject,
-  documentHash,
-  extractPathCandidates,
-  parsePermissionsDocument,
-  type CompiledRuleEntry,
-  type CompiledRuleset,
-  type RuleAction,
-} from './rule.js'
+import { compileDocument, documentHash, extractPathCandidates, parsePermissionsDocument, type CompiledRuleset } from './rule.js'
 import { decomposeShellCommand } from './shell.js'
 import type { NetworkTarget } from './network.js'
 import { extractAgentCandidates } from './agent-identity.js'
@@ -43,58 +34,6 @@ import { resolveGatePresets } from './config.js'
 export interface PreToolDecisionLike {
   kind: 'deny' | 'ask'
   reason: string
-}
-
-/**
- * The P2 rule chain's own verdict for one call, as reported by
- * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
- * verdict: a P0 hard-deny or a preset deny-keyword fires *before* this layer and
- * never leaves a rule index behind, so a differing pair is information rather
- * than a contradiction.
- */
-export interface RuleExplanation {
-  readonly action: RuleAction
-  readonly reason: string
-  readonly ruleIndex: number | undefined
-  readonly rule: CompiledRuleEntry | undefined
-  readonly defaultAction: RuleAction
-}
-
-/** Locate a rule by its chain-wide index (deny entries first, then allow, then ask). */
-function findRuleByIndex(ruleset: CompiledRuleset, index: number): CompiledRuleEntry | undefined {
-  return (
-    ruleset.deny.find((entry) => entry.index === index) ??
-    ruleset.allow.find((entry) => entry.index === index) ??
-    ruleset.ask.find((entry) => entry.index === index)
-  )
-}
-
-/** Which layer of the chain produced a decision, from its stage. */
-function sourceOfStage(stage: FinalDecision['stage'], reason: string): DecisionSource {
-  switch (stage) {
-    case 'hard-deny':
-      return 'hard-deny'
-    case 'grant':
-      return 'grant'
-    case 'rule':
-      return 'rule'
-    case 'classifier':
-      return 'classifier'
-    default:
-      return reason.startsWith('permissive') ? 'permissive' : 'default'
-  }
-}
-
-/**
- * The pure policy outcome for one call, as reported by
- * {@link PermGateRuntime.explainCall}. Same chain as the host-facing decision,
- * minus every side effect and minus the session-state layers.
- */
-export interface CallExplanation {
-  readonly action: RuleAction
-  readonly reason: string
-  readonly source: DecisionSource | 'deny-keyword' | 'cleanup-safe'
-  readonly ruleIndex?: number
 }
 
 export interface ToolExecutionLike {
@@ -287,25 +226,6 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * Default 30 minutes.
    */
   readonly networkGrantTtlMs?: number
-  // ─── Rules in the settings namespace (dual-source) ──────────────────
-  /**
-   * Live settings-sourced rules document (the `dsh-perm-gate-rules` namespace),
-   * read on every (re)compile. When it carries a real configuration — entries or
-   * a non-default `defaultAction` — it takes precedence over `rulesFile` and the
-   * rule chain (settings first, file fallback); `undefined` means "namespace
-   * still at bare defaults", and the file paths run unchanged.
-   */
-  readonly readRulesDocument?: () => RulesConfig | undefined
-  /**
-   * Settings-backed allowlist writer. When wired (the settings service is
-   * available), {@link approveAllowEverywhere} / {@link setAllowlist} go through
-   * it instead of rewriting the rules file; a falsy verdict (no scope, rejected
-   * write) falls back to the file path.
-   */
-  readonly allowlistWriter?: {
-    readonly append: (pattern: string, reason: string) => boolean
-    readonly replace: (patterns: readonly string[], reason: string) => boolean
-  }
 }
 
 export type CallDecision = 'allow' | 'deny' | 'ask'
@@ -531,12 +451,6 @@ export class PermGateRuntime {
    * frozen events, which would otherwise re-fold on every tool call.
    */
   private presetCache: { length: number; last: SessionEventLike | undefined; preset: string | undefined } | undefined
-  /**
-   * Last stand-down announced per session (sessionId → the out-of-scope preset
-   * name, `''` when the session records none). Bounded by the session count and
-   * only read on the stand-down path — the in-scope path never touches it.
-   */
-  private readonly standDownAnnounced = new Map<string, string>()
   private readonly learning: RiskLearning
   private readonly events?: EventLog
   /** Learning candidates awaiting human approval + execution (call fingerprint → candidate). */
@@ -582,24 +496,6 @@ export class PermGateRuntime {
       defaultAction: options.defaultAction ?? 'ask',
       deny: [], allow: [], ask: [],
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
-    }
-
-    // Settings-first (dual-source): a configured `dsh-perm-gate-rules`
-    // namespace overrides every file path — the gate then loads with zero
-    // filesystem dependency. Bare defaults (nothing configured) fall through
-    // to the file sources below. Compile errors propagate: the constructor
-    // fails loud, and `reload()` keeps the previous rules on a hot change.
-    const settingsDoc = options.readRulesDocument?.()
-    if (settingsDoc !== undefined) {
-      const hash = documentHash(JSON.stringify(settingsDoc))
-      const hit = this.cache.get(hash)
-      if (hit !== undefined) return hit
-      const compiled = compileRulesObject(settingsDoc, {
-        maxGlobStars: 2,
-        caseInsensitivePaths: options.caseInsensitivePaths ?? true,
-      })
-      this.cache.set(hash, compiled)
-      return compiled
     }
 
     // Chain mode: when searchUp is enabled, use the multi-file chain resolver.
@@ -963,43 +859,9 @@ export class PermGateRuntime {
    * `danger-full-access` means "full access without approval prompts", where a
    * forwarded ask can only fail (the approval seam rejects before any answerer
    * runs) and a hard-deny would silently overrule the tier the user chose.
-   *
-   * P0 is therefore monotonic only WITHIN the gate's scope, not across every
-   * preset. {@link announceStandDown} makes that visible instead of silent.
    */
-  private gateActive(preset: string | undefined): boolean {
-    return presetInScope(preset, this.gatePresets)
-  }
-
-  /**
-   * Record one `stand-down` event the first time a session is observed with a
-   * preset outside {@link gatePresets}, and again whenever that preset changes.
-   *
-   * Per-call silence is what makes a stand-down dangerous: the tool call looks
-   * exactly like a call the gate inspected and allowed. One event per
-   * transition is enough to say otherwise, and keeps the feed (and the
-   * `events.jsonl` append) proportional to preset changes rather than to call
-   * volume.
-   *
-   * The event is a NOTICE, not a decision: it carries no allow/deny meaning,
-   * and the call it was observed on is still settled entirely by the selected
-   * tier. `verdict: 'stand-down'` labels it for the history view.
-   */
-  private announceStandDown(exec: ToolExecutionLike, preset: string | undefined): void {
-    const sessionId = sessionIdOf(exec)
-    const announced = preset ?? ''
-    if (this.standDownAnnounced.get(sessionId) === announced) return
-    this.standDownAnnounced.set(sessionId, announced)
-    const scope = this.gatePresets.includes('*') ? 'every preset' : this.gatePresets.join(', ')
-    const named = preset === undefined ? 'no permission/preset recorded' : `"${preset}"`
-    this.recordEvent(
-      exec,
-      'stand-down',
-      `perm-gate is INACTIVE: the session permission preset is ${named} and the gate scope is ${scope}. `
-        + 'No P0 hard-deny, no rule, no ask and no allow is evaluated for any call in this session — '
-        + 'the selected tier\'s own policy governs. Select a preset in the gate scope to re-arm it.',
-      { verdict: 'stand-down' },
-    )
+  private gateActive(exec: ToolExecutionLike): boolean {
+    return presetInScope(this.presetOf(exec), this.gatePresets)
   }
 
   /**
@@ -1231,17 +1093,10 @@ export class PermGateRuntime {
    */
   decideExecution(exec: ToolExecutionLike): PreToolDecisionLike | undefined {
     // The gate is scoped to its own tier(s): anywhere else it stands down
-    // entirely and decides nothing (the session's selected tier owns the call).
-    // The stand-down is announced ONCE per (session, preset) transition — the
-    // call's outcome is unchanged, but the user must be able to see that the
-    // gate — including P0 hard-deny — is inactive; a silent stand-down reads as
-    // "the gate looked at this and allowed it".
-    const preset = this.presetOf(exec)
-    if (!this.gateActive(preset)) {
-      this.announceStandDown(exec, preset)
-      return undefined
-    }
+    // entirely and records nothing (the session's selected tier owns the call).
+    if (!this.gateActive(exec)) return undefined
 
+    const ctx = this.ctxFor(exec)
     const callId = randomId()
 
     // Preset deny-keyword layer (deny wins over allow): a dangerous-keyword hit
@@ -1255,9 +1110,13 @@ export class PermGateRuntime {
       return { kind: 'deny', reason }
     }
 
-    // The same chain `explainCall` reports, evaluated once here so the two views
-    // cannot drift; this caller adds the side effects and the session layers.
-    const decision = this.applyPermissive(this.rawPolicy(exec))
+    const grantResolver: GrantResolver = (tool, args) => {
+      if (exec.parentAuthorized === false) return 'no-match'
+      return this.grants.decide(tool, args)
+    }
+
+    const raw = decide(ctx, { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
+    const decision = this.applyPermissive(raw)
 
     // Deterministic cleanup pre-screen: if a deletion command targets a
     // regenerable/temporary artifact inside the workspace, allow it directly.
@@ -1328,85 +1187,6 @@ export class PermGateRuntime {
     // rather than prompted. Reached only after the two passthrough early-returns.
     this.clearCall(exec, decision.reason, source, source)
     return undefined
-  }
-
-  /**
-   * The **pure policy** outcome for one call: the same chain
-   * {@link decideExecution} runs, with every side effect and every session-state
-   * layer removed.
-   *
-   * Side effects removed — no audit entry, no event, no ask tracking, no call
-   * clearance, no learning. A rule-test panel must be able to run on every
-   * keystroke without writing to the live decision feed.
-   *
-   * Session-state layers removed — the preset stand-down and the
-   * `approval: never` ask degradation both describe a session a session-less
-   * caller does not have. Including them is not harmless: the degradation turns
-   * every "the rules would ask a human" into a reported **allow**, which is the
-   * opposite of the truth for exactly the rules someone opens the panel to
-   * review (measured on the live host: `shell ls -la` reported `allow` while the
-   * rule layer said `ask`).
-   *
-   * `reason` is never collapsed: "allow" has causes worth naming (a rule, a
-   * grant, cleanup-safety, the permissive default).
-   */
-  explainCall(exec: ToolExecutionLike): CallExplanation {
-    const keyword = this.denyKeywordHit(exec)
-    if (keyword !== undefined) {
-      return {
-        action: 'deny',
-        reason: `deny-keyword: matches preset blacklist entry "${keyword}"`,
-        source: 'deny-keyword',
-      }
-    }
-    const decision = this.applyPermissive(this.rawPolicy(exec))
-    if (decision.action === 'ask') {
-      const cleanupSafe = isCleanupSafe(exec)
-      if (cleanupSafe !== undefined) {
-        return { action: 'allow', reason: `cleanup-safe: ${cleanupSafe}`, source: 'cleanup-safe' }
-      }
-    }
-    return {
-      action: decision.action,
-      reason: decision.reason,
-      source: sourceOfStage(decision.stage, decision.reason),
-      ...(decision.ruleIndex !== undefined ? { ruleIndex: decision.ruleIndex } : {}),
-    }
-  }
-
-  /**
-   * P0 hard-deny → P1 session grant → P2 rules → P4 ask, as a value. Shared by
-   * the host-facing decision and {@link explainCall} so the two cannot drift.
-   */
-  private rawPolicy(exec: ToolExecutionLike): FinalDecision {
-    const grantResolver: GrantResolver = (tool, args) => {
-      if (exec.parentAuthorized === false) return 'no-match'
-      return this.grants.decide(tool, args)
-    }
-    return decide(this.ctxFor(exec), { decide: (c) => decideRules(this.ruleset, c) }, grantResolver, this.autoAllowExtra)
-  }
-
-  /**
-   * Rule-layer explanation for one would-be call: what the `permissions` chain
-   * decides on its own, before P0 hard-deny, P1 session grants, the P3
-   * classifier and the P4 ask ever get a say.
-   *
-   * This is the read-only half of a dry-run. It appends nothing to the audit
-   * mirror, records no event, mints no grant and touches no learning store, so a
-   * "rule test" panel may call it on every keystroke without leaving a trace in
-   * the decision feed. It answers a narrower question than
-   * {@link decideExecution} and says so: `ruleIndex` identifies a rule in the
-   * chain, which only this layer can attribute.
-   */
-  explainRules(exec: ToolExecutionLike): RuleExplanation {
-    const decision = decideRules(this.ruleset, this.ctxFor(exec))
-    return {
-      action: decision.action,
-      reason: decision.reason,
-      ruleIndex: decision.ruleIndex,
-      rule: decision.ruleIndex === undefined ? undefined : findRuleByIndex(this.ruleset, decision.ruleIndex),
-      defaultAction: this.ruleset.defaultAction,
-    }
   }
 
   /**
@@ -1520,22 +1300,13 @@ export class PermGateRuntime {
     if (risk.kind === 'risky') {
       if (risk.category !== 'neutral') {
         // Hard category (deletion / credential / remote / system / bulk) or an
-        // off-protocol output graded hard: KEEP THE ASK.
-        //
-        // Denying here would make a probabilistic verdict the source of an
-        // unappealable block: the gate would be "sure enough" to refuse on the
-        // model's word alone, with no popup to appeal to and no grant to retry
-        // with — measured live on a benign `git commit -F …` the grader called
-        // `remote`. Deny stays with the deterministic layers (P0 hard-deny, the
-        // deny-keyword blacklist, explicit `deny:` rules); everything the
-        // classifier merely *suspects* is negotiated with the human instead.
-        //
-        // Hard categories stay distinct from `neutral` in one way that matters:
-        // they are NEVER learnable, so repeated confirmations cannot sediment
-        // them into an auto-allow.
-        const hardReason = `${decision.reason} [llm-assist risky:${risk.category} → ask]`
-        this.trackAsk(exec, hardReason, undefined)
-        return { kind: 'ask', reason: hardReason }
+        // off-protocol output graded hard: auto-deny. The operation is clearly
+        // dangerous or sensitive — no popup, no learning, just block.
+        const reason = `${decision.reason} [llm-assist risky:${risk.category} → auto-deny]`
+        this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'deny', source: 'classifier', reason, at: Date.now() }))
+        this.recordEvent(exec, 'deny', reason, { risk: risk.category, verdict: 'llm-deny', category: risk.category })
+        this.untrackAsk(exec)
+        return { kind: 'deny', reason }
       }
 
       const learning = this.liveRiskLearning()
@@ -1772,40 +1543,26 @@ export class PermGateRuntime {
 
   /**
    * Grant "allow every occurrence of this command" (the always-confirm panel's
-   * second extended allow button): persist the command into the rules' `allow`
-   * whitelist and reload. Prefers the settings-backed writer (the namespace's
-   * watch triggers the reload once the write lands); falls back to the rules
-   * file when no settings scope is wired. Returns the write verdict.
+   * second extended allow button): persist the command into the rules file's
+   * `allow` whitelist and reload. Returns the reload result.
    */
   approveAllowEverywhere(commandWord: string, reason = 'permissive allow-everywhere'): boolean {
-    const writer = this.options.allowlistWriter
-    if (writer !== undefined && writer.append(commandWord, reason)) return true
     if (!this.options.rulesFile) return false
     if (!appendAllowCommand(this.options.rulesFile, commandWord, reason)) return false
     return this.reload()
   }
 
-  /**
-   * Read-only view of the current allow-list command patterns (whitelist).
-   * Reads the settings document when the namespace is configured, else the
-   * rules file.
-   */
+  /** Read-only view of the current allow-list command patterns (whitelist). */
   allowlist(): readonly string[] {
-    const doc = this.options.readRulesDocument?.()
-    if (doc !== undefined) return listAllowFromRulesDoc(doc)
     if (!this.options.rulesFile) return []
     return listAllowCommands(this.options.rulesFile)
   }
 
   /**
    * Replace the whitelist with exactly the given command patterns and reload.
-   * Prefers the settings-backed writer; falls back to the rules file when no
-   * settings scope is wired. Returns the write verdict (false when neither
-   * sink is available or the write failed).
+   * Returns the reload result (false when no rulesFile or the write failed).
    */
   setAllowlist(patterns: readonly string[]): boolean {
-    const writer = this.options.allowlistWriter
-    if (writer !== undefined && writer.replace(patterns, 'permissive allowlist')) return true
     if (!this.options.rulesFile) return false
     if (!replaceAllowCommands(this.options.rulesFile, patterns)) return false
     return this.reload()

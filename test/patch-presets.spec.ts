@@ -82,15 +82,6 @@ describe('cordis.patch.yml permission presets', () => {
     expect(presets['permissive']?.name).toBe('自动审查')
   })
 
-  it('never uses the reserved `custom` key', () => {
-    // Ported from the DSH 0.1.5 line, where the `permission` id is backed by
-    // @deepseek-ai/dsh-permission-presets and its PermissionPresetService
-    // rejects `custom` as a reserved key. A preset map that grows a `custom`
-    // entry therefore throws on load there while staying silent on 0.1.2 —
-    // so the reservation is pinned here, on the line both branches share.
-    expect(Object.keys(presets)).not.toContain('custom')
-  })
-
   it('does not resurrect the retired auto tier', () => {
     // dsh-auto-mode contributed it; that plugin is uninstalled, its knobs were
     // identical to workspace-write, and this gate is inactive in it.

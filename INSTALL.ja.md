@@ -12,31 +12,30 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` バージョン **3.0.0**。判定チェーン、ルールファイル形式、自动审查
+`dsh-perm-gate` バージョン **2.1.2**。判定チェーン、ルールファイル形式、自动审查
 ティアについては [日本語 README](./README.ja.md) を参照してください。
 
 ## 必要条件
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) がインストール済みであること。
-- Node.js **>= 24**（`package.json` の `engines` を参照）。
+- Node.js **>= 20**（`package.json` の `engines` を参照）。
 - `dsh` CLI が `PATH` に存在すること。
 - インストール先の profile。ブラウザ側は `web` profile 向けにのみビルドされます
   （`package.json` の `dsh.client.platform = "web"`）。
 
-## DSH のバージョンに合うラインを選ぶ
+## DSH のバージョンに合う tag を選ぶ
 
-2 つの長期ブランチが 2 つの DSH ラインを担当します：`main`（2.x）と
-`sync/0.1.5-from-main`（3.x、DSH 0.1.5 のパッケージング変体 —— `compat/0.1.5` は
-同じコードツリーを指します）。
+単一ビルドが DSH 両ラインをカバーするため、どちらの tag を選んでも動作するコードが
+インストールされます —— tag を残しておくのは、あなたがピン留めするバージョンが
+各ラインで意味を持つようにするためです。
 
 | DSH のバージョン | インストール方法 |
 |-----------------|-----------------|
-| `0.1.2-alpha.1` – `0.1.5-rc.0` | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`、2.x ライン） |
-| `0.1.5-rc.1` 以上 | `dsh plugin --profile web add github:drscrewdriver/dsh-perm-gate#sync/0.1.5-from-main`（3.x ライン；npm の dist-tag は未公開 —— `@latest` は同じコードの 2.x パッケージングをインストールします） |
+| `0.1.2-alpha.1` 以上（`0.1.5-rc.2` を含む） | `dsh plugin --profile web add dsh-perm-gate`（tag `latest`） |
 | `0.1.1-rc.2` まで | `dsh plugin --profile web add dsh-perm-gate@legacy` |
 
-DSH は `engines.dsh` を強制しないため、tag と ref は選択メカニズムであり、互換性
-ゲートそのものではありません。ラインと tag の公開レイアウトについては
+DSH は `engines.dsh` を強制しないため、tag が選択メカニズムであり、互換性ゲート
+そのものではありません。単一ビルドが両ラインをカバーする理由と tag の公開方法については、
 [RELEASING.md](./RELEASING.md) を参照してください。
 
 ## 公式 CLI でインストール
@@ -72,11 +71,6 @@ profile の `cordis.yml` にプラグインを追加します：
     dshHome: $DSH_HOME              # 保護対象チェックのルート固定
     defaultAction: ask              # allow | ask | deny
 ```
-
-ルール本体は `dsh-perm-gate-rules` settings 名前空間に保存され、変更のたびにゲートが
-その場で再コンパイルされます。上記の YAML ファイルは任意です。名前空間が未設定の間
-だけ読み込まれ、プラグインが最初にルールを書き込む際（許可リストの承認、または設定
-UI での編集）にファイルのルールが自動的に取り込まれます。
 
 まずは [examples/permissions.example.yaml](./examples/permissions.example.yaml)
 から始め、profile を再読込してください。

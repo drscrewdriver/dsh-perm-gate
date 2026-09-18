@@ -8,18 +8,15 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parse } from 'yaml'
-import { Config, RULES_NAMESPACE, RulesSchema, isRulesConfigured, readRulesFromSettings, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
-import { appendAllowToSettings, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
-import { runDryRun } from './dry-run.js'
-import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, registerStreamRoute, type SessionSender, type WebServerLike } from './events.js'
+import { Config, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
-import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
 import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
+import { RuleWatcher } from './watch.js'
 
 export const name = 'dsh-perm-gate'
 /**
@@ -271,41 +268,6 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // entry that omits `config` still records events, snapshots and learning.
   const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
 
-  // ─── Rules sources (dual-source: settings first, rulesFile fallback) ──
-  // The `dsh-perm-gate-rules` settings namespace is the primary rules store —
-  // the framework owns it, so the gate loads with no rules file on disk. A
-  // namespace still at bare defaults never shadows the file, and the first
-  // settings write seeds the file document along (implicit migration). Both
-  // references are filled in by the settings registration below; until then
-  // the file paths run exactly as before.
-  const rulesFilePath = resolveRulesFile(
-    typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
-    dataDir,
-  )
-  let rulesFromSettings: () => Record<string, unknown> = () => ({})
-  const rulesScopeRef: { scope: SettingsRulesScope | undefined } = { scope: undefined }
-  /** The raw file document, for seeding the namespace on its first write. */
-  const fileSeedDoc = (): unknown => {
-    try {
-      const text = readFileSync(rulesFilePath, 'utf8')
-      if (text.trim() === '') return undefined
-      return parse(text)
-    } catch {
-      return undefined
-    }
-  }
-  const settingsWrite = (
-    write: (scope: SettingsRulesScope, seed: unknown) => Promise<boolean>,
-    fallback: () => boolean,
-  ): boolean => {
-    const scope = rulesScopeRef.scope
-    if (scope === undefined) return fallback()
-    void write(scope, fileSeedDoc()).catch((e: unknown) => {
-      console.warn('[dsh-perm-gate] settings rules write failed:', e)
-    })
-    return true
-  }
-
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same
   // contract). The llm service backs the `host` receiver; agentDefaultModel
@@ -446,25 +408,8 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       : join(dataDir, 'learning.json'),
     // The rules document lives in the plugin's data dir by default, so a
     // `$DSH_HOME/perm-gate/rules.yml` the user writes is actually loaded without
-    // also having to declare `rulesFile` in the composition entry. It is the
-    // FALLBACK source: a configured `dsh-perm-gate-rules` namespace wins.
-    rulesFile: rulesFilePath,
-    // Settings-first rules: the live `dsh-perm-gate-rules` document when the
-    // namespace carries a real configuration, else undefined (file fallback).
-    readRulesDocument: () => readRulesFromSettings({ get: () => rulesFromSettings() }),
-    // Settings-backed allowlist writes; a falsy verdict (settings service
-    // absent) makes the runtime fall back to its own rules-file paths, and the
-    // namespace's watch triggers the reload once a write lands.
-    allowlistWriter: {
-      append: (pattern: string, reason: string) => settingsWrite(
-        (scope, seed) => appendAllowToSettings(scope, pattern, reason, seed),
-        () => false,
-      ),
-      replace: (patterns: readonly string[], reason: string) => settingsWrite(
-        (scope, seed) => replaceAllowInSettings(scope, patterns, reason, seed),
-        () => false,
-      ),
-    },
+    // also having to declare `rulesFile` in the composition entry.
+    rulesFile: resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir),
     // The whole gate is scoped to the presets that opt into it (default: the
     // `permissive` tier this plugin adds); elsewhere it stands down entirely.
     gatePresets: resolveGatePresets(
@@ -560,16 +505,14 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     },
     onChange: () => {},
     onScope: (scope) => {
-      // Seed the editable whitelist from the rules source only when the
-      // namespace carries no override yet, so the card shows the current allow
-      // patterns.
+      // Seed the editable whitelist from the rules file only when the namespace
+      // carries no override yet, so the card shows the current allow patterns.
       const surface = asSurface(scope.get())
       if (surface !== undefined && !Array.isArray(surface.allowlist)) {
         const patterns = runtime.allowlist()
         if (patterns.length > 0) void scope.update({ allowlist: patterns.slice() })
       }
-      // Card edits -> namespace -> rules source (settings via the runtime's
-      // writer, else the rules file mirror) + reload.
+      // Card edits -> namespace -> rulesFile (mirror + reload).
       scope.watch(() => {
         const next = asSurface(scope.get())
         if (next !== undefined && Array.isArray(next.allowlist)) {
@@ -589,23 +532,6 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     },
   })
 
-  // The rules namespace: the primary rules store (JSON twin of rules.yml).
-  // Every change recompiles the gate — the settings half of the hot reload
-  // that used to be a chokidar file watcher. `onScope` hands the live scope to
-  // the allowlist writers above; the seed entry is `{}`, so an untouched
-  // namespace reads as "not configured" and the file paths stay in force.
-  installSettingsSection<Record<string, unknown>>(ctx, RULES_NAMESPACE, RulesSchema, {}, {
-    setSource: (source) => {
-      rulesFromSettings = source
-    },
-    onChange: () => {
-      runtime.reload()
-    },
-    onScope: (scope) => {
-      rulesScopeRef.scope = scope
-    },
-  })
-
   // Event feed HTTP API (best effort): the dsh webServer service exposes the
   // JSONL decision events to the browser half; without it events stay on disk.
   try {
@@ -620,10 +546,6 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     if (webServer !== undefined && runtime.eventLog !== undefined) {
       const offEvents = registerEventsRoute(webServer, runtime.eventLog)
       if (offEvents !== undefined) ctx.effect(() => () => { offEvents() }, 'dsh-perm-gate: events route')
-      // Push plane: the browser half follows decisions over one SSE connection
-      // instead of re-reading the event log on a timer.
-      const offStream = registerStreamRoute(webServer, runtime.eventLog)
-      if (offStream !== undefined) ctx.effect(() => () => { offStream() }, 'dsh-perm-gate: stream route')
     }
     // Review-page plane (diff / revert / snapshot stats / snapshot clear): the
     // approval-history view's file chips and snapshot bar drive these.
@@ -652,37 +574,6 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         snapshot: () => networkRefs.snapshot?.() ?? { enabled: false, proxyActive: false },
       })
       if (offNetwork !== undefined) ctx.effect(() => () => { offNetwork() }, 'dsh-perm-gate: network route')
-      // Rule test (dry-run): evaluate one would-be call against the ruleset the
-      // gate currently has loaded, and report both the effective verdict and the
-      // rule layer's own answer. Read-only — the route has no write form, so
-      // testing a rule can never change it. It runs against the LIVE runtime
-      // rather than a fresh one so the panel tests the rules in force, not a
-      // re-derivation of them (a fresh runtime would also re-resolve the chain
-      // from a different root and could silently answer about a different file).
-      const offDryRun = registerDryRunRoute(webServer, {
-        run: (request) =>
-          runDryRun(
-            {
-              tool: request.tool,
-              args: request.args,
-              ...(request.permissive !== undefined ? { permissive: request.permissive } : {}),
-            },
-            runtime,
-          ),
-      })
-      if (offDryRun !== undefined) ctx.effect(() => () => { offDryRun() }, 'dsh-perm-gate: dry-run route')
-      // Permissions view: the document the gate is actually loading, shown so
-      // the panel is never editing rules it cannot display. Read-only, and
-      // resolved exactly as the gate resolves it — settings first, the file the
-      // fallback resolves to otherwise.
-      const offRules = registerRulesRoute(webServer, {
-        view: () => {
-          const doc = rulesFromSettings()
-          if (isRulesConfigured(doc)) return readRulesViewFromSettings(doc)
-          return readRulesView(rulesFilePath)
-        },
-      })
-      if (offRules !== undefined) ctx.effect(() => () => { offRules() }, 'dsh-perm-gate: rules route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null
@@ -841,11 +732,27 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   }
   networkRefs.snapshot = () => networkLifecycle.snapshot()
   if (networkRefs.appliedKey === undefined) networkRefs.appliedKey = networkKeyOf(current())
-  // ─── Rule hot reload ────────────────────────────────────────────────
-  // The file watcher (chokidar) is gone: the settings namespace is the primary
-  // rules store and its `scope.watch` recompiles the gate on every change
-  // (see the RULES_NAMESPACE registration above). A rules FILE edit is no
-  // longer picked up mid-session — the settings document is the source to edit.
+  // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────
+  const watchEnabled = typeof config.watch === 'boolean' ? config.watch : true
+  if (watchEnabled) {
+    const watchDebounceMs = typeof config.watchDebounceMs === 'number' ? config.watchDebounceMs : 300
+    const ruleWatcher = new RuleWatcher({
+      debounceMs: watchDebounceMs,
+      logger: { warn: (msg: string) => console.warn(msg) },
+    })
+    // Watch the effective rules file for the current workspace.
+    const rulesFile = resolveRulesFile(
+      typeof config.rulesFile === 'string' ? config.rulesFile : undefined,
+      dataDir,
+    )
+    const cwd = typeof config.cwd === 'string' ? config.cwd : process.cwd()
+    ruleWatcher.watch(cwd, [rulesFile], () => {
+      runtime.reload()
+    })
+    ctx.effect(() => () => {
+      ruleWatcher.closeAll()
+    }, 'dsh-perm-gate: rule watcher')
+  }
 
   return runtime
 }

@@ -11,11 +11,9 @@ import {
   type CompiledRuleset,
   type RuleAction,
 } from './rule.js'
-import { commandArgv, decomposeShellCommand, isForceDeletion, isRecursiveDeletion, type SimpleCommand } from './shell.js'
+import { decomposeShellCommand, isForceDeletion, isRecursiveDeletion, type SimpleCommand } from './shell.js'
 import { compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
-import { dispatchCommand } from './command-dispatcher.js'
 import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
-import type { CompiledBranchDimension } from './rule.js'
 
 export interface ToolCallContext {
   readonly tool: string
@@ -114,22 +112,13 @@ export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, comma
   // argv dimension: pipeline patterns.
   if (rule.argv?.pipeline !== undefined && rule.argv.pipeline.length > 0) {
     if (commands.length === 0) return false
-    // Join the FULL argv of each simple command: `c.command` alone is just the
-    // command word, so `curl https://x | sh` would read as `curl|sh` and the
-    // documented `curl|sh` pattern could never see its own subject.
-    const pipelineText = commands.map((c) => commandArgv(c)).join('|')
+    const pipelineText = commands.map((c) => c.command).join('|')
     const compiled = rule.argv.pipeline.map((p) => compileGlobForMatch(p))
     if (!compiled.some((g) => g.test(pipelineText))) return false
   }
   // network dimension: all present sub-dimensions must match.
   if (rule.network !== undefined) {
     if (!matchNetwork(rule.network, ctx.network)) return false
-  }
-  // branch dimension: git semantics only; non-git commands satisfy no branch
-  // dimension (per sub-dimension above). Never throws — a parser is pure, and
-  // the dispatcher falls back to `family: 'unknown'` rather than raising.
-  if (rule.branch !== undefined) {
-    if (!matchBranch(rule.branch, commands)) return false
   }
   return true
 }
@@ -384,62 +373,5 @@ function matchNetwork(network: NetworkDimension, ctx?: { domain?: string; ip?: s
     if (ctx.scheme === undefined) return false
     if (!network.schemes.includes(ctx.scheme)) return false
   }
-  return true
-}
-
-/**
- * Per-call memo for command classification.
- *
- * `ruleMatches` runs once per rule, so a rule chain with several `branch`
- * rules would otherwise re-parse the same command each time. `dispatchCommand`
- * is pure, so caching its result per `SimpleCommand` object is safe; the
- * WeakMap keeps no references once the command array is dropped.
- */
-const commandSemanticsCache = new WeakMap<SimpleCommand, ReturnType<typeof dispatchCommand>>()
-
-function semanticsOf(cmd: SimpleCommand): ReturnType<typeof dispatchCommand> {
-  const cached = commandSemanticsCache.get(cmd)
-  if (cached !== undefined) return cached
-  // The parser needs the WHOLE argv: `cmd.command` carries only the command
-  // word, so `git push --force origin main` would arrive as `git` and classify
-  // as `family: unknown` (no branch, no remote, no flags).
-  const result = dispatchCommand(commandArgv(cmd))
-  commandSemanticsCache.set(cmd, result)
-  return result
-}
-
-/**
- * Branch dimension matching (git semantics only).
- *
- * Candidates come from the shared command dispatcher, so `refspec` forms
- * (`HEAD:main`) are already split and a remote name is never mistaken for a
- * branch name. Sub-dimensions are AND (each present one must match); within a
- * sub-dimension the entries are OR.
- *
- * **Non-git commands satisfy no branch dimension**: `dispatchCommand` reports
- * `family: 'unknown'` for them rather than throwing, so a rule that names a
- * branch simply does not match `rm -rf`, `npm install` and friends. That is
- * deliberate — the write-path/blacklist layers cover non-git commands.
- *
- * `shared` is the parser's STATIC protected-branch rule (main / master /
- * production / release / stable, see `src/parsers/git.ts`). No git subprocess
- * ever runs on the decision path.
- */
-function matchBranch(branch: CompiledBranchDimension, commands: readonly SimpleCommand[]): boolean {
-  if (commands.length === 0) return false
-  const branches: string[] = []
-  const remotes: string[] = []
-  let anyShared = false
-  for (const cmd of commands) {
-    const result = semanticsOf(cmd)
-    if (result === null || result.semantics.family !== 'git') continue
-    const { branch: name, remote, targetsSharedBranch } = result.semantics
-    if (targetsSharedBranch) anyShared = true
-    if (typeof name === 'string' && name.length > 0) branches.push(name)
-    if (typeof remote === 'string' && remote.length > 0) remotes.push(remote)
-  }
-  if (branch.shared && !anyShared) return false
-  if (branch.target.length > 0 && !branches.some((b) => branch.target.some((g) => g.re.test(b)))) return false
-  if (branch.remote.length > 0 && !remotes.some((r) => branch.remote.some((g) => g.re.test(r)))) return false
   return true
 }
