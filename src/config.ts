@@ -3,6 +3,7 @@
  * loader validates and fills defaults before `apply`. Invalid values fail loud.
  */
 import { homedir } from 'node:os'
+import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
@@ -24,6 +25,39 @@ export function resolveDshHome(configured?: string): string {
 /** This plugin's data directory (`<dshHome>/perm-gate`), always defined. */
 export function resolveDataDir(configured?: string): string {
   return join(resolveDshHome(configured), 'perm-gate')
+}
+
+/**
+ * Lazily ensure the data directory exists. Safe to call repeatedly —
+ * `mkdirSync({recursive:true})` is a no-op when the directory already
+ * exists. Returns `true` if the directory is now available, `false`
+ * if creation failed (caller should degrade to empty defaults).
+ *
+ * Used by every write path. Read paths should call `dataDirReady()`
+ * instead to avoid creating the directory as a side effect of reading.
+ */
+let _dataDirReady = false
+export function ensureDataDir(dataDir: string): boolean {
+  if (_dataDirReady) return true
+  try {
+    mkdirSync(dataDir, { recursive: true })
+    _dataDirReady = true
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Check whether the data directory exists without creating it. */
+export function dataDirReady(dataDir: string): boolean {
+  if (_dataDirReady) return true
+  try {
+    statSync(dataDir)
+    _dataDirReady = true
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -402,7 +436,7 @@ export const Config: z<PermGateConfig> = z.object({
   networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000),
   networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000),
   // Hot reload (Phase 3)
-  watch: z.boolean().default(true),
+  watch: z.boolean().default(false),
   watchDebounceMs: z.number().min(50).max(5000).default(300),
 })
 
