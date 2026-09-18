@@ -5,6 +5,216 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-09-17
+
+### Added
+
+- **Rule test (dry-run) in the settings card.** A new panel evaluates one would-be tool call
+  against the ruleset the gate currently has loaded and shows the verdict, the matched rule (index
+  and action), the dimensions that rule constrains, and the reason. Written for the question the
+  YAML cannot answer by inspection: *what will this actually do?* — `args` is an OR over tokens, an
+  empty dimension constrains nothing, and `command` matches the decomposed command **word** only, so
+  a plausible-looking rule can be dead on arrival.
+
+  The report keeps two answers apart on purpose. **`verdict`** is the policy result of the whole
+  chain (P0 hard-deny → deny-keyword → P1 grant → P2 rules → P4 ask → permissive).
+  **`ruleLayer`** is what the `permissions` chain decides on its own, and only that layer can name a
+  rule index: a P0 hard-deny or a preset deny-keyword fires *before* it and leaves no rule behind, so
+  the panel says so instead of attributing an unrelated rule. `matchedDimensions` likewise lists the
+  dimensions the matched rule *constrains* rather than the one that "caused" the match — dimensions
+  are ANDed, so a single cause cannot honestly be named. A `ruleCount` of 0 is surfaced as "0 rules
+  loaded, check the rulesFile path" rather than as "nothing matched".
+
+- **`POST /api/dsh-perm-gate/dry-run`** — the panel's endpoint. **Read-only by construction**: it
+  has no write form, unknown body keys are dropped rather than forwarded, and it never touches
+  rules, grants, learning state or the settings namespace. Testing a rule must not be able to change
+  it. It evaluates against the **live** runtime rather than a fresh one, so the panel tests the rules
+  in force — a fresh runtime would re-resolve the chain from a different root and could silently
+  answer about a different file.
+
+- **`src/dry-run.ts`** — `runDryRun` / `createDryRunRuntime`, the shared evaluator for the CLI and
+  the route, plus `PermGateRuntime.explainRules` (read-only rule-layer report) and
+  `PermGateRuntime.explainCall` (pure policy evaluation). `src/cli.ts` is now a thin wrapper over it;
+  its output is unchanged across nine replayed invocations, verified byte for byte (including the
+  `--list`, no-tool, bad-JSON and write-path cases).
+
+### Fixed
+
+- **The rule-test panel reported `allow` for calls the rules send to a human.** The first version
+  evaluated through the host-facing path, which applies the session layers — the preset stand-down
+  and the `approval: never` ask degradation. A session-less dry-run has no session, so the policy
+  reader answered "never", every `ask` degraded to a passthrough, and the panel showed **allow** for
+  exactly the rules someone opens it to review. Measured on the live host: `shell ls -la` showed
+  `allow` while the rule layer on the same card said `ask`.
+
+  `runDryRun` now reports the **pure policy** verdict from `explainCall`: the same
+  P0 → deny-keyword → P1 → P2 → P4 chain with the session-state layers excluded rather than guessed,
+  and with `reason` never collapsed to a bare `(default/passthrough)`. The host-facing view remains
+  available under `input.hostView`; the CLI asks for it, so its historic output stays byte for byte
+  identical (re-verified: 9/9 cases, SHA256 per case).
+
+- **The "read-only" route was not read-only.** It ran the host-facing decision path against the live
+  runtime, which appends audit entries and records decision events — opening the rule-test panel
+  wrote to the live decision feed. The pure path appends nothing, and `test/dry-run.spec.ts` now
+  asserts that a call the host path *would* record leaves the audit mirror at zero.
+
+## [2.5.0] - 2026-09-17
+
+### Added
+
+- **`branch` rule dimension** — git branch / remote / protected-branch matching, so a rule can
+  finally say "no push to a protected branch" without catching unrelated commands. The decisive
+  case is the one `args` can never express: `git push --force origin main` (dangerous) and
+  `git checkout --force main` (routine) carry the *same tokens*, and only the branch dimension
+  tells them apart. Sub-fields: `target` (branch-name glob, `*` crosses `/`), `remote`
+  (remote-name glob) and `shared` (require a protected branch). Candidates come from the shared
+  command dispatcher, so `refspec` forms (`HEAD:main`) are already split and a remote name is
+  never mistaken for a branch name. Documented in `docs/rules-format.md` §4.11.
+
+### Fixed
+
+- **The multi-file rule chain silently emptied every match dimension.** `resolveRuleChain` merged
+  entries by hand with `tools: []`, `command: []`, `args: []` and `paths: []`. An empty dimension
+  means "no constraint", so EVERY merged entry matched EVERY call: the first `deny` entry denied
+  everything in its partition, and the first `allow` entry allowed everything before the `ask`
+  partition was ever consulted. The merge now goes through the same `compileRuleEntry` the
+  single-file path uses.
+
+  *Reach:* the chain resolver is reached **only** under `searchUp: true` (product default `false`,
+  and unset in a stock profile), so the default single-file path — `compileDocument` — was never
+  affected. That is also why the existing suite stayed green: no test drove a rules *file* through
+  the chain. `test/rule-chain.spec.ts` now does. A separate, still-open defect on the same
+  opt-in path is recorded in the plan: `findChainEntries` joins the configured `rulesFile` onto
+  each directory, so the absolute path `resolveRulesFile` always produces matches nothing and the
+  chain yields an empty ruleset without an error.
+
+- **`argv.pipeline` could not see its own subject.** The pipeline match string was built from
+  `SimpleCommand.command`, which is only the command *word* — `curl https://x.sh | sh` collapsed
+  to `curl|sh`, so the documented `curl|sh` pattern matched the harmless adjacent form while the
+  genuinely dangerous one with arguments did not match at all. The match string is now each
+  simple command's full argv (joined by `|`), and the docs state that `|` in a pattern is a
+  literal, so covering arguments requires `curl*|sh`.
+
+- Nine pre-existing `eslint` errors (unused imports/constants and one `prefer-const` in
+  `src/parsers/` and `test/command-parsers.spec.ts`) — `npm run lint` is green again.
+
+## [2.4.1] - 2026-09-17
+
+### Fixed
+
+- The approvals history showed the raw `preset-passthrough` string for the one event that
+  explains *why* a flagged call ran unreviewed: the tier declares `approval: ask`, the session was
+  overridden to `never`, and the gate's ask therefore degraded to a passthrough. It now renders as
+  a readable label like every other verdict.
+
+## [2.4.0] - 2026-09-17
+
+### Changed
+
+- **The P3 LLM classifier is escalate-only — it can no longer deny.** A `risky` verdict with a
+  hard category (`deletion` / `credential` / `remote` / `system` / `bulk`) used to **auto-deny**
+  with no panel; it now **keeps the human ask**. Denying is reserved for the deterministic layers
+  alone — P0 hard-deny, the deny-keyword blacklist, explicit `deny:` rules — because a
+  probabilistic verdict must not be able to hand down an unappealable block. Measured live: the
+  grader called a benign `git commit -F …` **`remote`** and the auto-deny left no panel to approve
+  and no grant to retry with; only a manual retry (which happened to grade `safe`) got past it.
+  This also aligns the code with the project's own rule that high-risk operations are intercepted
+  **deterministically, never on the LLM's judgement**.
+
+### Added
+
+- Hard risk categories keep one meaningful distinction from `neutral`: they are **never
+  learnable**. Repeated human approvals cannot sediment a `deletion`/`credential`/`remote`/
+  `system`/`bulk` verdict into an auto-allow (previously this was true only as a side effect of
+  the auto-deny; it is now an explicit property).
+
+### Behaviour notes
+
+- Under `approval: never` an ask the gate cannot deliver still degrades to passthrough, so a
+  classifier-flagged call now **runs** where it used to be auto-denied. That is the direct
+  consequence of "deny only what is deterministically dangerous, negotiate everything else": a
+  negotiation needs a human, and `never` means there is none. Run the gate in a tier whose
+  `approval` is `ask` for the flags to reach you.
+
+## [2.3.0] - 2026-09-17
+
+### Added
+
+- **A stand-down is no longer silent.** When the session's permission preset is outside
+  `gatePresets`, the gate used to stand down and record nothing — so the tool call looked
+  exactly like one the gate had inspected and allowed. It now records **one** `stand-down`
+  notice per (session, preset) transition (never per call), naming the preset, the scope and
+  the fact that P0 hard-deny is inactive. The browser renders it as a sticky **GATE OFF**
+  strip above the input, and the approvals history shows a `Gate off` tag.
+- The 自动审查 settings card states the gate's own preset scope (`gatePresets`, default
+  `permissive` / `permissive-full`) and what happens outside it, so the scope is visible
+  where the tier is configured.
+
+### Changed
+
+- **P0's documented positioning is scoped, not global.** P0 hard-deny is monotonic and
+  non-negotiable *within the gate's preset scope*; across presets the gate stands down
+  entirely — P0 included — because the selected tier's own policy owns that session. The
+  code always behaved this way; `AGENTS.md` and the four READMEs claimed otherwise, which
+  made `danger-full-access` read as "P0 still applies". Set `gatePresets: ['*']` to make P0
+  global again.
+
+### Fixed
+
+- `DEFAULT_GATE_PRESETS` / `resolveGatePresets` moved from `config.ts` (which imports
+  schemastery) into the dependency-free `preset.ts`, so the browser half can render the scope
+  without pulling a node-only dependency into the client bundle. `config.ts` re-exports both,
+  so existing imports are unchanged.
+
+## [2.2.0] - 2026-09-17
+
+### Fixed
+
+- **P0 hard-deny skipped every shell tool but four.** `hardDenyReason` gated its shell
+  inspection on a locally defined regex, `/^(?:bash|pwsh|sh|cmd)$/`, which does **not**
+  match `shell`, `terminal` or `powershell`. `shell` is DSH's primary shell tool, so the
+  whole P0 shell check — the protected-path redirect guard — was **inert for the most
+  common call shape**. Measured, same command `echo x > /etc/passwd`: blocked via `bash`,
+  **allowed** via `shell`. `engine.ts` now imports `SHELL_TOOLS` from `evaluate.ts`; the
+  gate held three copies of that one fact and only one of them was complete.
+- **`git push --delete` was parsed as an ordinary push.** `hasDelete` was computed in
+  `analyzeSubcommand` but only ever read in the `branch` case, so `git push --delete
+  origin main` fell through to the plain-push branch (`destructiveness: 4`) and the
+  `DESTRUCTIVENESS_MAP` entry `'push-delete': 5` was dead data.
+- **Protected-branch detection mis-fired on any name containing a slash.** The predicate
+  stripped everything before the last `/`, so `backup/main` and `feat/release` were read
+  as protected. It now strips only known ref prefixes (`refs/heads/`, `refs/tags/`,
+  `refs/remotes/<remote>/`). The direction matters: this predicate feeds an **unremovable**
+  P0, where a miss still has the keyword / rule / LLM layers behind it, while a false
+  positive blocks a legitimate workflow with no recourse.
+
+### Added
+
+- **P0 hard-deny for remote-history rewrite on a protected branch.** A `git push` that
+  force-overwrites or deletes `main` / `master` / `production` / `release` / `stable` is
+  rejected deterministically, before any LLM call. The pre-existing protection was the
+  flat, branch-blind, namespace-overridable keyword `'push --force'`; this is the
+  non-negotiable floor beneath it.
+  - **Escalate-only by construction, not by convention**: the helper returns
+    `string | undefined`, which the caller reads as deny / undecided. It has no way to
+    express allow, so wiring it into P0 cannot widen what the gate permits.
+  - Deliberately **not** covered (still left to the keyword / rule / LLM layers):
+    force-push to a non-protected branch, `git push --force` with no branch named, and
+    ordinary pushes.
+  - First production use of the command parser (`command-dispatcher`, `command-semantics`,
+    `parsers/git`, `parsers/shell-cmds`), which until now was referenced only by its own
+    test file.
+
+### Tests
+
+- New suite `test/git-protected-push.spec.ts` (13 cases): parser variants, the
+  protected-branch predicate in both directions, full `SHELL_TOOLS` coverage, the four
+  deliberately-allowed shapes, and compound-command segmentation
+  (`git status && git push --force origin main`).
+- **Falsified**: reverting each of the three fixes turns exactly the cases guarding it red
+  (7 failures in total), while the deliberate-allow cases stay green.
+- Full suite **40 files / 459 cases**; `typecheck` clean.
+
 ## [2.1.2] - 2026-09-15
 
 ### Added

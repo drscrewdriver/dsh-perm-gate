@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { RuleAction } from './rule.js'
+import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js'
 
 /**
  * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
@@ -208,9 +209,9 @@ export interface PermGateConfig {
    */
   readonly networkGrantTtlMs?: number
   // ─── Hot reload (Phase 3) ──────────────────────────────────────────
-  /** Enable file watching for rule hot-reload. Default true. */
+  /** @deprecated Rules now live in the `dsh-perm-gate-rules` settings namespace; file watching was removed. Accepted (ignored) for composition compatibility. */
   readonly watch?: boolean
-  /** Debounce interval for rule file changes in ms. Default 300. */
+  /** @deprecated See {@link watch}. */
   readonly watchDebounceMs?: number
 }
 
@@ -250,20 +251,10 @@ export const DEFAULT_PERMISSIVE_STRATEGIES: Readonly<PermissiveStrategies> = {
   trustEscalation: true,
 }
 
-/**
- * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
- * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
- * same approval behaviour) — so a user can have the gate without inheriting a
- * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
- * preset, including the hard-deny layer).
- */
-export const DEFAULT_GATE_PRESETS: readonly string[] = ['permissive', 'permissive-full']
-
-/** Normalize the gate scope: an unset/empty list means the default. */
-export function resolveGatePresets(configured?: readonly string[]): readonly string[] {
-  if (configured === undefined || configured.length === 0) return DEFAULT_GATE_PRESETS
-  return configured.filter((name) => typeof name === 'string' && name !== '')
-}
+// The scope constants live in the dependency-free `preset` module (the browser
+// half renders them); bound locally AND re-exported so every existing
+// `./config.js` import keeps resolving.
+export { DEFAULT_GATE_PRESETS, resolveGatePresets }
 
 /** Normalize a backend strategy bag to fully-specified booleans (backend-part combinable). */
 export function resolvePermissiveStrategies(bag: Partial<PermissiveStrategies> = {}): PermissiveStrategies {
@@ -273,6 +264,92 @@ export function resolvePermissiveStrategies(bag: Partial<PermissiveStrategies> =
     llmAssist: bag.llmAssist ?? DEFAULT_PERMISSIVE_STRATEGIES.llmAssist,
     trustEscalation: bag.trustEscalation ?? DEFAULT_PERMISSIVE_STRATEGIES.trustEscalation,
   }
+}
+
+// ─── Rules Schema (for settings namespace) ──────────────────────────────────
+// The JSON twin of the rules.yml permissions document, stored in its own DSH
+// settings namespace so the gate loads without any file on disk.
+
+/**
+ * One rule entry as stored in settings. Deliberately permissive (`z.any()`
+ * fields): strict validation happens in `parseRuleEntry` at compile time (fail
+ * loud), and the stored form must round-trip BOTH the raw YAML shape (string
+ * scalars, `params` as a key→patterns mapping) and the parsed document shape
+ * (parsed dimensions), so a file migration can be seeded without lossy
+ * normalization. Schemastery preserves unknown keys in non-strict object mode.
+ */
+export const RuleEntrySchema: z<unknown> = z.any()
+
+/**
+ * The rules structure stored in the DSH settings namespace — the JSON form of
+ * rules.yml. Unknown extra keys on the document itself are preserved too.
+ */
+export const RulesSchema: z<RulesConfig> = z.object({
+  defaultAction: z.union(['allow', 'ask', 'deny'] as const).default('ask'),
+  deny: z.array(RuleEntrySchema).default([]),
+  allow: z.array(RuleEntrySchema).default([]),
+  ask: z.array(RuleEntrySchema).default([]),
+})
+
+/** One rule entry in the settings-stored rules document (JSON form; all optional). */
+export interface RulesEntryConfig {
+  readonly tools?: readonly string[]
+  readonly command?: readonly string[]
+  readonly args?: readonly string[]
+  readonly paths?: readonly string[]
+  readonly params?: unknown
+  readonly absent?: readonly string[]
+  readonly agents?: readonly string[]
+  readonly when?: unknown
+  readonly argv?: unknown
+  readonly network?: { readonly domains?: readonly string[]; readonly ips?: readonly string[]; readonly ports?: readonly string[]; readonly schemes?: readonly string[] }
+  readonly branch?: { readonly target?: readonly string[]; readonly remote?: readonly string[]; readonly shared?: boolean }
+  readonly reason?: string
+  readonly enabled?: boolean
+}
+
+/**
+ * The rules document stored in the settings namespace. The action lists are
+ * `unknown[]` on purpose: entries may be the raw YAML shape or the parsed
+ * document shape, and strict validation belongs to `parseRuleEntry` at compile
+ * time — see {@link RulesEntryConfig} for the documented JSON form. (Mutable
+ * arrays: the type doubles as the Schemastery input face of {@link RulesSchema},
+ * which validates in place.)
+ */
+export interface RulesConfig {
+  readonly defaultAction?: RuleAction
+  readonly deny?: unknown[]
+  readonly allow?: unknown[]
+  readonly ask?: unknown[]
+}
+
+/** Settings namespace for rules (separate from the main perm-gate namespace). */
+export const RULES_NAMESPACE = 'dsh-perm-gate-rules'
+
+/**
+ * Whether a settings-sourced rules document carries a REAL configuration —
+ * entries or a non-default `defaultAction`. A namespace still holding bare
+ * schema defaults is "not configured" and must not shadow the rules file
+ * (the dual-source contract: settings first, file fallback).
+ */
+export function isRulesConfigured(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const doc = value as RulesConfig
+  if (doc.defaultAction !== undefined && doc.defaultAction !== 'ask') return true
+  for (const key of ['deny', 'allow', 'ask'] as const) {
+    const list = doc[key]
+    if (Array.isArray(list) && list.length > 0) return true
+  }
+  return false
+}
+
+/**
+ * Read the rules from a settings scope: the document when the namespace is
+ * configured, otherwise `undefined` so the caller falls back to the rules file.
+ */
+export function readRulesFromSettings(scope: { get(): unknown } | undefined): RulesConfig | undefined {
+  const value = scope?.get()
+  return isRulesConfigured(value) ? (value as RulesConfig) : undefined
 }
 
 export const Config: z<PermGateConfig> = z.object({
