@@ -105,6 +105,31 @@ grants and LLM. It is editable as a list in the settings card (preset entries ar
 one-click restore brings the preset back); unset or empty applies the preset — the blacklist
 never silently turns off.
 
+## Screenshots
+
+**The settings card — the 自动审查 tier.** The front end exposes a single switch; the four back-end
+strategies combine. `LlmAssist` can follow the session's current model or be pinned to a provider /
+model, and carries its own health test and verdict learning:
+
+![Settings card — the 自动审查 tier](assets/setting-head.png)
+![LlmAssist — provider, model, API key](assets/llms.png)
+
+**The rules the gate actually loaded**, read straight from the `dsh-perm-gate-rules` settings
+namespace — the panel is read-only by design, so it can never edit what it shows:
+
+![Built-in rules, read-only](assets/setting-rules.png)
+
+**Approval decision log** — every verdict in this session, newest first, with the reason the model saw:
+
+![Approval decision log](assets/permlist.png)
+
+**Decision strips** — an auto-allow states its basis (a read-only tool, or an LLM `safe` verdict),
+and a stand-down is never silent:
+
+![ALLOW strip — read-only internal tool](assets/allow1.png)
+![ALLOW strip — llm-assist risk: safe](assets/allow2.png)
+![GATE OFF strip — the gate stood down](assets/gateoff.png)
+
 ## Install
 
 Requires an existing [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) installation.
