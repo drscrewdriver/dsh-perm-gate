@@ -65,6 +65,27 @@
 - **自动审查档位**（机器值 `permissive`）——一个**独立审批模式**（区别于只读、完全权限与白名单档），既不是"自动审批"，也不授予泛化权限。前端只暴露**一个开关**（`permissive`），后台四个审批策略**可组合**、由插件设置决定——仍对 P0 保持 fail-closed。权限下拉框与设置行都按产品名「自动审查」显示；图标见下文（内置档自带，插件档需补丁）。
 - **沙箱提权自动答复**（`trustEscalation`）— 沙箱提权是从 shell / pwsh / edit 工具**体内部**（`tools/pre-execute` 之后）发出的，所以门禁从未见过它，一个它自动放行的调用仍会弹出确认。开启后，门禁以 `callId` 精确匹配已放行调用并直接答复。
 
+## 界面预览
+
+**设置卡片 —— 自动审查档位**：前端只暴露一个开关，后台四个策略可组合；`LlmAssist` 可跟随会话当前模型，也可钉住 Provider / Model，并自带健康测试与裁决学习：
+
+![设置卡片 —— 自动审查档位](assets/setting-head.png)
+![LlmAssist —— Provider / Model / API Key](assets/llms.png)
+
+**门禁实际加载的规则**——直接读自 `dsh-perm-gate-rules` 设置命名空间；面板按设计只读，改不了它显示的内容：
+
+![内置规则（只读）](assets/setting-rules.png)
+
+**权限审批记录**——本会话每一次裁决，最新在上，附带模型看到的理由：
+
+![权限审批记录](assets/permlist.png)
+
+**裁决条**——自动放行会写明依据（只读工具，或 LLM 判定 `safe`）；停摆也绝不静默：
+
+![ALLOW 条 —— 只读内置工具](assets/allow1.png)
+![ALLOW 条 —— llm-assist 判定 safe](assets/allow2.png)
+![GATE OFF 条 —— 门禁停摆](assets/gateoff.png)
+
 ## 安装
 
 需要先安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)。

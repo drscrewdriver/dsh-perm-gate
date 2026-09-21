@@ -90,6 +90,31 @@ DSH 안전 생태계에서는 이 역할이 `dsh-permission-rules` / `dsh-auto-m
    없고, 게이트가 자동 허용한 호출에도 확인 프롬프트가 나타납니다. 이 전략을 켜면 게이트가
    `callId`로 이미 허용한 호출을 정확히 매칭하여 여기서 직접 응답합니다.
 
+## 스크린샷
+
+**설정 카드 — 自动审查 티어**: 프론트는 단일 스위치만 노출하고, 백엔드의 네 전략은 조합
+가능합니다. `LlmAssist`는 세션의 현재 모델을 따르거나 Provider / Model을 고정할 수 있으며,
+헬스 테스트와 판정 학습을 갖춥니다:
+
+![설정 카드 — 自动审查 티어](assets/setting-head.png)
+![LlmAssist — Provider / Model / API Key](assets/llms.png)
+
+**게이트가 실제로 로드한 규칙** — `dsh-perm-gate-rules` 설정 네임스페이스에서 직접 읽은
+읽기 전용 뷰입니다. 패널에서는 바꿀 수 없습니다:
+
+![내장 규칙(읽기 전용)](assets/setting-rules.png)
+
+**권한 승인 기록** — 이 세션의 모든 판정을 최신순으로, 모델이 본 이유와 함께 표시합니다:
+
+![권한 승인 기록](assets/permlist.png)
+
+**판정 스트립** — 자동 허용은 근거(읽기 전용 도구 또는 LLM의 `safe` 판정)를 밝히고,
+게이트 정지도 결코 조용히 일어나지 않습니다:
+
+![ALLOW 스트립 — 읽기 전용 도구](assets/allow1.png)
+![ALLOW 스트립 — llm-assist safe](assets/allow2.png)
+![GATE OFF 스트립 — 게이트 정지](assets/gateoff.png)
+
 ## 설치
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)가 설치되어 있어야

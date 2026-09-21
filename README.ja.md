@@ -93,6 +93,31 @@ DSH の安全まわりのエコシステムでは、この役割が `dsh-permiss
    オンにすると、ゲートが許可した呼び出しを `callId` で正確に一致させてここで直接回答
    します。
 
+## スクリーンショット
+
+**設定カード — 自动审查ティア**：フロントが露出するのは単一スイッチのみで、バックエンドの
+4 戦略は組み合わせ可能です。`LlmAssist` はセッションの現在のモデルに追従するか、
+Provider / Model を固定でき、ヘルスチェックと裁決学習を備えます：
+
+![設定カード — 自动审查ティア](assets/setting-head.png)
+![LlmAssist — Provider / Model / API Key](assets/llms.png)
+
+**ゲートが実際に読み込んだルール** — `dsh-perm-gate-rules` 設定名前空間から直接読み出した
+読み取り専用ビューです。パネルからは変更できません：
+
+![組み込みルール（読み取り専用）](assets/setting-rules.png)
+
+**権限承認記録** — このセッションのすべての裁決を新しい順に、モデルが見た理由つきで表示します：
+
+![権限承認記録](assets/permlist.png)
+
+**裁決ストリップ** — 自動許可は根拠（読み取り専用ツール、または LLM の `safe` 判定）を明示し、
+ゲートの停止も決して無言では起きません：
+
+![ALLOW ストリップ — 読み取り専用ツール](assets/allow1.png)
+![ALLOW ストリップ — llm-assist が safe](assets/allow2.png)
+![GATE OFF ストリップ — ゲート停止](assets/gateoff.png)
+
 ## インストール
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) が導入済みである
