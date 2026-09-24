@@ -33,6 +33,36 @@ Old and new versions must never resolve into each other:
 - A `1.x`-range install therefore cannot be dragged onto `2.x` by `dsh plugin update`,
   and installing `latest` on DSH `0.1.1` needs an explicit `@legacy`.
 
+## The declared 0.1.5-line delta, and the release step it needs
+
+`compat/0.1.5` differs from `main` by a **declared** amount, held in
+`scripts/sync-0.1.5-line.mjs` (`LINE_015`) and asserted by `npm run check:line`.
+The declaration has four kinds of member: `fields`/`nested` (the `package.json`
+values the line sets, pinned by value), `contentPaths` (files the line owns,
+pinned to the line-side blob id), `mirrorPaths` (files derived from
+`package.json`), and `declarationPaths` (this guard and its own description,
+which cannot agree with their own pin).
+
+**Every release must update `fields.version`.** That is the step 4.0.0 through
+4.1.1 skipped: the release commits bumped `package.json` alone, so the guard went
+red and stayed red — it was still declaring `3.0.0`. A red `check:line` is
+therefore almost always a stale declaration, not a broken tree: run
+`npm run check:line`, and if the only complaints are the version and pins that
+no longer differ, the fix is the declaration.
+
+### Re-syncing (when main-side work should reach the line)
+
+1. `node scripts/sync-0.1.5-line.mjs apply --dir <0.1.5 worktree>` — aligns the
+   worktree to `main` and re-applies the declared `package.json` delta (the array
+   form of a `nested` path is what carries the scoped `@deepseek-ai/*` peers, so
+   they survive the alignment instead of being dropped).
+2. `node scripts/sync-0.1.5-line.mjs pin` — prints the `contentPaths` entries the
+   synced tree now needs, and the pins it no longer needs. Paste them in as a
+   reviewed edit; the command never writes the declaration.
+3. Set `syncedFrom` to the `main` commit that was just synced from, then run
+   `npm run check:line`. Green means the tree carries exactly the declared
+   difference — nothing more, and nothing less.
+
 ## Local tarball installs: bump the version EVERY time
 
 **Rebuilding a tarball under the same version does not update an install.** The profile's
