@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.2] - 2026-09-25
+
+### Fixed
+
+- **The composer glyph patch works on DSH 0.1.5 again.** `scripts/patch-permission-glyph.mjs`
+  spliced its entry after `["permissive",` — a key DSH 0.1.2 rendered a glyph for and 0.1.5-rc.2
+  no longer contains anywhere in the bundle — so the patch died with `anchor not found` and both
+  plugin tiers stayed text-only. The sources are now declared per tier in `GLYPH_TARGETS` and each
+  anchor is **resolved**: `["<key>",` first, then the constant alias the bundle uses instead
+  (`danger-full-access` is keyed `[FULL_ACCESS,`). A source key this host does not render is
+  reported together with the keys the map does carry.
+- **The probe no longer patches a DSH install that is not serving the UI.** Candidate bundles are
+  ordered profile scope first, CLI install second, and any *other* install carrying the same
+  bundle is listed in the output instead of being silently passed over. Measured on this
+  project's own host: a global CLI install shadowed the launcher-managed runtime, so the patch
+  reported success while the picker stayed icon-free.
+
+### Changed
+
+- **Each tier wears the glyph of the file sandbox it shares, not one shared shield+eye.** 自动审查
+  copies the `workspace-write` glyph and 自动审查（高权限） the `danger-full-access` one, so the icon
+  matches the access the tier actually grants. The old identical-icon pair came from 0.1.2, whose
+  map still keyed a `permissive` glyph that 0.1.5 dropped.
+- **Both glyphs are applied, or neither.** A source key the script cannot resolve is a refusal that
+  writes nothing, rather than a half-patched bundle.
+
 ## [2.6.0] - 2026-09-17
 
 ### Added
