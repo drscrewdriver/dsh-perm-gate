@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { mkdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cosmokit'
 import type { RuleAction } from './rule.js'
 import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js'
 
@@ -386,66 +387,110 @@ export function readRulesFromSettings(scope: { get(): unknown } | undefined): Ru
   return isRulesConfigured(value) ? (value as RulesConfig) : undefined
 }
 
-export const Config: z<PermGateConfig> = z.object({
+export const Config = z.object({
   rulesFile: z.string(),
   dshHome: z.string(),
-  defaultAction: z.union(['allow', 'ask', 'deny'] as const).default('ask'),
-  caseInsensitivePaths: z.boolean().default(true),
-  classifierEnabled: z.boolean().default(false),
-  classifierEndpoint: z.string(),
-  classifierModel: z.string().default('deepseek-chat'),
-  classifierApiKey: z.string(),
-  riskTimeoutMs: z.number().min(1000).default(20_000),
-  riskLearning: z.boolean().default(true),
-  riskSediment: z.boolean().default(true),
-  classifierSource: z.union(['custom', 'host'] as const).default('custom'),
-  classifierProvider: z.string(),
-  riskThreshold: z.number().min(1).max(10).default(1),
+  defaultAction: z.union(['allow', 'ask', 'deny'] as const).default('ask').volatile(),
+  caseInsensitivePaths: z.boolean().default(true).volatile(),
+  classifierEnabled: z.boolean().default(false).volatile(),
+  classifierEndpoint: z.string().volatile(),
+  classifierModel: z.string().default('deepseek-chat').volatile(),
+  classifierApiKey: z.string().volatile(),
+  riskTimeoutMs: z.number().min(1000).default(20_000).volatile(),
+  riskLearning: z.boolean().default(true).volatile(),
+  riskSediment: z.boolean().default(true).volatile(),
+  classifierSource: z.union(['custom', 'host'] as const).default('custom').volatile(),
+  classifierProvider: z.string().volatile(),
+  riskThreshold: z.number().min(1).max(10).default(1).volatile(),
   learningFile: z.string(),
   eventsFile: z.string(),
-  grantTtlMs: z.number().min(1).default(5 * 60_000),
-  grantMaxUses: z.number().min(1).default(1),
-  permissive: z.boolean().default(false),
+  grantTtlMs: z.number().min(1).default(5 * 60_000).volatile(),
+  grantMaxUses: z.number().min(1).default(1).volatile(),
+  permissive: z.boolean().default(false).volatile(),
   gatePresets: z.array(z.string()),
   permissiveStrategies: z.object({
     trustAutoAllow: z.boolean().default(true),
     alwaysConfirm: z.boolean().default(false),
     llmAssist: z.boolean().default(false),
     trustEscalation: z.boolean().default(true),
-  }),
-  allowlist: z.array(z.string()),
-  denyKeywords: z.array(z.string()),
-  autoAllowTools: z.array(z.string()),
-  sessionSweep: z.boolean().default(true),
+  }).volatile(),
+  allowlist: z.array(z.string()).volatile(),
+  denyKeywords: z.array(z.string()).volatile(),
+  autoAllowTools: z.array(z.string()).volatile(),
+  sessionSweep: z.boolean().default(true).volatile(),
   workspaceStoreFile: z.string(),
   // Rule chain (T1.9)
-  searchUp: z.boolean().default(false),
+  searchUp: z.boolean().default(false).volatile(),
   fallbackPath: z.string(),
-  badFilePolicy: z.union(['fail', 'warn'] as const).default('fail'),
-  maxChainLength: z.number().min(1).max(50).default(10),
+  badFilePolicy: z.union(['fail', 'warn'] as const).default('fail').volatile(),
+  maxChainLength: z.number().min(1).max(50).default(10).volatile(),
   // Network (Phase 2)
-  networkEnabled: z.boolean().default(false),
-  networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist'),
-  networkUnlisted: z.union(['ask', 'deny'] as const).default('ask'),
-  networkUnattributed: z.union(['allow', 'deny'] as const).default('allow'),
-  networkLoopback: z.union(['allow', 'policy'] as const).default('allow'),
-  networkBind: z.string().default('127.0.0.1'),
-  networkPort: z.number().min(0).max(65535).default(0),
-  networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear'),
-  networkInjectEnv: z.boolean().default(true),
-  networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000),
-  networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000),
+  networkEnabled: z.boolean().default(false).volatile(),
+  networkMode: z.union(['deny-all', 'whitelist', 'allow-all'] as const).default('whitelist').volatile(),
+  networkUnlisted: z.union(['ask', 'deny'] as const).default('ask').volatile(),
+  networkUnattributed: z.union(['allow', 'deny'] as const).default('allow').volatile(),
+  networkLoopback: z.union(['allow', 'policy'] as const).default('allow').volatile(),
+  networkBind: z.string().default('127.0.0.1').volatile(),
+  networkPort: z.number().min(0).max(65535).default(0).volatile(),
+  networkNoProxy: z.union(['clear', 'preserve'] as const).default('clear').volatile(),
+  networkInjectEnv: z.boolean().default(true).volatile(),
+  networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000).volatile(),
+  networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000).volatile(),
+  // 0.1.7: the rules document lives on this entry as a volatile whole-object
+  // field (a second settings namespace is no longer projectable). Unconfigured
+  // (bare defaults) -> the rules file remains the source.
+  rules: RulesSchema.volatile(),
   // Hot reload (Phase 3)
   watch: z.boolean().default(false),
   watchDebounceMs: z.number().min(50).max(5000).default(300),
 })
+
+/** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
+export type VolatileRef<T> = Volatile<T>
+
+/** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
+export const VOLATILE_CONFIG_KEYS = [
+  'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
+  'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
+  'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
+  'permissive', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'autoAllowTools',
+  'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
+  'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
+  'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',
+  'networkGrantTtlMs', 'rules',
+] as const
+
+/** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
+export function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined {
+  if (value !== null && typeof value === 'object' && typeof (value as { get?: unknown }).get === 'function') {
+    return (value as Volatile<T>).get()
+  }
+  return value as VolatileSnapshot<T> | undefined
+}
+
+/** Shallow-resolve every volatile field into a plain snapshot (one per read). */
+export function resolveVolatileConfig(config: object): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(config as Record<string, unknown>) }
+  for (const key of VOLATILE_CONFIG_KEYS) {
+    const v = out[key]
+    if (v !== null && typeof v === 'object' && typeof (v as { get?: unknown }).get === 'function') {
+      out[key] = (v as Volatile<unknown>).get()
+    }
+  }
+  return out
+}
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
   & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
   & { readonly permissiveStrategies: PermissiveStrategies; readonly gatePresets: readonly string[] }
 
 export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConfig {
-  const parsed = Config(config)
+  // 0.1.7: the apply-time config carries live refs for `.volatile()` fields —
+  // resolve them before validation; schemastery's own schema call also wraps
+  // volatile fields into fresh refs, so resolve the output as well.
+  const parsed = resolveVolatileConfig(
+    Config(resolveVolatileConfig(config) as PermGateConfig),
+  ) as unknown as PermGateConfig
   return {
     rulesFile: parsed.rulesFile,
     dshHome: parsed.dshHome,

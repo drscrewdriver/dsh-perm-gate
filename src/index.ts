@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Config, RULES_NAMESPACE, RulesSchema, readRulesFromSettings, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
@@ -52,70 +52,12 @@ const APPROVAL_OUTCOMES: ReadonlySet<string> = new Set(['allowed-once', 'rejecte
 export const PERMISSIVE_NAMESPACE = 'dsh-perm-gate'
 
 /**
- * Minimal face of the dsh `settings` service (typed locally — the plugin must
- * NOT value-import the official `@deepseek-ai/dsh-settings` package: it is
- * provided by the dsh runtime instead).
- */
-interface SettingsScopeLike {
-  get(): unknown
-  /**
-   * Merge a partial patch into the namespace's user layer and persist it. This is
-   * the HOST scope's only write verb: it exposes `update(patch)` / `replace(section)`
-   * and has never had a `set(field, value)` (that is the client-side convenience
-   * wrapper over `mutate()`, a different object).
-   */
-  update(patch: object): Promise<unknown> | unknown
-  watch(callback: () => void): () => void
-}
-interface SettingsServiceLike {
-  register(ns: string, schema: unknown, options?: { base?: unknown }): SettingsScopeLike
-}
-interface SettingsAwareCtx {
-  inject(deps: readonly string[], fn: (sctx: {
-    settings: SettingsServiceLike
-    effect(cleanup: () => (() => void) | void, label?: string): void
-  }) => void): void
-}
-
-/**
- * Minimal face of a cordis context that can observe a service event and own the
- * disposer (the shape the settings section already uses for `sctx.effect`).
+ * Minimal face of a cordis context that can observe a service event.
  */
 interface EventContextLike {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(name: string, listener: (...args: any[]) => any, options?: { prepend?: boolean }): () => void
   effect(cleanup: () => (() => void) | void, label?: string): void
-}
-
-/**
- * Inline equivalent of the official `installSettingsSection` helper: register
- * the namespace through the `settings` service, layer the composition entry as
- * `base`, and keep the runtime source live so the UI card applies immediately.
- * `onScope` receives the live scope after registration (for seeding/syncing
- * host-owned fields like the allowlist).
- */
-function installSettingsSection<T>(
-  ctx: Context,
-  ns: string,
-  schema: unknown,
-  entry: T,
-  hooks: {
-    setSource: (source: () => T) => void
-    onChange: () => void
-    onScope?: (scope: SettingsScopeLike) => void
-  },
-): void {
-  ;(ctx as unknown as SettingsAwareCtx).inject(['settings'], (sctx) => {
-    const scope = sctx.settings.register(ns, schema, { base: entry })
-    hooks.setSource(() => scope.get() as T)
-    hooks.onChange()
-    hooks.onScope?.(scope)
-    sctx.effect(() => () => {
-      hooks.setSource(() => entry)
-      hooks.onChange()
-    })
-    scope.watch(() => hooks.onChange())
-  })
 }
 
 /** The flat set of config fields the Permissive tier reads live. */
@@ -274,15 +216,17 @@ export function makePreExecuteListener(
 }
 
 export function apply(ctx: Context, config: Record<string, unknown> = {}): PermGateRuntime {
-  // Runtime-adjustable config: the composition entry is the base; the settings
-  // namespace layers on top and `current()` always reads the active section.
-  let current: () => PermissiveSurface & Record<string, unknown> = () => config as never
+  // Runtime-adjustable config: 0.1.7 hands `.volatile()` fields to apply() as
+  // live refs; `current()` shallow-resolves one snapshot per read.
+  const current: () => PermissiveSurface & Record<string, unknown> =
+    () => resolveVolatileConfig(config) as never
 
-  // ─── Rules settings scope (dsh-perm-gate-rules namespace) ────────────────
-  // Holds the live settings-sourced rules document. When non-undefined, the
-  // runtime prefers it over the rules file on disk.
-  let rulesScope: { get(): unknown } | undefined
-  const readRulesDocument = (): ReturnType<typeof readRulesFromSettings> => readRulesFromSettings(rulesScope)
+  // ─── Rules (volatile `rules` field on this entry) ─────────────────────────
+  // The rules document is a `.volatile()` whole-object field of the plugin's
+  // own entry (0.1.7 has no second projectable namespace). Unconfigured
+  // (bare defaults) -> undefined -> the rules file stays the source.
+  const readRulesDocument = (): ReturnType<typeof readRulesFromSettings> =>
+    readRulesFromSettings({ get: () => readVolatileValue(config.rules) })
 
   // Plugin-owned data files live under $DSH_HOME (node_modules may be
   // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
@@ -522,53 +466,38 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     appliedKey?: string
   } = {}
 
-  installSettingsSection<PermissiveSurface & Record<string, unknown>>(ctx, PERMISSIVE_NAMESPACE, Config, config as never, {
-    setSource: (source) => {
-      current = source
-    },
-    onChange: () => {},
-    onScope: (scope) => {
-      // Seed the editable whitelist from the rules file only when the namespace
-      // carries no override yet, so the card shows the current allow patterns.
-      const surface = asSurface(scope.get())
-      if (surface !== undefined && !Array.isArray(surface.allowlist)) {
-        const patterns = runtime.allowlist()
-        if (patterns.length > 0) void scope.update({ allowlist: patterns.slice() })
+  // ─── 0.1.7 declarative settings ───────────────────────────────────────────
+  // The volatile fields render the settings form and arrive as live refs;
+  // each committed edit raises ONE `loader/volatile-update` (no remount).
+  // The host no longer seeds settings (there is no write path): an empty
+  // `allowlist` keeps the rules-file default via `runtime.allowlist()`.
+  let lastRulesDocKey: string | undefined
+  ;(ctx as unknown as EventContextLike).on('loader/volatile-update', () => {
+    const next = asSurface(current())
+    if (next !== undefined) {
+      if (Array.isArray(next.allowlist)) {
+        runtime.setAllowlist(next.allowlist.filter((x): x is string => typeof x === 'string'))
       }
-      // Card edits -> namespace -> rulesFile (mirror + reload).
-      scope.watch(() => {
-        const next = asSurface(scope.get())
-        if (next !== undefined && Array.isArray(next.allowlist)) {
-          runtime.setAllowlist(next.allowlist.filter((x): x is string => typeof x === 'string'))
-        }
-        // A network knob changed: re-mount the proxy so the card's switches
-        // take effect without a plugin reload. Only a rebind-relevant edit
-        // triggers it.
-        const key = networkKeyOf(next)
-        if (networkRefs.appliedKey !== undefined && networkRefs.appliedKey !== key) {
-          networkRefs.appliedKey = key
-          networkRefs.rebind?.()
-        } else if (networkRefs.appliedKey === undefined) {
-          networkRefs.appliedKey = key
-        }
-      })
-    },
-  })
-
-  // ─── Rules settings namespace (dsh-perm-gate-rules) ─────────────────────
-  // Registers the rules document in its own DSH settings namespace so the gate
-  // loads rules from settings (when configured) instead of the rules file.
-  installSettingsSection<Record<string, unknown>>(ctx, RULES_NAMESPACE, RulesSchema, {}, {
-    setSource: (source) => {
-      rulesScope = { get: source }
-    },
-    onChange: () => {},
-    onScope: (scope) => {
-      rulesScope = scope
-      // When rules change in settings, reload the runtime so the new ruleset
-      // takes effect on the next tool call.
-      scope.watch(() => { runtime.reload() })
-    },
+      // A network knob changed: re-mount the proxy so the card's switches
+      // take effect without a plugin reload. Only a rebind-relevant edit
+      // triggers it.
+      const key = networkKeyOf(next)
+      if (networkRefs.appliedKey !== undefined && networkRefs.appliedKey !== key) {
+        networkRefs.appliedKey = key
+        networkRefs.rebind?.()
+      } else if (networkRefs.appliedKey === undefined) {
+        networkRefs.appliedKey = key
+      }
+    }
+    // A rules edit reloads the runtime so the new ruleset takes effect on the
+    // next tool call (allowlist/network edits must not pay for a reload).
+    const rulesDoc = readRulesDocument()
+    const rulesKey = rulesDoc === undefined ? '' : JSON.stringify(rulesDoc)
+    if (rulesKey !== lastRulesDocKey) {
+      const changed = lastRulesDocKey !== undefined
+      lastRulesDocKey = rulesKey
+      if (changed) runtime.reload()
+    }
   })
 
   // Event feed HTTP API (best effort): the dsh webServer service exposes the

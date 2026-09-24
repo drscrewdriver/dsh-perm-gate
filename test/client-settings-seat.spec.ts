@@ -30,7 +30,7 @@ function collectRegistrations(): { declared: string[]; registrations: CapturedRe
   const ctx = {
     effect: (build: () => unknown) => { void build(); return () => {} },
     locale: { register: () => () => {}, bind: () => (key: string) => key },
-    settingsScope: { bind: () => ({}) },
+    configForms: { get: () => ({}) },
     slots: {
       inject: (slot: string, factory: () => (() => void) | Generator<() => void>) => {
         declared.push(slot)

@@ -1,8 +1,8 @@
 /**
- * Permissive settings card — the `settings.plugin.item` face of dsh-perm-gate.
+ * Permissive settings card — a `settings.plugins.tab` face of dsh-perm-gate.
  *
- * The card binds the `dsh-perm-gate` settings namespace through the
- * `settingsScope` cordis service and renders its fields: the single front switch
+ * The card binds the plugin's profile entry (`dsh-perm-gate`) through the
+ * `configForms` cordis service and renders its fields: the single front switch
  * (`permissive`) plus the three combinable backend strategies
  * (`trustAutoAllow` / `alwaysConfirm` / `llmAssist`). Every change commits
  * immediately through the scope (no staged form); the host reads the namespace
@@ -14,34 +14,16 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
 import { DEFAULT_GATE_PRESETS } from '../preset.ts'
 import { SedimentSection } from './sediment.tsx'
 
 /**
- * Minimal face of the browser settings scope this card consumes.
- *
- * Typed locally on purpose (the same pattern the host half uses for the host
- * `settings` service): the official contract moved packages between DSH lines.
- * DSH 0.1.1 declares `SettingsScope` in `@deepseek-ai/dsh-client-runtime/client`;
- * that package is gone from 0.1.2-alpha.1 on, where the byte-identical interface
- * is exported from `@deepseek-ai/dsh-client-ui-settings/client`. Declaring the
- * four members the card uses binds against `ctx.settingsScope.bind()` on every
- * line, instead of pinning a package that exists on only one of them.
+ * The official 0.1.7 browser config form ().
+ * Imported from the host package now that this line targets 0.1.7 only.
  */
-export interface SettingsScopeSnapshotLike<T> {
-  readonly status: 'loading' | 'ready' | 'unavailable'
-  readonly value: T | undefined
-  readonly writable: boolean
-}
-
-export interface SettingsScopeLike<T> {
-  getSnapshot(): SettingsScopeSnapshotLike<T>
-  subscribe(listener: () => void): () => void
-  set(field: string, value: unknown): Promise<void>
-  unset(field: string): Promise<void>
-}
 
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
@@ -90,7 +72,7 @@ export interface PermissiveCardValue {
 
 /** One injected face: the plugin's own settings scope. */
 export interface PermissiveCardInjected {
-  scope: SettingsScopeLike<PermissiveCardValue>
+  scope: ConfigForm<PermissiveCardValue>
 }
 
 /** Full props: locale seat + the injected scope. */

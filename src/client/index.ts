@@ -7,7 +7,7 @@
  * plus the four combinable backend approval strategies.
  *
  * All @deepseek-ai/* imports are type-only at the value level: collaboration
- * happens through cordis services (`slots`, `locale`, `settingsScope`) and slot
+ * happens through cordis services (`slots`, `locale`, `configForms`) and slot
  * registration only (client bundle purity). The `LocaleNamespaceMap`
  * augmentation below is a type-only merge so the `locale:` seat type-checks.
  *
@@ -29,7 +29,7 @@ import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue }
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
 
-/** The settings namespace the host half registers (kept in lockstep with src/index.ts). */
+/** The profile entry id of this plugin — the `configForms` key (kept in lockstep with cordis.patch.yml). */
 const PERMISSIVE_NS = 'dsh-perm-gate'
 
 // Declare the plugin's dictionary namespace in the locale key domain so the
@@ -68,7 +68,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Services required by the browser half. */
-export const inject = ['slots', 'locale', 'settingsScope']
+export const inject = ['slots', 'locale', 'configForms']
 
 /**
  * Client plugin body: dictionaries plus the settings page registration.
@@ -120,7 +120,7 @@ export function apply(ctx: ClientContext): void {
       label: () => t('card.title'),
       locale: NS,
       inject: (): PermissiveCardInjected => {
-        const scope = ctx.settingsScope.bind<PermissiveCardValue>({ namespace: PERMISSIVE_NS })
+        const scope = ctx.configForms.get<PermissiveCardValue>(PERMISSIVE_NS)
         return { scope }
       },
     }, PermissiveCard)
