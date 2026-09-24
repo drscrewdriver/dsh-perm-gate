@@ -40,7 +40,7 @@
 > 线上都是 user-approval 服务的**私有**方法，因此通过 `typeof` 探测读取，缺失
 > 或抛错时降级为「策略未知」。
 
-版本 **2.6.0** —— 变更见 [Changelog](./CHANGELOG.md)。
+版本 **2.6.1** —— 变更见 [Changelog](./CHANGELOG.md)。
 
 一个**单一自足、确定性优先、fail-closed** 的 DeepSeek Harness 权限门插件。
 
@@ -202,9 +202,10 @@ MSYS2/Cygwin 的 `sh.exe`、ConPTY 都会以 `Win32 error 5` / `couldn't create 
 标签，因此 `cordis.patch.yml` 直接写中文名，对所有会话一致。
 
 **图标是另一回事。** 输入栏的图标表是闭合的，表自己的注释写明了规则：*host-configured names
-outside the design set get none*。`permissive` 是内置值，所以「自动审查」本来就有盾+眼图标；
-「自动审查（高权限）」能拿到同一个图标，靠的是 `npx dsh-perm-gate-patch-glyph` 往那张表里
-加了一项。该补丁改的是**宿主**包，每次 DSH 升级都会丢 —— 见
+outside the design set get none*。两个档位都不是内置值，图标全靠
+`npx dsh-perm-gate-patch-glyph` 往那张表里补两项 ——「自动审查」复制 `workspace-write` 的
+盾+铅笔，「自动审查（高权限）」复制 `danger-full-access` 的盾+感叹号，各自对应自己实际共用的
+文件沙箱。该补丁改的是**宿主**包，每次 DSH 升级都会丢 —— 见
 [DSH 升级后：重打输入区图标补丁](./INSTALL.zh.md)。
 
 `cordis.yml`：
@@ -297,9 +298,9 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 调用文本命中任一关键词（大小写不敏感子串）即直接拒绝，且先于白名单 / 授权 / LLM。黑名单在设置
 卡片中按列表查看与增删（预置条目带标签，可一键恢复预置）；未设置或为空时应用预置列表——黑名单
 不会静默关闭。
-「自动审查」与「自动审查（高权限）」在选择器里都画盾+眼图标 —— 前者来自 DSH 内置表，后者来自
-安装指南里描述的那次宿主补丁。没有该补丁时，第二个档位在所有界面上都是纯文字；它的标签与门禁
-不受影响。
+「自动审查」与「自动审查（高权限）」在选择器里都画图标 —— 图标由安装指南里描述的那次宿主补丁
+从各自共用的文件沙箱档位复制而来（`workspace-write` 与 `danger-full-access`）。没有该补丁时，
+两个档位在所有界面上都是纯文字；它们的标签与门禁不受影响。
 
 
 ## CLI（独立 dry-run）

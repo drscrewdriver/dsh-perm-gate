@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` 版本 **2.6.0**。裁决链、规则文件格式与自动审查档位请见
+`dsh-perm-gate` 版本 **2.6.1**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
 
 ## 前置条件
@@ -92,11 +92,18 @@ dsh profile reload --profile web
 
 ## **DSH** 升级后：重打输入区图标补丁
 
-「自动审查（高权限）」之所以和「自动审查」一样显示盾+眼图标，只是因为
-`scripts/patch-permission-glyph.mjs` 把这一项加进了 **DSH 宿主包里的一张封闭 Map**。
-DSH 对插件档位**设计上就不给图标** —— 那张表自己的注释写着 *"host-configured
-names outside the design set get none"*；而插件能影响的 option 对象只携带
-`{value, name, description}`，所以插件侧没有可用的接缝。
+两个「自动审查」档位之所以有图标，只是因为 `scripts/patch-permission-glyph.mjs`
+把它们加进了 **DSH 宿主包里的一张封闭 Map**：「自动审查」复制 `workspace-write` 的
+盾+铅笔，「自动审查（高权限）」复制 `danger-full-access` 的盾+感叹号 —— 各自对应
+自己实际共用的文件沙箱。DSH 对插件档位**设计上就不给图标** —— 那张表自己的注释写着
+*"host-configured names outside the design set get none"*；而插件能影响的 option 对象
+只携带 `{value, name, description}`，所以插件侧没有可用的接缝。
+
+脚本会**解析**源键而不是假定它的写法：先找 `["<key>",`，再找宿主可能改用的常量别名
+（`danger-full-access` 在 0.1.5 里就写作 `[FULL_ACCESS,`）。宿主已经改过一次设计集 ——
+0.1.2 有 `permissive` 图标，0.1.5 只剩 `read-only` / `workspace-write` /
+`danger-full-access` —— 解析不到的源键会在报错里连同「表里实际有哪些键」一起给出，
+所以改档位只需改 `GLYPH_TARGETS` 一行。
 
 该补丁改的是**宿主**文件，因此 **DSH 升级或重装会把它抹掉**。升级*本插件*不会：
 图标从来不属于插件，而插件自己的贡献（`cordis.patch.yml` 里的 `name:` /
@@ -113,9 +120,12 @@ dsh profile reload --profile web
 `postinstall` 上：它改的是宿主包，插件不该未经许可改写自己所在的 harness。有没有它
 都不影响 DSH 运行，档位本身照常工作。
 
-脚本是幂等的（重复执行是 no-op），只备份一次，且拒绝写坏切片 —— 它会对结果跑
-`node --check`，失败即还原备份 —— 所以每次 DSH 升级后无条件重跑都是安全的。
-它从运行中的 `node` 二进制反推包路径，因此 nvm 换版本或安装软链重指都不会让它失效。
+脚本是幂等的（重复执行是 no-op），只备份一次，两个图标要么都打要么都不打（源键解析不到
+即拒绝，不会打出半个补丁），且拒绝写坏切片 —— 它会对结果跑 `node --check`，失败即还原
+备份 —— 所以每次 DSH 升级后无条件重跑都是安全的。它先探测调用方自己的 profile 作用域，
+再看 CLI 安装目录，因此 nvm 换版本或安装软链重指都不会让它失效；当机器上存在多份 DSH
+安装时，**没有**被打补丁的那些会列在输出里 —— 因为真正服务你面前界面的只有其中一份，
+需要时把那个路径作为参数显式传入。
 
 **重装插件并不会恢复图标。**`dsh plugin --profile web add …` 只是把参数转发给
 profile 目录里的 pnpm，只写 profile 自己的 `node_modules`；`-w`
@@ -185,9 +195,10 @@ DSH 的 bundle patch 是整体替换 `permission.config.presets`，而非逐 key
 请重载 profile 让 `cordis.patch.yml` 重新生效，并确认没有更晚加载的插件覆盖了
 `presets`。
 
-**「自动审查（高权限）」在输入区丢了图标。**
+**某个「自动审查」档位在输入区丢了图标。**
 DSH 升级或重装替换了被打了补丁的宿主 bundle；重装插件不会把它带回来。执行
-`npx dsh-perm-gate-patch-glyph` 后重载即可。档位本身不受影响 ——
+`npx dsh-perm-gate-patch-glyph` 后重载即可。若报错说某个源键不存在，说明宿主又改了
+图标表 —— 报错会列出表里现有的键，按提示改 `GLYPH_TARGETS` 即可。档位本身不受影响 ——
 没有补丁，它的标签与门禁照常工作。
 
 **规则文件存在但 `--list` 显示 `ruleCount: 0`。**

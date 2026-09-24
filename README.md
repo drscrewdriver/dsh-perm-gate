@@ -43,7 +43,7 @@
 > **private** method of the user-approval service on both, so it is read behind a
 > `typeof` probe and degrades to “policy unknown” when absent or throwing.
 
-Version **2.6.0** — see the [Changelog](./CHANGELOG.md).
+Version **2.6.1** — see the [Changelog](./CHANGELOG.md).
 
 A single, self-sufficient, deterministic-first, fail-closed permission gate for DeepSeek Harness.
 
@@ -290,9 +290,10 @@ default row and the composer picker) and only supplies its own localized labels 
 built-in values, so `cordis.patch.yml` ships the Chinese label for every session.
 
 The **icon** is a different story. The composer's glyph map is closed, and its own comment states
-the rule: *host-configured names outside the design set get none.* `permissive` is a built-in
-value, so 自动审查 already has a shield+eye glyph; `permissive-full` gets the same glyph only
-because `npx dsh-perm-gate-patch-glyph` adds it to that map. That patch edits a **host**
+the rule: *host-configured names outside the design set get none.* Neither tier is a built-in value,
+so both get an icon only because `npx dsh-perm-gate-patch-glyph` adds them to that map — 自动审查
+copies the `workspace-write` glyph, 自动审查（高权限） the `danger-full-access` one, so each tier
+shows the glyph of the file sandbox it actually shares. That patch edits a **host**
 package, so it is lost on every DSH upgrade — see
 [After a DSH upgrade](./INSTALL.md#after-a-dsh-upgrade-re-apply-the-composer-glyph-patch).
 
@@ -400,9 +401,10 @@ channel existed), with `tools/result` settling the same ask as a fallback when t
 correlate it. Approvals report the post-approval learning progress (`n`/threshold), and the notice
 strip labels all three terminal states.
 
-自动审查 and 自动审查（高权限） both draw the shield+eye glyph in the picker — the first from DSH's
-built-in map, the second from the host patch the installation guide describes. Without that patch
-the second tier is text-only on every surface; its label and its gating are unaffected.
+自动审查 and 自动审查（高权限） both draw a glyph in the picker — copied from the built-in tiers whose
+file sandbox they share (`workspace-write` and `danger-full-access`) by the host patch the
+installation guide describes. Without that patch both tiers are text-only on every surface; their
+labels and their gating are unaffected.
 
 ### A selectable session tier
 

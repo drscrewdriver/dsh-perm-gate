@@ -76,7 +76,7 @@ export const LINE_015 = {
   /**
    * Paths the repository must NOT carry. Plan artifacts are assets and live
    * outside the repo; the manual glyph patch is superseded by
-   * `scripts/patch-permission-glyph.mjs` (which has 11 tests behind it), and a
+   * `scripts/patch-permission-glyph.mjs` (which has a test suite behind it), and a
    * hand-maintained patch rots silently as the host changes.
    */
   absentPaths: ['spec.md', 'tasks.md', 'checklist.md', 'findings.md', 'patches/add-permissive-glyph.patch'],

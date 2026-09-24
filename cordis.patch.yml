@@ -17,14 +17,17 @@
 # The composer's permission picker draws an icon per preset from a CLOSED map
 # inside @deepseek-ai/dsh-client-ui-conversation (`permissionGlyphs`), whose
 # source states the rule: "host-configured names outside the design set get
-# none". DSH ships a shield+eye glyph for `permissive`, so 自动审查 has an icon,
-# but a second plugin tier has none — it falls back to text in the trigger. The
-# map is a closure variable with no plugin-facing seam (the option objects the
-# host supplies carry only {value, name, description}), so the only way to give
-# BOTH tiers the same glyph is to extend that map.
-# `scripts/patch-permission-glyph.mjs` does exactly that, duplicating the
-# `permissive` entry under `permissive-full`. It patches a HOST package, so it
-# must be re-run after any DSH upgrade or reinstall.
+# none". Neither tier is a built-in value, so DSH renders no glyph for either
+# — the map is a closed closure variable and its only plugin-facing input is
+# {value, name, description} on the option objects, which carries no icon. The
+# only way to give a tier an icon is to add an entry to that map.
+# `scripts/patch-permission-glyph.mjs` does exactly that, copying the glyph of
+# the built-in tier whose file sandbox each of ours shares:
+#   permissive       <- ["workspace-write",  (same sandbox: workspace-write)
+#   permissive-full  <- [FULL_ACCESS,        (same sandbox: danger-full-access)
+# The source key is RESOLVED, not assumed (0.1.2 keyed a `permissive` glyph that
+# 0.1.5 dropped, so a literal anchor died with "anchor not found"). It patches a
+# HOST package, so it must be re-run after any DSH upgrade or reinstall.
 #
 # The DSH bundle patch REPLACES the whole `permission.config.presets` map (it
 # does not merge per key), so this file MUST restate every tier that should

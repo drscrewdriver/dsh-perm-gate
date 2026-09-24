@@ -12,7 +12,7 @@
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
 
-`dsh-perm-gate` version **2.6.0**. Continue with the [README](./README.md) for the
+`dsh-perm-gate` version **2.6.1**. Continue with the [README](./README.md) for the
 decision chain, the rules file format and the 自动审查 tier.
 
 ## Requirements
@@ -98,12 +98,21 @@ dsh profile reload --profile web
 
 ## After a **DSH** upgrade: re-apply the composer glyph patch
 
-The 自动审查（高权限） tier shows the same shield+eye glyph as 自动审查 only because
-`scripts/patch-permission-glyph.mjs` added it to a **closed map inside a DSH host
-package**. DSH gives host-configured tiers no glyph by design — the map's own
-comment reads *"host-configured names outside the design set get none"* — and the
-option objects a plugin can influence carry only `{value, name, description}`, so
-there is no plugin-side seam to use instead.
+Both 自动审查 tiers draw an icon only because `scripts/patch-permission-glyph.mjs`
+added them to a **closed map inside a DSH host package**: 自动审查 copies the
+`workspace-write` glyph and 自动审查（高权限） the `danger-full-access` one — the
+built-in tier each shares a file sandbox with. DSH gives host-configured tiers no
+glyph by design — the map's own comment reads *"host-configured names outside the
+design set get none"* — and the option objects a plugin can influence carry only
+`{value, name, description}`, so there is no plugin-side seam to use instead.
+
+The script resolves each source key instead of assuming its spelling: `["<key>",`
+first, then the constant alias the bundle may use instead (`[FULL_ACCESS,` for
+`danger-full-access`). DSH has already changed this design set once — 0.1.2 keyed a
+`permissive` glyph, 0.1.5 keeps only `read-only` / `workspace-write` /
+`danger-full-access` — and a source key it cannot resolve is reported together with
+the keys the map does carry, so re-pointing a tier is a one-line edit to
+`GLYPH_TARGETS`.
 
 That patch edits a **host** file, so a DSH upgrade or reinstall erases it. Upgrading
 *this plugin* does not: the plugin never owned the glyph, and its own contribution
@@ -120,11 +129,15 @@ the `dsh-perm-gate-patch-glyph` bin — so no source checkout is needed. It is d
 **not** wired to `postinstall`: it edits a host package, and a plugin must not rewrite its
 harness uninvited. Running DSH is unaffected either way; the tier works with or without it.
 
-It is idempotent (a second run is a no-op), backs the bundle up once, and refuses to
-write a mis-sliced bundle — it runs `node --check` on the result and restores the
-backup if that fails — so it is safe to run unconditionally after every DSH upgrade.
-It locates the bundle from the running `node` binary, so an nvm version change or a
-re-pointed install symlink does not break it.
+It is idempotent (a second run is a no-op), backs the bundle up once, applies both
+glyphs or neither (a source key it cannot resolve is a refusal, not a half-patch),
+and refuses to write a mis-sliced bundle — it runs `node --check` on the result and
+restores the backup if that fails — so it is safe to run unconditionally after every
+DSH upgrade. It locates the bundle from the caller's profile scope first and the CLI
+install second, so an nvm version change or a re-pointed install symlink does not
+break it — and when the machine carries more than one DSH install, the ones it did
+**not** patch are listed in the output, because only one of them serves the UI in
+front of you. Pass that path explicitly to patch it.
 
 **Reinstalling the plugin does not restore the glyph.** `dsh plugin --profile web
 add …` forwards to pnpm inside the profile directory and writes the profile's own
@@ -199,11 +212,13 @@ The DSH bundle patch replaces the whole `permission.config.presets` map instead 
 merging per key. Reload the profile so `cordis.patch.yml` is re-applied, and make
 sure no later plugin overwrites `presets`.
 
-**自动审查（高权限） lost its icon in the composer.**
-A DSH upgrade or reinstall replaced the host bundle the glyph was patched into;
+**A 自动审查 tier lost its icon in the composer.**
+A DSH upgrade or reinstall replaced the host bundle the glyphs were patched into;
 re-running the plugin install will not bring it back. Run
-`npx dsh-perm-gate-patch-glyph` and reload. The tier itself is
-unaffected — its label and its gating keep working without the patch.
+`npx dsh-perm-gate-patch-glyph` and reload. If it reports that a source key is gone,
+DSH changed the glyph map again: the error names the keys the map now carries, so
+re-point the affected tier in `GLYPH_TARGETS`. The tiers themselves are
+unaffected — their labels and their gating keep working without the patch.
 
 **`--list` reports `ruleCount: 0` although my rules file exists.**
 `rulesFile` is resolved against the process CWD of the harness, not the plugin
