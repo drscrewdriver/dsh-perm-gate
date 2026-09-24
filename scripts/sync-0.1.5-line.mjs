@@ -65,7 +65,7 @@ export const LINE_015 = {
    * deliberate: the pin records the last real sync, and `fields.version` below is
    * what makes the bump visible. Re-pinning is a sync-time act, not a release one.
    */
-  syncedFrom: 'c2e80d94ce57419b5bf7f44074201c2769cc3e5c',
+  syncedFrom: '1f15c6ecd6e1dc633975c11634036f1d91f13be1',
   /** `package.json` top-level scalars, as `[key, expected]`. */
   fields: [
     ['version', '4.1.2'],
