@@ -263,9 +263,13 @@ describe('live host bundle', () => {
     }
   })
 
-  it.skipIf(!available)('does not key its glyphs by a value this plugin no longer uses', () => {
-    // Documentation of the drift, so a reader does not re-add a `permissive`
-    // anchor: the target keys are ours, the source keys are the host's.
-    expect(glyphKeys(readFileSync(String(bundle), 'utf8'))).not.toContain('permissive')
+  it.skipIf(!available)('never carries only one of the declared targets', () => {
+    // State-agnostic on purpose: an unpatched host carries none of our keys and a
+    // patched one carries all of them. Exactly one is the half-glyphed bundle the
+    // all-or-nothing splice exists to prevent — and it is also what a hand edit to
+    // the host, or a partially restored backup, would leave behind.
+    const text = readFileSync(String(bundle), 'utf8')
+    const present = GLYPH_TARGETS.filter(({ target }) => text.includes(`["${target}",`))
+    expect([0, GLYPH_TARGETS.length]).toContain(present.length)
   })
 })
