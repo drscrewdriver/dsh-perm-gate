@@ -2,16 +2,19 @@
 /**
  * The 0.1.5 line's difference from `main`, declared as executable text.
  *
- * Why this exists: how `compat/0.1.5` (the 3.x line) differs from `main` used to
- * live only in a person's head. Re-deriving it meant diffing tens of commits by
+ * Why this exists: how `compat/0.1.5` (the 3.x/4.x line) differs from `main` used
+ * to live only in a person's head. Re-deriving it meant diffing tens of commits by
  * hand — which is exactly what happened once, at a cost of a dozen commands —
  * and nothing stopped a fifth difference from appearing unnoticed. This file
  * declares the difference; `test/line-delta.spec.ts` asserts reality matches it.
  *
- * The declaration is small because the two lines are close. Measured: their DSH
- * client devDependencies are byte-identical (`@deepseek-ai/dsh-client-*` all
- * `^0.1.5-rc.2`). The 0.1.5 line is a **packaging variant**, not an API fork —
- * so the difference fits in `package.json`.
+ * The declaration has four kinds of member, because there are four honest answers
+ * to "how may this differ from main":
+ *
+ *   `fields` / `nested`  — `package.json` values the line SETS, pinned by value.
+ *   `contentPaths`       — files the line OWNS, pinned by line-side blob id.
+ *   `mirrorPaths`        — files DERIVED from `package.json`, exempt by nature.
+ *   `declarationPaths`   — this file, which cannot agree with its own pin.
  *
  * Usage:
  *   node scripts/sync-0.1.5-line.mjs check [--ref <ref>] [--base <ref>]
@@ -24,6 +27,11 @@
  *     Align a checked-out 0.1.5-line worktree to `main` and re-apply the delta.
  *     Refuses to run unless the worktree is clean and on the declared branch.
  *     It never commits and never pushes — review, gate, then commit yourself.
+ *
+ *   node scripts/sync-0.1.5-line.mjs pin [--ref <ref>] [--base <ref>]
+ *     Print the `contentPaths` entries this tree would need, plus the pins that no
+ *     longer differ, for pasting into the declaration after a re-pin. Print-only:
+ *     the declaration stays a reviewed edit, never a generated file.
  *
  * What the difference is NOT allowed to contain: the plan artifacts
  * (`spec.md` / `tasks.md` / `checklist.md` / `findings.md`) and the manual glyph
@@ -39,9 +47,6 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
  * The declared difference between the 0.1.5 line and `main`.
- *
- * `fields` is the complete list of `package.json` values the line may differ in.
- * Anything else that differs is drift, and `check` reports it.
  */
 export const LINE_015 = {
   branch: 'compat/0.1.5',
@@ -55,23 +60,95 @@ export const LINE_015 = {
    * Pinning the sync point makes the two cases distinguishable: a difference
    * from THIS commit is an undeclared edit to the line, while commits after it
    * are simply newer work waiting to be synced.
+   *
+   * A release that bumps `version` moves the line ahead of its own pin. That is
+   * deliberate: the pin records the last real sync, and `fields.version` below is
+   * what makes the bump visible. Re-pinning is a sync-time act, not a release one.
    */
-  syncedFrom: '1072a244b635890f804966dc92d00908de0f2825',
+  syncedFrom: 'c2e80d94ce57419b5bf7f44074201c2769cc3e5c',
   /** `package.json` top-level scalars, as `[key, expected]`. */
   fields: [
-    ['version', '3.0.0'],
+    ['version', '4.1.2'],
     ['description', 'DSH permission-gate for the DeepSeek Harness 0.1.5 line: a single self-sufficient, deterministic-first, fail-closed gate covering P0 hard-deny -> P1 session grant -> P2 static rule (allow/deny) chain -> P3 optional LLM semantic classifier -> P4 ask, with command whitelist/blacklist.'],
   ],
   /**
-   * Nested scalars, as `[path, expected]` with `/`-separated paths — the same
-   * separator `diffPaths` reports, so a declared path can be compared against a
-   * detected one directly. Mixing separators here silently turns a legitimate
-   * difference into a reported one.
+   * Nested scalars, as `[path, expected]` — the same separator `diffPaths`
+   * reports, so a declared path can be compared against a detected one directly.
+   * Mixing separators here silently turns a legitimate difference into a reported
+   * one.
+   *
+   * A path may also be an ARRAY of keys. That form exists for keys containing a
+   * slash — a scoped package name like `@deepseek-ai/dsh-client-locale` cannot be
+   * addressed through a `/`-separated string at all, and reading it back needs
+   * the array form to round-trip. Both forms feed `apply` as well as `check`, so
+   * the line's optional peers survive a sync instead of being silently dropped.
+   *
+   * A declared VALUE may be a sub-object; it is then compared structurally, with
+   * key order ignored. That is what lets a whole entry be pinned where the tree
+   * adds it whole (`peerDependenciesMeta`), instead of pinning an inner scalar the
+   * diff never reaches.
    */
   nested: [
     ['engines/node', '>=24'],
     ['engines/dsh', '>=0.1.5-rc.1 <0.2.0-0'],
     ['scripts/release:3x', 'npm publish --tag dsh-0.1.5'],
+    ['publishConfig/registry', 'https://registry.npmjs.org'],
+    ['publishConfig/access', 'public'],
+    ['publishConfig/tag', 'dsh-0.1.5'],
+    [['peerDependencies', '@deepseek-ai/cordis'], '^4.0.1'],
+    [['peerDependencies', '@deepseek-ai/dsh-client-locale'], '>=0.1.5-rc.1 <0.2.0-0'],
+    [['peerDependencies', '@deepseek-ai/dsh-client-ui-conversation'], '>=0.1.5-rc.1 <0.2.0-0'],
+    [['peerDependencies', '@deepseek-ai/dsh-client-ui-renderer'], '>=0.1.5-rc.1 <0.2.0-0'],
+    [['peerDependencies', '@deepseek-ai/dsh-client-ui-settings'], '>=0.1.5-rc.1 <0.2.0-0'],
+    [['peerDependenciesMeta', '@deepseek-ai/dsh-client-locale'], { optional: true }],
+    [['peerDependenciesMeta', '@deepseek-ai/dsh-client-ui-conversation'], { optional: true }],
+    [['peerDependenciesMeta', '@deepseek-ai/dsh-client-ui-renderer'], { optional: true }],
+    [['peerDependenciesMeta', '@deepseek-ai/dsh-client-ui-settings'], { optional: true }],
+  ],
+  /**
+   * Files the line owns outright: they differ from the sync point by design, and
+   * each one is pinned to the blob id the line is supposed to carry. "May differ"
+   * is too weak a claim — with that, any of these could be edited on the line
+   * without a trace. Pinning the blob means the tree has to differ in exactly the
+   * declared way, and editing one of them is drift until the pin is renewed
+   * (`pin` prints the entries; renewing it is a reviewed edit).
+   *
+   * `null` means the path is tracked on `main` and deliberately absent here.
+   */
+  contentPaths: [
+    ['CHANGELOG.ja.md', '4800c71f6b97'],
+    ['CHANGELOG.ko.md', 'a04afccc20d9'],
+    ['CHANGELOG.md', '92a03c5d7d91'],
+    ['INSTALL.ja.md', '9b1ef53a63db'],
+    ['INSTALL.ko.md', 'a034d153d61b'],
+    ['INSTALL.md', '16987e2b20cb'],
+    ['INSTALL.zh.md', 'dc67460165cb'],
+    ['README.ja.md', 'b681a1a4641b'],
+    ['README.ko.md', '25a0f7174690'],
+    ['README.md', 'ff43c4520e75'],
+    ['README.zh.md', 'e538c8de8052'],
+    ['dsh.plugin.json', '01fc21c1ed56'],
+    ['lib/client.js', 'beae9473799c'],
+    ['lib/client.js.map', '7a7e0a9abe74'],
+    ['lib/config.d.ts', 'bde16e60b663'],
+    ['lib/config.js', '4576600428e6'],
+    ['lib/events.d.ts', '2dbf08d79f9e'],
+    ['lib/events.js', '11f9adae21e7'],
+    ['lib/index.js', 'ae82a210fd8f'],
+    ['src/client/feed.ts', 'fe032e52841a'],
+    ['src/client/history.tsx', '1b3cf569110c'],
+    ['src/client/locales.ts', '772c513e97dd'],
+    ['src/client/notice.tsx', '2de179280cab'],
+    ['src/client/sediment.tsx', '72d12b2b3382'],
+    ['src/config.ts', 'ff6c08b371a1'],
+    ['src/events.ts', 'f7fe41f7f715'],
+    ['src/index.ts', 'c407bcf3dd9a'],
+    ['test/events.spec.ts', 'fdbee547747f'],
+    // Tracked on main, deliberately not tracked on this line: its package manager
+    // is npm (`package-lock.json` is the mirror), and the plan doc is a main-side
+    // artifact the line never carried.
+    ['docs/plan-rules-to-settings.md', null],
+    ['pnpm-lock.yaml', null],
   ],
   /**
    * Paths the repository must NOT carry. Plan artifacts are assets and live
@@ -91,11 +168,32 @@ export const LINE_015 = {
    * running it.
    */
   mirrorPaths: ['package-lock.json'],
+  /**
+   * Files whose JOB is to describe the delta, and which therefore can never agree
+   * with the delta's own pin: this file is edited whenever the line syncs, so it
+   * is always one edit ahead of the commit `syncedFrom` names. Hashing it here
+   * would be circular — the hash would have to include itself.
+   *
+   * It is still covered: `test/line-delta.spec.ts` exercises the machinery, and
+   * any change here is a reviewed edit to the guard itself.
+   */
+  declarationPaths: ['scripts/sync-0.1.5-line.mjs'],
 }
 
-/** Read a nested value by `a/b/c` path. */
+/** Human-readable form of a declared path (string or array of keys). */
+function pathLabel(path) {
+  return Array.isArray(path) ? path.join('/') : path
+}
+
+/** The keys a declared path names: split a string, copy an array. */
+function pathKeys(path) {
+  return Array.isArray(path) ? [...path] : path.split('/')
+}
+
+/** Read a nested value by path — `a/b/c`, or an array of literal keys. */
 function at(object, path) {
-  return path.split('/').reduce((node, key) => (node === undefined || node === null ? undefined : node[key]), object)
+  const keys = pathKeys(path)
+  return keys.reduce((node, key) => (node === undefined || node === null ? undefined : node[key]), object)
 }
 
 /**
@@ -107,14 +205,14 @@ export function applyDelta(pkg) {
   const next = structuredClone(pkg)
   for (const [key, value] of LINE_015.fields) next[key] = value
   for (const [path, value] of LINE_015.nested) {
-    const parts = path.split('/')
-    const key = parts.pop()
+    const keys = pathKeys(path)
+    const leaf = keys.pop()
     let node = next
-    for (const part of parts) {
-      if (typeof node[part] !== 'object' || node[part] === null) node[part] = {}
-      node = node[part]
+    for (const key of keys) {
+      if (typeof node[key] !== 'object' || node[key] === null || Array.isArray(node[key])) node[key] = {}
+      node = node[key]
     }
-    node[key] = value
+    node[leaf] = value
   }
   return next
 }
@@ -141,12 +239,36 @@ export function diffPaths(before, after, prefix = '') {
 }
 
 /**
+ * A value's comparable form: objects with their keys sorted, so two objects that
+ * differ only in insertion order compare equal.
+ */
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (typeof value === 'object' && value !== null) {
+    const out = {}
+    for (const key of Object.keys(value).sort()) out[key] = canonical(value[key])
+    return out
+  }
+  return value
+}
+
+/**
+ * Whether a declared value holds. Scalars compare by identity; an object or array
+ * declaration compares structurally, which is how a whole sub-object is pinned.
+ */
+function sameValue(actual, expected) {
+  if (actual === expected) return true
+  if (typeof expected !== 'object' || expected === null) return false
+  return JSON.stringify(canonical(actual)) === JSON.stringify(canonical(expected))
+}
+
+/**
  * Every problem with one 0.1.5-line tree, as human-readable strings.
  * An empty array means the tree carries exactly the declared difference.
- * @param {{ pkg: Record<string, unknown> | undefined, mainPkg: Record<string, unknown> | undefined, present: readonly string[], changed: readonly string[], label?: string }} input - the tree under test.
+ * @param {{ pkg: Record<string, unknown> | undefined, mainPkg: Record<string, unknown> | undefined, present: readonly string[], changed: readonly string[], content?: Record<string, string | null>, label?: string }} input - the tree under test.
  * @returns {string[]} problems; empty when the tree is correct.
  */
-export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.branch }) {
+export function checkLine({ pkg, mainPkg, present, changed, content = {}, label = LINE_015.branch }) {
   const problems = []
   if (pkg === undefined) return [`${label}: package.json is missing`]
   if (mainPkg === undefined) return [`${label}: main's package.json is unreadable — cannot compare`]
@@ -159,15 +281,15 @@ export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.bra
   }
   for (const [path, value] of LINE_015.nested) {
     const actual = at(pkg, path)
-    if (actual !== value) {
-      problems.push(`${label}: package.json ${path} is ${JSON.stringify(actual)}, declared ${JSON.stringify(value)}`)
+    if (!sameValue(actual, value)) {
+      problems.push(`${label}: package.json ${pathLabel(path)} is ${JSON.stringify(actual)}, declared ${JSON.stringify(value)}`)
     }
   }
 
   // 2. Nothing ELSE may differ — this is the drift this whole file exists for.
   const declared = new Set([
     ...LINE_015.fields.map(([key]) => key),
-    ...LINE_015.nested.map(([path]) => path.split('/')[0]),
+    ...LINE_015.nested.map(([path]) => pathKeys(path)[0]),
   ])
   const unexpected = diffPaths(mainPkg, pkg).filter((path) => !declared.has(path.split('/')[0]))
   for (const path of unexpected) {
@@ -178,15 +300,42 @@ export function checkLine({ pkg, mainPkg, present, changed, label = LINE_015.bra
   // read `package.json` and nothing else, so without this an edited `src/` file
   // on the 0.1.5 line passed with "carries exactly the declared difference"
   // printed over it. `package.json` is always permitted because its contents
-  // were already judged above; mirrors are permitted because they are derived.
-  const permitted = new Set(['package.json', ...LINE_015.mirrorPaths, ...LINE_015.absentPaths])
+  // were already judged above; mirrors are permitted because they are derived;
+  // the declaration file because it cannot agree with its own pin.
+  const permitted = new Set([
+    'package.json',
+    ...LINE_015.mirrorPaths,
+    ...LINE_015.absentPaths,
+    ...LINE_015.declarationPaths,
+  ])
+  const pinned = new Map(LINE_015.contentPaths)
   for (const path of changed) {
-    if (!permitted.has(path)) {
+    if (permitted.has(path)) continue
+    if (!pinned.has(path)) {
       problems.push(`${label}: ${path} differs from the sync point but is not part of the declared difference`)
+      continue
+    }
+    const expected = pinned.get(path)
+    const actual = content[path] ?? null
+    if (expected === null) {
+      if (actual !== null) {
+        problems.push(`${label}: ${path} is declared absent on this line but is tracked (${actual})`)
+      }
+    } else if (actual !== expected) {
+      problems.push(`${label}: ${path} is declared at ${expected} but the line carries ${actual ?? 'nothing'}`)
     }
   }
 
-  // 4. The repo must not carry the assets that belong outside it.
+  // 4. A declared content pin that no longer differs is a stale pin: harmless to
+  // the tree, but it means the declaration is describing a difference that has
+  // been synced away. Reported so the list cannot quietly rot.
+  for (const [path] of LINE_015.contentPaths) {
+    if (!changed.includes(path)) {
+      problems.push(`${label}: ${path} is declared as line-owned content but no longer differs from the sync point`)
+    }
+  }
+
+  // 5. The repo must not carry the assets that belong outside it.
   for (const path of LINE_015.absentPaths) {
     if (present.includes(path)) problems.push(`${label}: ${path} is tracked in the repository but must live outside it`)
   }
@@ -235,6 +384,28 @@ function readChanged(baseRef, ref, cwd) {
   }
 }
 
+/**
+ * The line-side blob id of each path, shortened to the 12 characters the
+ * declaration pins. `null` when the path is not tracked there, which is how a
+ * declared-absent path is told apart from a missing one.
+ */
+function readContent(ref, cwd, paths) {
+  const out = {}
+  for (const path of paths) {
+    try {
+      out[path] = execFileSync('git', ['rev-parse', `${ref ?? 'HEAD'}:${path}`], {
+        cwd,
+        encoding: 'utf8',
+        // A declared-absent path is an expected miss; its stderr is not a finding.
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim().slice(0, 12)
+    } catch {
+      out[path] = null
+    }
+  }
+  return out
+}
+
 /** `check` subcommand. */
 function cmdCheck(argv) {
   const ref = argv.ref ?? LINE_015.branch
@@ -245,6 +416,7 @@ function cmdCheck(argv) {
     mainPkg: readPkg(baseRef, ROOT),
     present: readPaths(ref, ROOT),
     changed: readChanged(baseRef, ref, ROOT),
+    content: readContent(ref, ROOT, LINE_015.contentPaths.map(([path]) => path)),
     label: ref,
   })
 
@@ -265,6 +437,38 @@ function cmdCheck(argv) {
   for (const p of problems) console.error(`✗ ${p}`)
   console.error(`\n${problems.length} problem(s). The declaration lives in scripts/sync-0.1.5-line.mjs.`)
   return 1
+}
+
+/**
+ * `pin` subcommand: print the `contentPaths` entries this tree needs, and the
+ * pins it no longer needs. Print-only on purpose — the declaration stays a
+ * reviewed edit, and a generator that rewrote it could mask a real drift.
+ */
+function cmdPin(argv) {
+  const ref = argv.ref ?? 'HEAD'
+  const baseRef = argv.base ?? LINE_015.syncedFrom
+  const declared = new Set([
+    'package.json',
+    ...LINE_015.mirrorPaths,
+    ...LINE_015.absentPaths,
+    ...LINE_015.declarationPaths,
+  ])
+  const changed = readChanged(baseRef, ref, ROOT).filter((path) => !declared.has(path))
+  const content = readContent(ref, ROOT, changed)
+
+  console.log(`// LINE_015.contentPaths for ${ref} against ${baseRef}`)
+  for (const path of changed) {
+    const id = content[path]
+    console.log(`    ['${path}', ${id === null ? 'null' : `'${id}'`}],`)
+  }
+
+  const stale = LINE_015.contentPaths.map(([path]) => path).filter((path) => !changed.includes(path))
+  if (stale.length > 0) {
+    console.log('\n// no longer differ — drop these pins:')
+    for (const path of stale) console.log(`//   ${path}`)
+  }
+  console.log('\n// then: node scripts/sync-0.1.5-line.mjs check')
+  return 0
 }
 
 /** `apply` subcommand: align a worktree and re-apply the delta, without committing. */
@@ -293,7 +497,7 @@ function cmdApply(argv) {
   const changed = diffPaths(before, after)
   const declared = new Set([
     ...LINE_015.fields.map(([key]) => key),
-    ...LINE_015.nested.map(([path]) => path),
+    ...LINE_015.nested.map(([path]) => pathLabel(path)),
   ])
   const stray = changed.filter((path) => !declared.has(path) && !declared.has(path.split('/')[0]))
   if (stray.length > 0) throw new Error(`refusing to write: the delta would also change ${stray.join(', ')}`)
@@ -318,7 +522,8 @@ function main() {
   const flags = parseFlags(rest)
   if (sub === 'check') return cmdCheck(flags)
   if (sub === 'apply') return cmdApply(flags)
-  console.error('usage: node scripts/sync-0.1.5-line.mjs <check|apply> [--ref R] [--main R] [--dir D]')
+  if (sub === 'pin') return cmdPin(flags)
+  console.error('usage: node scripts/sync-0.1.5-line.mjs <check|apply|pin> [--ref R] [--main R] [--base R] [--dir D]')
   return 2
 }
 

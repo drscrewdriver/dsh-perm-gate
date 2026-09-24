@@ -65,7 +65,7 @@ dsh-perm-gate/
 ├── scripts/
 │   ├── patch-permission-glyph.mjs          # opt-in：为两个自动审查档补 composer 图标（含 bin）
 │   ├── verify-line.mjs                     # 双线校验
-│   └── sync-0.1.5-line.mjs                 # 0.1.5 线差量声明 + check/apply
+│   └── sync-0.1.5-line.mjs                 # 0.1.5 线差量声明 + check/apply/pin
 ├── lib/                                    # 构建产物（**git 跟踪**，71 个文件；github 安装免构建）
 ├── examples/permissions.example.yaml       # 规则示例
 ├── docs/                                   # 见 §7 文档地图

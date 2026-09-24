@@ -22,9 +22,11 @@ interface LineDeltaModule {
     branch: string
     syncedFrom: string
     fields: readonly (readonly [string, string])[]
-    nested: readonly (readonly [string, string])[]
+    nested: readonly (readonly [string | readonly string[], string])[]
     absentPaths: readonly string[]
     mirrorPaths: readonly string[]
+    contentPaths: readonly (readonly [string, string | null])[]
+    declarationPaths: readonly string[]
   }
   applyDelta: (pkg: Record<string, unknown>) => Record<string, unknown>
   diffPaths: (before: unknown, after: unknown) => string[]
@@ -33,6 +35,7 @@ interface LineDeltaModule {
     mainPkg: Record<string, unknown> | undefined
     present: readonly string[]
     changed: readonly string[]
+    content?: Record<string, string | null>
     label?: string
   }) => string[]
 }
@@ -54,6 +57,12 @@ function mainPkg(overrides: Record<string, unknown> = {}): Record<string, unknow
     engines: { node: '>=20', dsh: '>=0.1.2-alpha.1 <0.2.0-0' },
     scripts: { 'release:latest': 'npm publish --tag latest' },
     dependencies: { yaml: '^2.5.0' },
+    // Present but empty on main's side; the line is what fills them in. Without
+    // the empty shells `diffPaths` reports each added object as a single path,
+    // and the exactness case below could not see the keys inside it.
+    publishConfig: {},
+    peerDependencies: {},
+    peerDependenciesMeta: {},
     ...overrides,
   }
 }
@@ -89,16 +98,60 @@ describe('applyDelta', () => {
   it('changes exactly the declared paths and nothing else', () => {
     const before = mainPkg()
     const changed = diffPaths(before, applyDelta(before))
+    // Array paths (scoped package names) are compared in the `/`-joined form
+    // `diffPaths` reports, which is what makes the two directly comparable.
     const declared = [
       ...LINE_015.fields.map(([key]) => key),
-      ...LINE_015.nested.map(([path]) => path),
+      ...LINE_015.nested.map(([path]) => (Array.isArray(path) ? path.join('/') : path)),
     ].sort()
     // The load-bearing assertion: the delta cannot quietly grow.
     expect(changed).toEqual(declared)
   })
 
+  it('carries a scoped peer through the array form of a path', () => {
+    // A `/`-separated path cannot address `@deepseek-ai/dsh-client-locale` at all:
+    // splitting on `/` turns one key into two. Without the array form, the line's
+    // optional peers would be dropped by the next `apply` instead of re-applied.
+    const pkg = applyDelta(mainPkg()) as {
+      peerDependencies: Record<string, string>
+      peerDependenciesMeta: Record<string, { optional?: boolean }>
+    }
+    expect(pkg.peerDependencies['@deepseek-ai/dsh-client-locale']).toBe('>=0.1.5-rc.1 <0.2.0-0')
+    expect(pkg.peerDependenciesMeta['@deepseek-ai/dsh-client-locale'].optional).toBe(true)
+  })
+
+  it('compares a declared sub-object structurally, ignoring key order', () => {
+    const pkg = applyDelta(mainPkg()) as { peerDependenciesMeta: Record<string, { optional?: boolean }> }
+    // Same entries, reversed insertion order: still exactly the declared value.
+    pkg.peerDependenciesMeta = {
+      '@deepseek-ai/dsh-client-ui-settings': { optional: true },
+      '@deepseek-ai/dsh-client-ui-renderer': { optional: true },
+      '@deepseek-ai/dsh-client-ui-conversation': { optional: true },
+      '@deepseek-ai/dsh-client-locale': { optional: true },
+    }
+    expect(checkLine({
+      pkg,
+      mainPkg: mainPkg(),
+      present: [],
+      changed: LINE_015.contentPaths.map(([p]) => p),
+      content: Object.fromEntries(LINE_015.contentPaths),
+    })).toEqual([])
+    // ...and a different shape is still reported.
+    pkg.peerDependenciesMeta = { '@deepseek-ai/dsh-client-locale': { optional: false } }
+    expect(checkLine({ pkg, mainPkg: mainPkg(), present: [], changed: [] }).join('\n'))
+      .toContain('peerDependenciesMeta/@deepseek-ai/dsh-client-locale')
+  })
+
   it('produces a tree the checker accepts', () => {
-    expect(checkLine({ pkg: applyDelta(mainPkg()), mainPkg: mainPkg(), present: [], changed: [] })).toEqual([])
+    // `changed` has to name every live content pin: a pin that no longer differs
+    // is reported, so a green check also means the pins are current.
+    expect(checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: [],
+      changed: [...LINE_015.contentPaths.map(([path]) => path), 'package.json'],
+      content: Object.fromEntries(LINE_015.contentPaths),
+    })).toEqual([])
   })
 })
 
@@ -122,7 +175,10 @@ describe('checkLine', () => {
       pkg: applyDelta(mainPkg()),
       mainPkg: mainPkg(),
       present: ['src/index.ts'],
-      changed: ['package.json', 'package-lock.json', 'tasks.md'],
+      // Every live pin has to be named: a declared content path that no longer
+      // differs is reported, which is what keeps the list from rotting.
+      changed: ['package.json', 'package-lock.json', 'tasks.md', ...LINE_015.contentPaths.map(([path]) => path)],
+      content: Object.fromEntries(LINE_015.contentPaths),
     })).toEqual([])
   })
 
@@ -166,6 +222,61 @@ describe('checkLine', () => {
     })
     expect(problems.join('\n')).toContain('src/runtime.ts')
     expect(problems.join('\n')).toContain('not part of the declared difference')
+  })
+
+  it('pins a line-owned path to its blob, not merely to "may differ"', () => {
+    const withBlob = LINE_015.contentPaths.find(([, pinned]) => pinned !== null)
+    if (withBlob === undefined) throw new Error('no blob-pinned content path declared')
+    const [path, id] = withBlob
+    const changed = LINE_015.contentPaths.map(([p]) => p)
+    const base = { pkg: applyDelta(mainPkg()), mainPkg: mainPkg(), present: [], changed }
+    expect(checkLine({ ...base, content: Object.fromEntries(LINE_015.contentPaths) })).toEqual([])
+    // The same path with different bytes is drift: the pin is a claim about
+    // content, not a licence to differ however one likes.
+    const problems = checkLine({ ...base, content: { ...Object.fromEntries(LINE_015.contentPaths), [path]: 'deadbeefdead' } })
+    expect(problems.join('\n')).toContain(`declared at ${id}`)
+    expect(problems.join('\n')).toContain(path)
+  })
+
+  it('reports a path the declaration says must be absent on the line', () => {
+    const absent = LINE_015.contentPaths.find(([, pinned]) => pinned === null)
+    if (absent === undefined) throw new Error('no declared-absent content path')
+    const problems = checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: [],
+      changed: LINE_015.contentPaths.map(([p]) => p),
+      content: { ...Object.fromEntries(LINE_015.contentPaths), [absent[0]]: 'feedfacecafe' },
+    })
+    expect(problems.join('\n')).toContain('declared absent')
+  })
+
+  it('reports a pin that no longer differs, so the list cannot rot', () => {
+    const problems = checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: [],
+      changed: ['package.json'],
+      content: {},
+    })
+    expect(problems.join('\n')).toContain('no longer differs')
+  })
+
+  it('permits the declaration file itself, which can never match its own pin', () => {
+    expect(checkLine({
+      pkg: applyDelta(mainPkg()),
+      mainPkg: mainPkg(),
+      present: [],
+      changed: [...LINE_015.contentPaths.map(([p]) => p), ...LINE_015.declarationPaths, 'package.json'],
+      content: Object.fromEntries(LINE_015.contentPaths),
+    })).toEqual([])
+  })
+
+  it('rejects a scoped peer whose declared version drifted', () => {
+    const pkg = applyDelta(mainPkg()) as { peerDependencies: Record<string, string> }
+    pkg.peerDependencies['@deepseek-ai/dsh-client-locale'] = '>=0.1.4-rc.1 <0.2.0-0'
+    const problems = checkLine({ pkg, mainPkg: mainPkg(), present: [], changed: [] })
+    expect(problems.join('\n')).toContain('peerDependencies/@deepseek-ai/dsh-client-locale')
   })
 
   it('reports an unreadable side instead of silently passing', () => {
