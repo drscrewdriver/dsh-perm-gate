@@ -9,6 +9,7 @@ export type PermissiveKey = keyof typeof zh
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'card.title': '自动审查',
+  'section.title': '自动审查门',
   'card.description': '独立审批档位：与只读 / 完全权限 / 白名单平行，在会话权限下拉中显示为「自动审查」。前端只暴露一个开关；后台四个审批策略可组合、由此处设置决定，仍对 P0 硬拒绝保持 fail-closed。',
   'card.permissive': '启用自动审查档位',
   'card.permissiveHint': '关闭时门禁行为与此前完全一致。',
@@ -163,6 +164,7 @@ export const zh = {
 /** English dictionary (keys mirror zh). */
 export const en: Record<keyof typeof zh, string> = {
   'card.title': '自动审查 (Auto review)',
+  'section.title': 'Auto-Review Gate',
   'card.description': 'Independent approval tier, parallel to read-only / full-access / whitelist, shown as 自动审查 in the session permission picker. The front-end exposes a single switch; the four backend approval strategies are combinable via this panel and still fail-closed against P0 hard-deny.',
   'card.permissive': 'Enable the 自动审查 tier',
   'card.permissiveHint': 'When off, the gate behaves exactly as before.',
@@ -316,6 +318,7 @@ export const en: Record<keyof typeof zh, string> = {
 /** Japanese dictionary (keys mirror zh). */
 export const ja: Record<keyof typeof zh, string> = {
   'card.title': '自动审查（自動審査）ティア',
+  'section.title': '自動審査ゲート',
   'card.description': 'read-only / full-access / whitelist と並ぶ独立の承認モード。セッション権限ピッカーでは「自动审查」と表示されます。フロントは単一スイッチのみ。バックエンドの 4 つの承認戦略はこのパネルで組み合わせ可能で、P0 ハード拒否に対して依然 fail-closed。',
   'card.permissive': '自动审查ティアを有効化',
   'card.permissiveHint': 'オフのときは以前と完全に同じ動作です。',
@@ -469,6 +472,7 @@ export const ja: Record<keyof typeof zh, string> = {
 /** Korean dictionary (keys mirror zh). */
 export const ko: Record<keyof typeof zh, string> = {
   'card.title': '自动审查(자동 검토) 티어',
+  'section.title': '자동 검토 게이트',
   'card.description': 'read-only / full-access / whitelist와 나란한 독립 승인 모드. 세션 권한 선택기에서는 「自动审查」로 표시됩니다. 프론트는 단일 스위치만 노출. 백엔드의 네 가지 승인 전략은 이 패널에서 조합 가능하며 P0 하드 거부에 대해 여전히 fail-closed.',
   'card.permissive': '自动审查 티어 활성화',
   'card.permissiveHint': '꺼져 있으면 이전과 완전히 동일하게 동작합니다.',

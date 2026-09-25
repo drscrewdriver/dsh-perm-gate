@@ -111,13 +111,13 @@ export function apply(ctx: ClientContext): void {
   // A localized tab label (re-evaluated per read so it follows the active locale).
   const t = ctx.locale.bind(NS)
 
-  ctx.slots.inject('settings.plugins.tab', function* () {
+  // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
+  ctx.slots.inject('settings.section', function* () {
     yield ctx.slots.register({
-      name: 'settings.plugins.tab',
-      // List-slot cell identity + nav position + localized tab text.
+      name: 'settings.section',
       id: PERMISSIVE_NS,
-      order: 50,
-      label: () => t('card.title'),
+      order: 30,
+      label: () => t('section.title'),
       locale: NS,
       inject: (): PermissiveCardInjected => {
         const scope = ctx.configForms.get<PermissiveCardValue>(PERMISSIVE_NS)

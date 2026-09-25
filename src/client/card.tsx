@@ -1,5 +1,5 @@
 /**
- * Permissive settings card — a `settings.plugins.tab` face of dsh-perm-gate.
+ * Permissive settings card — the top-level `settings.section` (自动审查门) of dsh-perm-gate.
  *
  * The card binds the plugin's profile entry (`dsh-perm-gate`) through the
  * `configForms` cordis service and renders its fields: the single front switch
