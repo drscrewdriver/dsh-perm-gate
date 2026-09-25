@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "4.2.0-beta.1",
+  "version": "4.2.0-beta.2",
   "publishConfig": {
     "tag": "dsh-0.1.7"
   },
@@ -65,13 +65,13 @@
   },
   "engines": {
     "node": ">=24",
-    "dsh": ">=0.1.5-rc.1 <0.2.0-0"
+    "dsh": ">=0.1.7-rc.1 <0.1.8-0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.1 <0.2.0-0",
-    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.7-rc.1 <0.2.0-0",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.1 <0.2.0-0"
+    "@deepseek-ai/dsh-client-locale": ">=0.1.7-rc.1 <0.1.8-0",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.7-rc.1 <0.1.8-0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.7-rc.1 <0.1.8-0"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.4",
