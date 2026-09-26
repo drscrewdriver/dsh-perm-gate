@@ -277,14 +277,17 @@ export interface RulesConfig {
     readonly deny?: unknown[];
     readonly allow?: unknown[];
     readonly ask?: unknown[];
+    /** Activation-time seed marker (see RulesSchema). */
+    readonly initialized?: boolean;
 }
 /** Settings namespace for rules (separate from the main perm-gate namespace). */
 export declare const RULES_NAMESPACE = "dsh-perm-gate-rules";
 /**
  * Whether a settings-sourced rules document carries a REAL configuration —
- * entries or a non-default `defaultAction`. A namespace still holding bare
- * schema defaults is "not configured" and must not shadow the rules file
- * (the dual-source contract: settings first, file fallback).
+ * entries, a non-default `defaultAction`, or the `initialized` marker the
+ * activation-time seed writes after populating an empty document. A namespace
+ * still holding bare schema defaults is "not configured" and must not shadow
+ * the rules file (the dual-source contract: settings first, file fallback).
  */
 export declare function isRulesConfigured(value: unknown): boolean;
 /**

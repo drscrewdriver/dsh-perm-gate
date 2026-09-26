@@ -240,7 +240,19 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   const ENTRY_ID = 'dsh-perm-gate'
   const settingsRef: { svc?: { update(ns: string, patch: object): Promise<void> } } = {}
   ctx.inject(['settings'], (child) => {
-    settingsRef.svc = (child as unknown as { settings?: { update(ns: string, patch: object): Promise<void> } }).settings
+    const svc = (child as unknown as { settings?: { update(ns: string, patch: object): Promise<void> } }).settings
+    settingsRef.svc = svc
+    // Activation-time seed: a never-configured `rules` field is populated once
+    // — from the rules file when one exists (implicit migration), otherwise a
+    // bare starter document — and marked `initialized`, so the panel shows a
+    // live rules document from the first boot instead of a missing-file
+    // fallback. The field watcher below picks the seed up via reload.
+    if (svc !== undefined && readRulesDocument() === undefined) {
+      const seed = { ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true }
+      void svc.update(ENTRY_ID, { rules: seed }).catch((e: unknown) => {
+        console.warn('[dsh-perm-gate] rules seed write failed:', e)
+      })
+    }
   })
 
   const settingsWrite = (write: (scope: SettingsRulesScope, seed: unknown) => Promise<boolean>): boolean => {
