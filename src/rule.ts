@@ -182,7 +182,8 @@ export function parsePermissionsObject(raw: unknown): PermissionsDoc {
   }
   if (!isRecord(raw)) throw new RuleError('permissions document must be a mapping')
   const root = isRecord(raw.permissions) ? raw.permissions : raw
-  const unknown = Object.keys(root).filter((k) => !(VALID_ACTIONS as string[]).includes(k) && k !== 'defaultAction')
+  // `initialized` is the activation-time seed marker (RulesSchema), not a rule.
+  const unknown = Object.keys(root).filter((k) => !(VALID_ACTIONS as string[]).includes(k) && k !== 'defaultAction' && k !== 'initialized')
   if (unknown.length > 0) {
     throw new RuleError(`unknown permissions field${unknown.length > 1 ? 's' : ''} ${unknown.map((k) => JSON.stringify(k)).join(', ')}`)
   }

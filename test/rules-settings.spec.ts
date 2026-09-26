@@ -62,6 +62,11 @@ describe('parsePermissionsObject / compileRulesObject (settings input path)', ()
     expect(decideRules(ruleset, writeCtx('src/secret.ts')).action).toBe('deny')
   })
 
+  it('accepts the activation-time seed marker alongside the rule fields', () => {
+    const ruleset = compileRulesObject({ initialized: true, defaultAction: 'ask', allow: [] })
+    expect(ruleset.defaultAction).toBe('ask')
+  })
+
   it('agrees with the YAML path for equivalent documents', () => {
     const yaml = `permissions:\n  defaultAction: ask\n  allow:\n    - command: [git push]\n      reason: settings allow\n`
     const fromYaml = parsePermissionsDocument(yaml)
