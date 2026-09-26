@@ -44,3 +44,11 @@ export declare function listAllowCommands(rulesFile: string): string[];
  * @param reason - reason recorded on each generated allow entry.
  */
 export declare function replaceAllowCommands(rulesFile: string, patterns: readonly string[], reason?: string): boolean;
+/**
+ * Parse the rules file into a plain document — the seed for the first
+ * settings-backed allowlist write, so migrating a file-defined document into
+ * the rules namespace cannot drop its deny/ask sections. The file's optional
+ * `permissions:` wrapper is unwrapped (the settings document stores the bare
+ * form). Returns `{}` when the file is absent or unreadable.
+ */
+export declare function readRulesFileDoc(rulesFile: string): unknown;
