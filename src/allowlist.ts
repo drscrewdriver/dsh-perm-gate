@@ -209,3 +209,19 @@ function readFileSafe(p: string): string {
     return ''
   }
 }
+
+/**
+ * Parse the rules file into a plain document — the seed for the first
+ * settings-backed allowlist write, so migrating a file-defined document into
+ * the entry's `rules` config field cannot drop its deny/ask sections.
+ * Returns `{}` when the file is absent or unreadable.
+ */
+export function readRulesFileDoc(rulesFile: string): unknown {
+  const text = readFileSafe(rulesFile)
+  if (text === '') return {}
+  try {
+    return parse(text) ?? {}
+  } catch {
+    return {}
+  }
+}

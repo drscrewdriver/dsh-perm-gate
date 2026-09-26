@@ -146,7 +146,7 @@ export const zh = {
   'card.dryRunFail': '测试失败：',
   'card.dryRunStale': '路由不存在（插件未重启？）',
   'card.rules': 'Settings 内置规则',
-  'card.rulesHint': '门禁此刻实际加载的规则（来自 settings 命名空间 dsh-perm-gate-rules）。只读——这里改不了任何东西。要改规则，用下面的白名单，或在设置页中编辑。',
+  'card.rulesHint': '门禁此刻实际加载的规则（来自本插件入口的 rules 配置字段；未配置时回退到规则文件）。只读——这里改不了任何东西。要改规则，用下面的白名单，或在设置页中编辑。',
   'card.rulesRefresh': '刷新',
   'card.rulesLoading': '读取中…',
   'card.rulesPath': '来源',
@@ -158,7 +158,7 @@ export const zh = {
   'card.rulesTruncated': '规则过大，仅显示前 512 KB。',
   'card.rulesError': '加载失败：',
   'card.rulesStale': '路由不存在（插件未重启？）',
-  'card.rulesNote': '此处只读：面板无法修改规则，白名单段是唯一会写入 settings 的地方。',
+  'card.rulesNote': '此处只读：面板无法修改规则；白名单段与“始终允许”会写回本插件的入口配置。',
 } satisfies Record<string, string>
 
 /** English dictionary (keys mirror zh). */
@@ -300,7 +300,7 @@ export const en: Record<keyof typeof zh, string> = {
   'card.dryRunFail': 'Test failed: ',
   'card.dryRunStale': 'route missing (plugin not restarted?)',
   'card.rules': 'Settings Built-in Rules',
-  'card.rulesHint': 'The rules the gate is loading right now (from the dsh-perm-gate-rules settings namespace). Read-only — nothing here can change them. To change rules, use the allowlist below or edit them on the settings page.',
+  'card.rulesHint': 'The rules the gate is loading right now (from this plugin entry\'s `rules` config field; falls back to the rules file when unset). Read-only — nothing here can change them. To change rules, use the allowlist below or edit them on the settings page.',
   'card.rulesRefresh': 'Refresh',
   'card.rulesLoading': 'Reading…',
   'card.rulesPath': 'Source',
@@ -312,7 +312,7 @@ export const en: Record<keyof typeof zh, string> = {
   'card.rulesTruncated': 'Rules are large; showing the first 512 KB only.',
   'card.rulesError': 'Load failed: ',
   'card.rulesStale': 'route missing (plugin not restarted?)',
-  'card.rulesNote': 'Read-only: this panel cannot modify the rules. The allowlist section is the only place that writes to settings.',
+  'card.rulesNote': 'Read-only: this panel cannot modify the rules. The allowlist section and "allow always" write back to this plugin\'s entry config.',
 }
 
 /** Japanese dictionary (keys mirror zh). */
@@ -454,7 +454,7 @@ export const ja: Record<keyof typeof zh, string> = {
   'card.dryRunFail': 'テスト失敗：',
   'card.dryRunStale': 'ルートが存在しません（プラグイン未再起動？）',
   'card.rules': 'Settings 組み込みルール',
-  'card.rulesHint': 'ゲートが今読み込んでいるルール（dsh-perm-gate-rules 設定名前空間から）。読み取り専用 — ここからは何も変更できません。変更するには下の許可リストを使うか、設定ページで編集してください。',
+  'card.rulesHint': 'ゲートが今読み込んでいるルール（本プラグインエントリの rules 設定フィールドから。未設定時はルールファイルにフォールバック）。読み取り専用 — 変更するには下の許可リストか設定ページを使ってください。',
   'card.rulesRefresh': '再読み込み',
   'card.rulesLoading': '読み込み中…',
   'card.rulesPath': 'ソース',
@@ -466,7 +466,7 @@ export const ja: Record<keyof typeof zh, string> = {
   'card.rulesTruncated': 'ルールが大きいため、先頭 512 KB のみ表示します。',
   'card.rulesError': '読み込みに失敗しました：',
   'card.rulesStale': 'ルートが存在しません（プラグイン未再起動？）',
-  'card.rulesNote': '読み取り専用：このパネルからルールは変更できません。書き込むのは許可リストのセクションだけです。',
+  'card.rulesNote': '読み取り専用：このパネルからルールは変更できません。許可リストと「常に許可」は本プラグインのエントリ設定に書き戻されます。',
 }
 
 /** Korean dictionary (keys mirror zh). */
@@ -608,7 +608,7 @@ export const ko: Record<keyof typeof zh, string> = {
   'card.dryRunFail': '테스트 실패: ',
   'card.dryRunStale': '라우트가 없습니다(플러그인 미재시작?)',
   'card.rules': 'Settings 내장 규칙',
-  'card.rulesHint': '게이트가 지금 불러오는 규칙(dsh-perm-gate-rules 설정 네임스페이스에서). 읽기 전용 — 여기서는 아무것도 바꿀 수 없습니다. 바꾸려면 아래 허용 목록을 쓰거나 설정 페이지에서 편집하세요.',
+  'card.rulesHint': '게이트가 지금 불러오는 규칙(이 플러그인 엔트리의 rules 설정 필드에서. 미설정 시 규칙 파일로 폴백). 읽기 전용 — 아래 허용 목록이나 설정 페이지에서 수정하세요.',
   'card.rulesRefresh': '새로 고침',
   'card.rulesLoading': '읽는 중…',
   'card.rulesPath': '소스',
@@ -620,5 +620,5 @@ export const ko: Record<keyof typeof zh, string> = {
   'card.rulesTruncated': '규칙이 커서 앞 512 KB만 표시합니다.',
   'card.rulesError': '불러오기 실패: ',
   'card.rulesStale': '라우트가 없습니다(플러그인 미재시작?)',
-  'card.rulesNote': '읽기 전용: 이 패널은 규칙을 수정할 수 없습니다. 쓰기는 허용 목록 섹션뿐입니다.',
+  'card.rulesNote': '읽기 전용: 이 패널은 규칙을 수정할 수 없습니다. 허용 목록과 "항상 허용"은 이 플러그인의 엔트리 설정에 기록됩니다.',
 }

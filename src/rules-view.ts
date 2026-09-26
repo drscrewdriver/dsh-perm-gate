@@ -115,7 +115,7 @@ export function readRulesView(rulesFile: string): RulesView {
 }
 
 /** The pseudo-path a settings view reports (there is no file to name). */
-export const SETTINGS_RULES_VIEW_PATH = 'settings:dsh-perm-gate-rules'
+export const SETTINGS_RULES_VIEW_PATH = 'config:dsh-perm-gate#rules'
 
 /**
  * Render the settings-sourced rules for display — the read-only face of the

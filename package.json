@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "4.2.0-beta.4",
+  "version": "4.2.0-beta.5",
   "publishConfig": {
     "tag": "dsh-0.1.7"
   },
