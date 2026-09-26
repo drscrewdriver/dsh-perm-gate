@@ -8,7 +8,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Config, RULES_NAMESPACE, RulesSchema, readRulesFromSettings, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, RULES_NAMESPACE, RulesSchema, readRulesFromSettings, resolveDshHome, resolveDataDir, ensureDataDir, dataDirReady, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile, isRulesConfigured } from './config.js'
+import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 import type { HostLlmLike } from './host-llm.js'
@@ -280,14 +281,31 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
 
   // ─── Rules settings scope (dsh-perm-gate-rules namespace) ────────────────
   // Holds the live settings-sourced rules document. When non-undefined, the
-  // runtime prefers it over the rules file on disk.
+  // runtime prefers it over the rules file on disk. The write-capable view is
+  // captured separately so allowlist writes can go through the namespace.
   let rulesScope: { get(): unknown } | undefined
+  let rulesWriteScope: SettingsRulesScope | undefined
   const readRulesDocument = (): ReturnType<typeof readRulesFromSettings> => readRulesFromSettings(rulesScope)
 
   // Plugin-owned data files live under $DSH_HOME (node_modules may be
   // read-only). The default resolves to `$DSH_HOME` / `~/.dsh`, so a profile
   // entry that omits `config` still records events, snapshots and learning.
   const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
+
+  const rulesFilePath = resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir)
+
+  // Allowlist write-back through the rules namespace: "allow always" and the
+  // panel's allowlist editor land in the live settings document (seeded from
+  // the rules file on first write) instead of the file the document shadows.
+  // A falsy verdict (namespace not wired yet) falls back to the rules file.
+  const settingsWrite = (write: (scope: SettingsRulesScope, seed: unknown) => Promise<boolean>): boolean => {
+    const scope = rulesWriteScope
+    if (scope === undefined) return false
+    void write(scope, readRulesFileDoc(rulesFilePath)).catch((e: unknown) => {
+      console.warn('[dsh-perm-gate] settings rules write failed:', e)
+    })
+    return true
+  }
 
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same
@@ -430,9 +448,19 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // The rules document lives in the plugin's data dir by default, so a
     // `$DSH_HOME/perm-gate/rules.yml` the user writes is actually loaded without
     // also having to declare `rulesFile` in the composition entry.
-    rulesFile: resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir),
+    rulesFile: rulesFilePath,
     // Settings-sourced rules take precedence over the file when present.
     readRulesDocument,
+    // Allowlist write-back (see settingsWrite above); falsy verdict falls back
+    // to the rules file paths.
+    allowlistWriter: {
+      append: (pattern: string, reason: string) => settingsWrite(
+        (scope, seed) => appendAllowToSettings(scope, pattern, reason, seed),
+      ),
+      replace: (patterns: readonly string[], reason: string) => settingsWrite(
+        (scope, seed) => replaceAllowInSettings(scope, patterns, reason, seed),
+      ),
+    },
     // The whole gate is scoped to the presets that opt into it (default: the
     // `permissive` tier this plugin adds); elsewhere it stands down entirely.
     gatePresets: resolveGatePresets(
@@ -565,9 +593,21 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     onChange: () => {},
     onScope: (scope) => {
       rulesScope = scope
+      rulesWriteScope = scope
       // When rules change in settings, reload the runtime so the new ruleset
       // takes effect on the next tool call.
       scope.watch(() => { runtime.reload() })
+      // Activation-time seed: an empty (never-configured) namespace is
+      // populated once — from the rules file when one exists (implicit
+      // migration), otherwise a bare starter document — and marked
+      // `initialized`, so the panel shows a live rules document from the
+      // first boot instead of a missing-file fallback.
+      if (!isRulesConfigured(scope.get())) {
+        const seed = { ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true }
+        void Promise.resolve(scope.update(seed)).catch((e: unknown) => {
+          console.warn('[dsh-perm-gate] rules seed write failed:', e)
+        })
+      }
     },
   })
 

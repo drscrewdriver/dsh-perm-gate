@@ -323,6 +323,10 @@ export const RulesSchema: z<RulesConfig> = z.object({
   deny: z.array(RuleEntrySchema).default([]),
   allow: z.array(RuleEntrySchema).default([]),
   ask: z.array(RuleEntrySchema).default([]),
+  // Activation-time seed marker: the gate writes `true` the first time it
+  // populates an empty document (file migration or bare starter), so the
+  // seeded namespace becomes the rules source instead of shadowing nothing.
+  initialized: z.boolean().default(false),
 })
 
 /** One rule entry in the settings-stored rules document (JSON form; all optional). */
@@ -355,6 +359,8 @@ export interface RulesConfig {
   readonly deny?: unknown[]
   readonly allow?: unknown[]
   readonly ask?: unknown[]
+  /** Activation-time seed marker (see RulesSchema). */
+  readonly initialized?: boolean
 }
 
 /** Settings namespace for rules (separate from the main perm-gate namespace). */
@@ -362,13 +368,15 @@ export const RULES_NAMESPACE = 'dsh-perm-gate-rules'
 
 /**
  * Whether a settings-sourced rules document carries a REAL configuration —
- * entries or a non-default `defaultAction`. A namespace still holding bare
- * schema defaults is "not configured" and must not shadow the rules file
- * (the dual-source contract: settings first, file fallback).
+ * entries, a non-default `defaultAction`, or the `initialized` marker the
+ * activation-time seed writes after populating an empty document. A namespace
+ * still holding bare schema defaults is "not configured" and must not shadow
+ * the rules file (the dual-source contract: settings first, file fallback).
  */
 export function isRulesConfigured(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const doc = value as RulesConfig
+  if (doc.initialized === true) return true
   if (doc.defaultAction !== undefined && doc.defaultAction !== 'ask') return true
   for (const key of ['deny', 'allow', 'ask'] as const) {
     const list = doc[key]
