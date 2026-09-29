@@ -161,11 +161,11 @@ const fieldLabelStyle: CSSProperties = { margin: 0, fontSize: '12px', lineHeight
 
 /**
  * The card body, wrapped in a disclosure shell like every peer settings card:
- * a header (name + description + chevron) toggling the body, collapsed by
- * default so the plugin tab stays a tidy list of drawers.
+ * a header (name + description + chevron) toggling the body, expanded by
+ * default so the section reads as an open page of drawers.
  */
 export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   // The api key is kept OUT of the visible value (secret): a fresh typed draft
   // overwrites on blur; an already-set key shows only a masked placeholder.
   const [apiKeyDraft, setApiKeyDraft] = useState('')
