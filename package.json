@@ -2,7 +2,7 @@
   "name": "dsh-perm-gate",
   "version": "5.0.1",
   "publishConfig": {
-    "tag": "dsh-0.1.7"
+    "tag": "dsh-0.2.0"
   },
   "description": "DSH permission-gate for the DeepSeek Harness 0.1.5 line: a single self-sufficient, deterministic-first, fail-closed gate covering P0 hard-deny -> P1 session grant -> P2 static rule (allow/deny) chain -> P3 optional LLM semantic classifier -> P4 ask, with command whitelist/blacklist.",
   "type": "module",
