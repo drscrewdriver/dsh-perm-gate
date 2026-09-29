@@ -59,6 +59,11 @@ const LINES = {
     branch: 'main',
     note: 'DSH >= 0.1.2-alpha.1 — dsh-client-runtime removed',
   },
+  next: {
+    dsh: '0.2.0-rc.1',
+    branch: 'compat/0.2.0',
+    note: 'DSH 0.2.0 line — peer gate generation',
+  },
 }
 
 /**
@@ -111,7 +116,7 @@ function restore() {
 
 const requested = process.argv[2]
 if (requested === undefined) {
-  console.error('usage: node scripts/verify-line.mjs <legacy|new|both>')
+  console.error('usage: node scripts/verify-line.mjs <legacy|new|next|both>')
   process.exit(2)
 }
 const names = requested === 'both' ? ['legacy', 'new'] : [requested]

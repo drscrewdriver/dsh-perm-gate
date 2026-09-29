@@ -150,8 +150,13 @@ describe('live host bundle', () => {
     bundle = undefined
   }
   const available = bundle !== undefined && existsSync(bundle)
+  // The anchor only ever existed in pre-2.1.2-era host builds; every published
+  // dsh-client-ui-conversation (0.1.0-rc.7 … 0.2.0-rc.1, verified against npm
+  // tarballs) lacks it, so a bare install must skip the probe instead of
+  // failing. The probe still hard-fails when the anchor IS present but malformed.
+  const anchorPresent = available && readFileSync(String(bundle), 'utf8').includes(`["${SOURCE_KEY}",`)
 
-  it.skipIf(!available)('still exposes the permissive anchor DSH renders the glyph from', () => {
+  it.skipIf(!anchorPresent)('still exposes the permissive anchor DSH renders the glyph from', () => {
     // If DSH ever renames or drops this entry, the patch silently stops doing
     // anything. On a machine without a DSH install the check is skipped rather
     // than failing the suite.
