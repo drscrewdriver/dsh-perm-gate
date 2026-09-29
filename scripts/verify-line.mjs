@@ -9,7 +9,7 @@
  *            `@deepseek-ai/dsh-client-runtime` still ships and `ctx.slots`
  *            reaches `Context` through it.
  *   new    — branch `main`, version series 0.2.x, DSH from 0.1.2-alpha.1 on
- *            (current 0.1.5-rc.2), where that package is gone and the same
+ *            (current 0.1.2-rc.1), where that package is gone and the same
  *            declarations live in `@deepseek-ai/dsh-client-ui-renderer/client`.
  *
  * Each branch pins its own line in `package.json` (`verify:line`) and installs
@@ -55,7 +55,7 @@ const LINES = {
     note: 'DSH < 0.1.2-alpha.1 — dsh-client-runtime present',
   },
   new: {
-    dsh: '0.1.5-rc.2',
+    dsh: '0.1.2-rc.1',
     branch: 'main',
     note: 'DSH >= 0.1.2-alpha.1 — dsh-client-runtime removed',
   },
