@@ -1,5 +1,7 @@
 # Changelog
 
+Languages: [English](./CHANGELOG.md) · [日本語](./CHANGELOG.ja.md) · [한국어](./CHANGELOG.ko.md) · [Français](./CHANGELOG.fr.md) · [Deutsch](./CHANGELOG.de.md) · [Italiano](./CHANGELOG.it.md) · [Русский](./CHANGELOG.ru.md) · [Español](./CHANGELOG.es.md)
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

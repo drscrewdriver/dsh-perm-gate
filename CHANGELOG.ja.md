@@ -1,5 +1,7 @@
 # 変更履歴
 
+言語: [English](./CHANGELOG.md) · [日本語](./CHANGELOG.ja.md) · [한국어](./CHANGELOG.ko.md) · [Français](./CHANGELOG.fr.md) · [Deutsch](./CHANGELOG.de.md) · [Italiano](./CHANGELOG.it.md) · [Русский](./CHANGELOG.ru.md) · [Español](./CHANGELOG.es.md)
+
 このプロジェクトの重要な変更はすべてこのファイルに記録されます。
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に従い、

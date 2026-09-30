@@ -4,13 +4,28 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Français README](./README.fr.md)
+- [Deutsch README](./README.de.md)
+- [Italiano README](./README.it.md)
+- [Русский README](./README.ru.md)
+- [Español README](./README.es.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guide d'installation](./INSTALL.fr.md)
+- [Installationsanleitung](./INSTALL.de.md)
+- [Guida all'installazione](./INSTALL.it.md)
+- [Руководство по установке](./INSTALL.ru.md)
+- [Guía de instalación](./INSTALL.es.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Français changelog](./CHANGELOG.fr.md)
+- [Deutsch changelog](./CHANGELOG.de.md)
+- [Italiano changelog](./CHANGELOG.it.md)
+- [Русский changelog](./CHANGELOG.ru.md)
+- [Español changelog](./CHANGELOG.es.md)
 
 > **호환성 안내:** v2.0.0은 `ja` / `ko` 사전을 포함하지만, 공식 DSH의 `LocaleRuntime`은
 > `zh` / `en`만 노출합니다(`LOCALE_IDS = ["zh", "en"]`). 기본 DSH에서 `ja` / `ko`를
@@ -101,7 +116,9 @@ dsh plugin --profile web add dsh-perm-gate
 
 설치·업그레이드·이전·문제 해결의 전체 절차는
 [한국어 설치 안내](./INSTALL.ko.md)([English](./INSTALL.md) /
-[中文](./INSTALL.zh.md) / [日本語](./INSTALL.ja.md))에 있습니다.
+[中文](./INSTALL.zh.md) / [日本語](./INSTALL.ja.md) / [Français](./INSTALL.fr.md) /
+[Deutsch](./INSTALL.de.md) / [Italiano](./INSTALL.it.md) / [Русский](./INSTALL.ru.md) /
+[Español](./INSTALL.es.md))에 있습니다.
 
 ## 설정
 
