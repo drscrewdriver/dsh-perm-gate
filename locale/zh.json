@@ -1,0 +1,1 @@
+{ "meta": { "title": "权限门禁", "description": "面向 DeepSeek Harness 的确定性优先、fail-closed 权限门禁：P0 硬拒绝 → P1 会话授权 → P2 静态规则链 → P3 可选 LLM 语义分类器 → P4 人工确认，含命令白名单与黑名单。" } }

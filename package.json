@@ -8,6 +8,7 @@
   "type": "module",
   "files": [
     "lib",
+    "locale",
     "scripts/patch-permission-glyph.mjs",
     "cordis.patch.yml",
     "dsh.plugin.json",
@@ -57,6 +58,7 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "bin": {

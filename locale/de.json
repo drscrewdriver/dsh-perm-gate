@@ -1,0 +1,1 @@
+{ "meta": { "title": "Berechtigungsschleuse", "description": "Deterministisch-zuerst, fehlgeschlossene Berechtigungsschleuse für DeepSeek Harness: P0 harte Ablehnung → P1 Sitzungsfreigabe → P2 statische Regelkette → P3 optionaler LLM-Semantik-Klassifikator → P4 manuelle Bestätigung, mit Befehls-Whitelist und -Blacklist." } }

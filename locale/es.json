@@ -1,0 +1,1 @@
+{ "meta": { "title": "Puerta de permisos", "description": "Puerta de permisos determinista y de cierre seguro para DeepSeek Harness: P0 denegación estricta → P1 concesión de sesión → P2 cadena de reglas estáticas → P3 clasificador semántico LLM opcional → P4 confirmación manual, con lista blanca y lista negra de comandos." } }

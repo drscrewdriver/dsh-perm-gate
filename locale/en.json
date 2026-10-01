@@ -1,0 +1,1 @@
+{ "meta": { "title": "Permission Gate", "description": "Deterministic-first, fail-closed permission gate for DeepSeek Harness: P0 hard-deny → P1 session grant → P2 static rules → P3 LLM classifier → P4 ask, with command whitelist and blacklist." } }

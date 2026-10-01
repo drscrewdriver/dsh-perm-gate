@@ -1,0 +1,1 @@
+{ "meta": { "title": "Gateway dei permessi", "description": "Gateway dei permessi deterministico e fail-closed per DeepSeek Harness: P0 rifiuto rigido → P1 concessione di sessione → P2 catena di regole statiche → P3 classificatore semantico LLM opzionale → P4 conferma manuale, con whitelist e blacklist dei comandi." } }

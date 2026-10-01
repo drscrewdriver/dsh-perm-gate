@@ -24,7 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // `dsh-client-runtime/client` (via the settings client's peer), which is why the
 // renderer entry declares nothing there. Importing it is a no-op on the old line.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { NS, en, zh, type PermissiveKey } from './locales.ts'
+import { NS, dictionaries, type PermissiveKey } from './locales.ts'
 import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue } from './card.tsx'
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
@@ -75,7 +75,7 @@ export const inject = ['slots', 'locale', 'configForms']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-perm-gate: dictionaries')
+  if (ctx.locale) ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-perm-gate: dictionaries')
 
   // No permission-picker decoration: the tier's label is the Chinese product
   // string supplied by cordis.patch.yml, and the composer draws glyphs only for

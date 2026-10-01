@@ -1,0 +1,1 @@
+{ "meta": { "title": "Passerelle de permissions", "description": "Passerelle de permissions déterministe et à échec fermé pour DeepSeek Harness : P0 refus strict → P1 autorisation de session → P2 chaîne de règles statiques → P3 classifieur sémantique LLM optionnel → P4 confirmation manuelle, avec liste blanche et liste noire de commandes." } }
