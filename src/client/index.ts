@@ -64,6 +64,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         useSessions?: (selector: (state: unknown) => unknown) => unknown
       }
     }
+    // Plugins-page configuration card (official ui-plugin-manager contract):
+    // DSH 0.2.0's Plugins page does not render volatile config forms on its
+    // own — the page draws a config card on the bundle's detail page only when
+    // a client claims this seat, keyed by the bundle's package name. Declared
+    // here (the declaring page package is not a dev dependency), mirroring the
+    // contract the page renders with (`{ view: 'page', form }` owner props).
+    'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
   }
 }
 
@@ -140,4 +147,19 @@ export function apply(ctx: ClientContext): void {
       },
     }, PermissiveCard)
   }) as unknown
+
+  // 插件页配置卡（DSH 0.2.0）：Plugins 页不会自动渲染 volatile 配置表单——
+  // 只有客户端注册 `plugins.bundle.config` 席位（key = package.json 的 name
+  // 字段），页面才会在 bundle 详情页渲染配置卡。注册同一个 PermissiveCard、
+  // 传同一份 inject 值（configForms 里的插件作用域），与上面的设置节共用
+  // 一个事实来源；卡片自带展开壳，不依赖 tab 容器上下文，可独立渲染。
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: 'dsh-perm-gate',
+    locale: NS,
+    inject: (): PermissiveCardInjected => {
+      const scope = ctx.configForms.get<PermissiveCardValue>(PERMISSIVE_NS)
+      return { scope }
+    },
+  }, PermissiveCard)) as unknown
 }
