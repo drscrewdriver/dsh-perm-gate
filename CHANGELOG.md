@@ -1,6 +1,10 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
+## 统一 15-rc 枚举线：三宿主子包 peer 全量枚举（client-locale/client-ui-renderer/client-ui-settings），内容=保留场验证的 4.3.0-beta.2 同树，版本越过 compat 线 5.0.4。 — 2026-10-05
+
+undefined
+
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
