@@ -191,6 +191,38 @@ export interface PermGateConfig {
      * Default 1800000 (30 min).
      */
     readonly networkGrantTtlMs?: number;
+    /**
+     * Run gate-allowed shell commands inside a Windows AppContainer. The
+     * container token carries NO network capability, so non-loopback egress is
+     * denied by Windows Firewall (WFP) itself; the container SID is derived
+     * deterministically so the loopback exemption is a one-time step. Default
+     * false — enabling changes how allowed commands execute.
+     */
+    readonly sandboxEnabled?: boolean;
+    /**
+     * Filesystem posture inside the container: 'workspace-write' grants the
+     * workspace Modify + temp FullControl; 'read-only' grants RX only.
+     * System directories stay readable through the stock ALL APPLICATION
+     * PACKAGES ACEs. Default 'workspace-write'.
+     */
+    readonly sandboxMode?: 'read-only' | 'workspace-write';
+    /**
+     * THE proxy parameter: the URL injected as HTTP(S)_PROXY / ALL_PROXY into
+     * sandboxed processes. Empty (default) follows the builtin filtered proxy
+     * (its actual bound 127.0.0.1 port) when networkEnabled; an explicit value
+     * must be loopback-bound (the container cannot reach anything else) and the
+     * destination filtering is that proxy's job. Neither set → no proxy env;
+     * direct egress stays WFP-blocked either way.
+     */
+    readonly sandboxProxy?: string;
+    /**
+     * Attempt the one-time `CheckNetIsolation LoopbackExempt -a -p=<sid>` for
+     * the container SID so sandboxed processes can reach 127.0.0.1 (the proxy
+     * and the host webServer). Denied without elevation → warning with the
+     * exact command; the sandbox still runs, only loopback stays closed.
+     * Default 'exempt'.
+     */
+    readonly sandboxLoopback?: 'exempt' | 'off';
     /** @deprecated Rules now live in the `dsh-perm-gate-rules` settings namespace; file watching was removed. Accepted (ignored) for composition compatibility. */
     readonly watch?: boolean;
     /** @deprecated See {@link watch}. */
@@ -349,6 +381,10 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     networkInjectEnv: z<boolean, boolean, "volatile-defined">;
     networkAskTimeoutMs: z<number, number, "volatile-defined">;
     networkGrantTtlMs: z<number, number, "volatile-defined">;
+    sandboxEnabled: z<boolean, boolean, "volatile-defined">;
+    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "volatile-defined">;
+    sandboxProxy: z<string, string, "volatile-defined">;
+    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "volatile-defined">;
     rules: z<NoInfer<RulesConfig>, NoInfer<RulesConfig>, "volatile">;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
@@ -404,6 +440,10 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     networkInjectEnv: z<boolean, boolean, "volatile-defined">;
     networkAskTimeoutMs: z<number, number, "volatile-defined">;
     networkGrantTtlMs: z<number, number, "volatile-defined">;
+    sandboxEnabled: z<boolean, boolean, "volatile-defined">;
+    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "volatile-defined">;
+    sandboxProxy: z<string, string, "volatile-defined">;
+    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "volatile-defined">;
     rules: z<NoInfer<RulesConfig>, NoInfer<RulesConfig>, "volatile">;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
@@ -411,7 +451,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "permissiveStrategies", "allowlist", "denyKeywords", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "permissiveStrategies", "allowlist", "denyKeywords", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */

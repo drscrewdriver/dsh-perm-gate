@@ -12,6 +12,14 @@ export interface PreToolDecisionLike {
     kind: 'deny' | 'ask';
     reason: string;
 }
+/** The sandbox hook's verdict for one allowed shell call (appcontainer seam). */
+export type SandboxRewriteOutcome = {
+    readonly kind: 'wrap';
+    readonly command: string;
+} | {
+    readonly kind: 'deny';
+    readonly reason: string;
+};
 /**
  * The P2 rule chain's own verdict for one call, as reported by
  * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
@@ -349,6 +357,20 @@ export declare class PermGateRuntime {
     private auditNetworkAsk;
     /** The compiled ruleset (read-only view for network module). */
     get compiledRuleset(): CompiledRuleset;
+    /**
+     * The sandbox hook installed by the plugin: gate-aware, fail-closed rewrite
+     * of an allowed shell call. Undefined → the feature is off entirely.
+     */
+    private sandboxHook;
+    /** Install/clear the sandbox rewrite hook (plugin wiring). */
+    setSandboxHook(hook: ((exec: ToolExecutionLike) => Promise<SandboxRewriteOutcome | undefined>) | undefined): void;
+    /**
+     * Gate-aware sandbox rewrite for the pre-execute waterfall's allow path.
+     * Mirrors {@link decideExecution}'s stand-down: outside the gate's presets
+     * the sandbox must not silently confine either — same scope, same fence.
+     * Returns undefined when not applicable.
+     */
+    sandboxRewrite(exec: ToolExecutionLike): Promise<SandboxRewriteOutcome | undefined>;
     private liveRiskLearning;
     private liveRiskSediment;
     private liveClassifySource;
