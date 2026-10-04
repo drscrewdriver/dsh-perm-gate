@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.log
 .backup/
+.compat-results/
+/*.tgz
