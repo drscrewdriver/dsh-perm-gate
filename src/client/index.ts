@@ -25,9 +25,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // renderer entry declares nothing there. Importing it is a no-op on the old line.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { NS, dictionaries, type PermissiveKey } from './locales.ts'
-import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardValue } from './card.tsx'
+import { PermissiveCard, type PermissiveCardInjected } from './card.tsx'
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
+import { resolveSettingsScope } from './compat.ts'
 
 /** The profile entry id of this plugin — the `configForms` key (kept in lockstep with cordis.patch.yml). */
 const PERMISSIVE_NS = 'dsh-perm-gate'
@@ -74,8 +75,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-/** Services required by the browser half. */
-export const inject = ['slots', 'locale', 'configForms']
+/** Services required by the browser half — generation-neutral only.
+ *
+ * `configForms` (0.1.7+) / `settingsScope` (≤0.1.5) are generation-exclusive
+ * durable-settings faces: keeping either in the plugin-level inject list would
+ * leave the WHOLE browser half fiber PENDING on the other line (strict ctx
+ * proxy throws on undeclared service reads; pending fiber = silent death).
+ * They resolve through scoped sub-injects in compat.ts instead, and the card
+ * registrations below move into the resolution callback. */
+export const inject = ['slots', 'locale']
 
 /**
  * Client plugin body: dictionaries plus the settings page registration.
@@ -118,33 +126,34 @@ export function apply(ctx: ClientContext): void {
   // A localized tab label (re-evaluated per read so it follows the active locale).
   const t = ctx.locale.bind(NS)
 
-  // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
-  ctx.slots.inject('settings.section', function* () {
-    yield ctx.slots.register({
-      name: 'settings.section',
-      id: PERMISSIVE_NS,
-      order: 30,
-      label: () => t('section.title'),
-      locale: NS,
-      inject: (): PermissiveCardInjected => {
-        const scope = ctx.configForms.get<PermissiveCardValue>(PERMISSIVE_NS)
-        return { scope }
-      },
-    }, PermissiveCard)
-  }) as unknown
+  // 设置卡注册收进 settings scope 解析回调（input-traffic P2 范式）：卡片
+  // inject 值闭包捕获已解析的句柄，注册体只在回调里跑一次——两代服务按代
+  // 互斥，天然不双触发。旧线 ≤0.1.5 经 settingsScope.bind 解析（此时
+  // `plugins.bundle.config` 席位在裸宿主上不存在，shadow-inject 为惰性
+  // no-op，注册体不执行）；0.1.7+ 经 configForms.get 解析。
+  resolveSettingsScope(ctx, PERMISSIVE_NS, (scope) => {
+    // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
+    ctx.slots.inject('settings.section', function* () {
+      yield ctx.slots.register({
+        name: 'settings.section',
+        id: PERMISSIVE_NS,
+        order: 30,
+        label: () => t('section.title'),
+        locale: NS,
+        inject: (): PermissiveCardInjected => ({ scope }),
+      }, PermissiveCard)
+    }) as unknown
 
-  // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
-  // `plugins.bundle.config` 席位（key = package.json 的 name 字段），页面才会
-  // 在 bundle 详情页渲染配置卡。注册同一个 PermissiveCard、传同一份 inject 值
-  // （configForms 里的插件作用域），与上面的设置节共用一个事实来源；卡片自带
-  // 展开壳，不依赖 tab 容器上下文，可独立渲染。
-  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
-    name: 'plugins.bundle.config',
-    key: 'dsh-perm-gate',
-    locale: NS,
-    inject: (): PermissiveCardInjected => {
-      const scope = ctx.configForms.get<PermissiveCardValue>(PERMISSIVE_NS)
-      return { scope }
-    },
-  }, PermissiveCard)) as unknown
+    // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
+    // `plugins.bundle.config` 席位（key = package.json 的 name 字段），页面才会
+    // 在 bundle 详情页渲染配置卡。注册同一个 PermissiveCard、传同一份 inject 值
+    // （configForms 里的插件作用域），与上面的设置节共用一个事实来源；卡片自带
+    // 展开壳，不依赖 tab 容器上下文，可独立渲染。
+    ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+      name: 'plugins.bundle.config',
+      key: 'dsh-perm-gate',
+      locale: NS,
+      inject: (): PermissiveCardInjected => ({ scope }),
+    }, PermissiveCard)) as unknown
+  })
 }

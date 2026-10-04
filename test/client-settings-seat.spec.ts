@@ -15,7 +15,7 @@
  *     card component stay stable.
  */
 import { describe, expect, it } from 'vitest'
-import { apply } from '../src/client/index.ts'
+import { apply, inject as declaredInject } from '../src/client/index.ts'
 import { PermissiveCard } from '../src/client/card.tsx'
 
 interface CapturedRegistration {
@@ -25,13 +25,22 @@ interface CapturedRegistration {
 }
 
 /** Drive apply against a stub host and capture every slot registration. */
-function collectRegistrations(): { declared: string[]; registrations: CapturedRegistration[] } {
+function collectRegistrations(): { declared: string[]; registrations: CapturedRegistration[]; scope: unknown } {
   const declared: string[] = []
   const registrations: CapturedRegistration[] = []
+  // Modern-line posture only (configForms present, settingsScope absent — the
+  // two durable-settings faces are generation-exclusive, see src/client/compat.ts).
+  const scope = { getSnapshot: () => ({ status: 'ready', value: {}, writable: true }), subscribe: () => () => {}, set: () => {}, unset: () => {} }
+  const services: Record<string, unknown> = { configForms: { get: () => scope } }
   const ctx = {
     effect: (build: () => unknown) => { void build(); return () => {} },
+    inject: (names: readonly string[], fn: (resolved: unknown) => void) => {
+      const resolved = names.map((n) => services[n])
+      if (resolved.some((r) => r === undefined)) return () => {} // absent service: fiber waits, nothing fires
+      fn(resolved.length === 1 ? resolved[0] : resolved)
+      return () => {}
+    },
     locale: { register: () => () => {}, bind: () => (key: string) => key },
-    configForms: { get: () => ({}) },
     slots: {
       inject: (slot: string, factory: () => (() => void) | Generator<() => void>) => {
         declared.push(slot)
@@ -49,7 +58,7 @@ function collectRegistrations(): { declared: string[]; registrations: CapturedRe
     },
   }
   apply(ctx as never)
-  return { declared, registrations }
+  return { declared, registrations, scope }
 }
 
 /** The one registration targeting a settings seat (any of the known ones). */
@@ -59,6 +68,13 @@ function settingsRegistrationOf(registrations: readonly CapturedRegistration[]):
 }
 
 describe('settings-seat contract (dedicated top-level settings.section)', () => {
+  it('declares generation-neutral plugin-level inject only (no durable-settings face)', () => {
+    // configForms (0.1.7+) / settingsScope (≤0.1.5) are generation-exclusive:
+    // keeping either in the plugin-level inject list silently kills the whole
+    // browser half on the other line. They resolve via scoped sub-injects.
+    expect(declaredInject).toEqual(['slots', 'locale'])
+  })
+
   it('injects the settings.section exactly once, and no other settings seat', () => {
     const { declared, registrations } = collectRegistrations()
     expect(declared.filter(slot => slot === 'settings.section')).toHaveLength(1)
@@ -68,7 +84,7 @@ describe('settings-seat contract (dedicated top-level settings.section)', () => 
   })
 
   it('pins the section identity (id/order/label/locale) and the card component', () => {
-    const { registrations } = collectRegistrations()
+    const { registrations, scope } = collectRegistrations()
     const { options, component } = settingsRegistrationOf(registrations)!
     expect(options['id']).toBe('dsh-perm-gate')
     expect(options['order']).toBe(30)
@@ -78,6 +94,9 @@ describe('settings-seat contract (dedicated top-level settings.section)', () => 
     expect(typeof options['inject']).toBe('function')
     const face = (options['inject'] as () => Record<string, unknown>)()
     expect(Object.keys(face)).toEqual(['scope'])
+    // The scope is the compat-resolved durable-settings handle, closure-captured
+    // at resolution time (registration happens inside the resolution callback).
+    expect(face['scope']).toBe(scope)
     expect(component).toBe(PermissiveCard)
   })
 })

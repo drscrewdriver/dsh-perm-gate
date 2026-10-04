@@ -14,16 +14,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { SettingsDocHandle } from './compat.ts'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
 import { DEFAULT_GATE_PRESETS } from '../preset.ts'
 import { SedimentSection } from './sediment.tsx'
-
-/**
- * The official 0.1.7 browser config form ().
- * Imported from the host package now that this line targets 0.1.7 only.
- */
 
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
@@ -70,9 +65,13 @@ export interface PermissiveCardValue {
   watch?: boolean
 }
 
-/** One injected face: the plugin's own settings scope. */
+/** One injected face: the plugin's own settings scope. Typed as the local
+ * structural handle (compat.ts) instead of the host package's `ConfigForm` —
+ * the host type's shape moves between host lines (0.1.5 set/unset vs 0.2.0
+ * mutate-centered snapshot), and the card must compile identically against
+ * every line's real types. */
 export interface PermissiveCardInjected {
-  scope: ConfigForm<PermissiveCardValue>
+  scope: SettingsDocHandle
 }
 
 /** Full props: locale seat + the injected scope. */
