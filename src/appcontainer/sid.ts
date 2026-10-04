@@ -14,15 +14,20 @@ export const APPCONTAINER_NAME = 'dsh-perm-gate.ac'
 
 export const APPCONTAINER_AUTHORITY = 'S-1-15-2'
 
-/** Structural check for a well-formed AppContainer SID string (4 sub-authorities). */
+/**
+ * Structural check for an AppContainer SID string — an OPAQUE handle check.
+ *
+ * 实测（2026-10-05，26200）：经典派生为 4 子权限，新代 moniker 派生与真实
+ * UWP 包 SID 为 7 子权限，且**非单调**——校验只认 `S-1-15-2` 权威前缀 +
+ * ≥4 个 uint32 子权限，绝不假设数量或排序（自造 SID 本就被内核拒收，
+ * 这里只是形状门，不是派生器）。
+ */
 export function isAppContainerSid(sid: string): boolean {
   const parts = sid.split('-')
-  if (parts.length !== 8 || parts[0] !== 'S' || parts[1] !== '1' || parts[2] !== '15' || parts[3] !== '2') return false
-  let prev = -1
+  if (parts.length < 8 || parts[0] !== 'S' || parts[1] !== '1' || parts[2] !== '15' || parts[3] !== '2') return false
   for (const part of parts.slice(4)) {
     const n = Number(part)
-    if (!Number.isInteger(n) || n < 0 || n > 0xFFFF_FFFF || n <= prev) return false
-    prev = n
+    if (!Number.isInteger(n) || n < 0 || n > 0xFFFF_FFFF) return false
   }
   return true
 }

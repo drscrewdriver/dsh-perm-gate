@@ -21,7 +21,8 @@ import { fileURLToPath } from 'node:url'
 /** The shipped C# launcher source (read-only asset). */
 export const LAUNCHER_SOURCE = fileURLToPath(new URL('../../assets/appcontainer-launcher.cs', import.meta.url))
 
-const CACHE_DIR = path.join(os.tmpdir(), 'dsh-perm-gate-ac')
+/** Compile-cache root (also swept by the controller's housekeeping). */
+export const CACHE_DIR = path.join(os.tmpdir(), 'dsh-perm-gate-ac')
 
 function cscCandidates(): string[] {
   const windir = process.env['WINDIR'] ?? 'C:\\Windows'
@@ -41,6 +42,7 @@ export function locateCsc(): string | undefined {
 
 export interface CompiledLauncher {
   readonly exePath: string
+  readonly hash: string
   readonly cached: boolean
 }
 
@@ -66,7 +68,7 @@ export async function ensureLauncher(): Promise<CompiledLauncher | undefined> {
   const hash = createHash('sha256').update(source, 'utf8').digest('hex').slice(0, 16)
   const exePath = path.join(CACHE_DIR, `appcontainer-launcher-${hash}.exe`)
   const marker = `${exePath}.ok`
-  if (existsSync(exePath) && existsSync(marker)) return { exePath, cached: true }
+  if (existsSync(exePath) && existsSync(marker)) return { exePath, hash, cached: true }
   await mkdir(CACHE_DIR, { recursive: true })
   await run(CACHE_DIR, csc, [
     '/nologo', '/target:exe', '/optimize+',
@@ -75,5 +77,5 @@ export async function ensureLauncher(): Promise<CompiledLauncher | undefined> {
     LAUNCHER_SOURCE,
   ])
   await writeFile(marker, String(process.pid), 'utf8')
-  return { exePath, cached: false }
+  return { exePath, hash, cached: false }
 }

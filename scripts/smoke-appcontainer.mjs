@@ -52,9 +52,24 @@ const csSource = path.join(ROOT, 'assets', 'appcontainer-launcher.cs')
 console.log(`compile launcher via ${csc} …`)
 execFileSync(csc, ['/nologo', '/target:exe', '/optimize+', '/r:System.Web.Extensions.dll', `/out:${exePath}`, csSource], { stdio: 'inherit' })
 
-// ── 容器 SID：launcher 向 OS 官方 API 要（DeriveAppContainerSidFromName）──
+// ── 容器 SID：launcher 向 OS 官方 API 要（双代动态解析：经典名或新代 moniker 名）──
 const containerSid = execFileSync(exePath, ['--print-sid'], { encoding: 'utf8' }).trim()
 console.log(`container SID: ${containerSid}`)
+
+// ── 探针裁决（T1.16）：--probe 单行 JSON，era/SID 形状是 PASS 条件；
+// tryLaunch.win32Err 仅作信息展示（87 归因见普通会话验证协议五臂）──
+{
+  const out = execFileSync(exePath, ['--probe'], { encoding: 'utf8' })
+  const line = out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('{'))
+  let probe
+  try { probe = JSON.parse(line) } catch { probe = undefined }
+  if (probe && probe.era !== 'none' && typeof probe.sid === 'string' && probe.sid.startsWith('S-1-15-2-')) {
+    record('probe: derivation verdict', 'pass',
+      `era=${probe.era} subAuth=${probe.sidSubAuthorities} tryLaunch.win32Err=${probe.tryLaunch.win32Err} build=${probe.osBuild}`)
+  } else {
+    record('probe: derivation verdict', 'fail', (line ?? out).slice(0, 200))
+  }
+}
 
 // ── 本地上游服务 + 过滤代理（127.0.0.1，allow 上游转发 / deny 其余） ──
 const upstream = http.createServer((_req, res) => { res.writeHead(200, {'content-type':'text/plain'}); res.end('upstream-ok') })
@@ -86,6 +101,8 @@ const tempDir = path.join(base, 'temp')
 mkdirSync(workspace); mkdirSync(tempDir)
 
 function launch(command, proxyEnv = {}) {
+  // 注意：config 里的 containerSid 字段是**仅信息性**的——launcher 一律自己
+  // 向 OS 派生并忽略该字段；绝不支持借它注入自造 SID（内核会 STATUS_INVALID_SID）。
   const cfg = path.join(base, `cfg-${Date.now()}-${Math.random().toString(36).slice(2)}.json`)
   writeFileSync(cfg, JSON.stringify({ containerSid, workspace, tempDir, mode: 'workspace-write', proxyEnv }))
   const b64 = Buffer.from(command, 'utf8').toString('base64')
