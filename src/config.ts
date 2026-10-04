@@ -243,6 +243,39 @@ export interface PermGateConfig {
    * Default 1800000 (30 min).
    */
   readonly networkGrantTtlMs?: number
+  // ─── AppContainer sandbox (Windows; goal 2) ─────────────────────────
+  /**
+   * Run gate-allowed shell commands inside a Windows AppContainer. The
+   * container token carries NO network capability, so non-loopback egress is
+   * denied by Windows Firewall (WFP) itself; the container SID is derived
+   * deterministically so the loopback exemption is a one-time step. Default
+   * false — enabling changes how allowed commands execute.
+   */
+  readonly sandboxEnabled?: boolean
+  /**
+   * Filesystem posture inside the container: 'workspace-write' grants the
+   * workspace Modify + temp FullControl; 'read-only' grants RX only.
+   * System directories stay readable through the stock ALL APPLICATION
+   * PACKAGES ACEs. Default 'workspace-write'.
+   */
+  readonly sandboxMode?: 'read-only' | 'workspace-write'
+  /**
+   * THE proxy parameter: the URL injected as HTTP(S)_PROXY / ALL_PROXY into
+   * sandboxed processes. Empty (default) follows the builtin filtered proxy
+   * (its actual bound 127.0.0.1 port) when networkEnabled; an explicit value
+   * must be loopback-bound (the container cannot reach anything else) and the
+   * destination filtering is that proxy's job. Neither set → no proxy env;
+   * direct egress stays WFP-blocked either way.
+   */
+  readonly sandboxProxy?: string
+  /**
+   * Attempt the one-time `CheckNetIsolation LoopbackExempt -a -p=<sid>` for
+   * the container SID so sandboxed processes can reach 127.0.0.1 (the proxy
+   * and the host webServer). Denied without elevation → warning with the
+   * exact command; the sandbox still runs, only loopback stays closed.
+   * Default 'exempt'.
+   */
+  readonly sandboxLoopback?: 'exempt' | 'off'
   // ─── Hot reload (Phase 3) ──────────────────────────────────────────
   /** @deprecated Rules now live in the `dsh-perm-gate-rules` settings namespace; file watching was removed. Accepted (ignored) for composition compatibility. */
   readonly watch?: boolean
@@ -444,6 +477,11 @@ export const Config = z.object({
   networkInjectEnv: z.boolean().default(true).volatile(),
   networkAskTimeoutMs: z.number().min(1000).max(600_000).default(120_000).volatile(),
   networkGrantTtlMs: z.number().min(0).max(24 * 60 * 60_000).default(30 * 60_000).volatile(),
+  // AppContainer sandbox (Windows; goal 2)
+  sandboxEnabled: z.boolean().default(false).volatile(),
+  sandboxMode: z.union(['read-only', 'workspace-write'] as const).default('workspace-write').volatile(),
+  sandboxProxy: z.string().default('').volatile(),
+  sandboxLoopback: z.union(['exempt', 'off'] as const).default('exempt').volatile(),
   // 0.1.7: the rules document lives on this entry as a volatile whole-object
   // field (a second settings namespace is no longer projectable). Unconfigured
   // (bare defaults) -> the rules file remains the source.
@@ -466,6 +504,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',
   'networkGrantTtlMs', 'rules',
+  'sandboxEnabled', 'sandboxMode', 'sandboxProxy', 'sandboxLoopback',
 ] as const
 
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */

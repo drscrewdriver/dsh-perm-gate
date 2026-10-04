@@ -8,6 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { SandboxController, type SandboxSettings } from './appcontainer/index.js'
 import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
 import { runDryRun } from './dry-run.js'
@@ -184,7 +185,7 @@ export function makeApprovalAnswerer(
  * (fail-closed).
  */
 export function makePreExecuteListener(
-  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'>,
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite'>>,
 ): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
   return async (exec, next) => {
     const decision = runtime.decideExecution(exec)
@@ -193,6 +194,21 @@ export function makePreExecuteListener(
       // The call proceeds: register it so a network connection made by its
       // child process can be attributed back to this session.
       runtime.beginShellExecution(exec)
+      // AppContainer sandbox (goal 2): rewrite the allowed shell call into
+      // the launcher invocation, or fail closed. The host executes THIS exec
+      // object after the waterfall resolves, so the in-place arguments swap
+      // is the sanctioned seam; the base64 wrapper keeps every pipe/&&
+      // inside the container (outer shell sees a plain exe call).
+      if (typeof runtime.sandboxRewrite === 'function') {
+        const rewrite = await runtime.sandboxRewrite(exec)
+        if (rewrite !== undefined) {
+          if (rewrite.kind === 'deny') return { kind: 'deny' as const, reason: rewrite.reason }
+          ;(exec as { arguments: Record<string, unknown> }).arguments = {
+            ...exec.arguments,
+            command: rewrite.command,
+          }
+        }
+      }
       return next()
     }
     if (decision.kind !== 'ask') return decision // deny: it never runs
@@ -783,6 +799,39 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   }
   networkRefs.snapshot = () => networkLifecycle.snapshot()
   if (networkRefs.appliedKey === undefined) networkRefs.appliedKey = networkKeyOf(current())
+
+  // ─── AppContainer sandbox (goal 2, Windows) ─────────────────────────
+  // The gate-aware rewrite hook: an ALLOWED shell call is rewritten into the
+  // launcher invocation (or denied, fail-closed). Settings are read per call
+  // so the card's switches apply without a reload; the controller memoizes
+  // the launcher compile + loopback exemption.
+  const readSandboxSettings = (): SandboxSettings => {
+    const live = current() as Record<string, unknown>
+    const str = (key: string, fallback: string): string =>
+      typeof live[key] === 'string' && live[key] !== '' ? live[key] as string : fallback
+    const bool = (key: string, fallback: boolean): boolean =>
+      typeof live[key] === 'boolean' ? live[key] as boolean : fallback
+    return {
+      enabled: bool('sandboxEnabled', false),
+      mode: str('sandboxMode', 'workspace-write') as SandboxSettings['mode'],
+      proxy: str('sandboxProxy', ''),
+      loopback: str('sandboxLoopback', 'exempt') as SandboxSettings['loopback'],
+    }
+  }
+  const sandboxController = new SandboxController({
+    cwdRoot: () => process.cwd(),
+    builtinProxyPort: () => {
+      try {
+        const snap = networkLifecycle.snapshot() as { proxyActive?: boolean; port?: number }
+        return snap.proxyActive === true && typeof snap.port === 'number' ? snap.port : undefined
+      } catch {
+        return undefined
+      }
+    },
+    log: (message: string) => loggerWarn(message),
+  })
+  runtime.setSandboxHook((exec) => sandboxController.wrap(readSandboxSettings(), exec))
+  ctx.effect(() => () => { void sandboxController.dispose() }, 'dsh-perm-gate: sandbox scratch cleanup')
   // ─── Hot reload watcher (Phase 3, T3.6) ────────────────────────────
   const watchEnabled = typeof config.watch === 'boolean' ? config.watch : true
   if (watchEnabled) {

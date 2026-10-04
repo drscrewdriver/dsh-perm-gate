@@ -45,6 +45,11 @@ export interface PreToolDecisionLike {
   reason: string
 }
 
+/** The sandbox hook's verdict for one allowed shell call (appcontainer seam). */
+export type SandboxRewriteOutcome =
+  | { readonly kind: 'wrap'; readonly command: string }
+  | { readonly kind: 'deny'; readonly reason: string }
+
 /**
  * The P2 rule chain's own verdict for one call, as reported by
  * {@link PermGateRuntime.explainRules}. Distinct from the gate's effective
@@ -904,6 +909,31 @@ export class PermGateRuntime {
   /** The compiled ruleset (read-only view for network module). */
   get compiledRuleset(): CompiledRuleset {
     return this.ruleset
+  }
+
+  // ─── AppContainer sandbox seam (goal 2) ─────────────────────────────
+  /**
+   * The sandbox hook installed by the plugin: gate-aware, fail-closed rewrite
+   * of an allowed shell call. Undefined → the feature is off entirely.
+   */
+  private sandboxHook: ((exec: ToolExecutionLike) => Promise<SandboxRewriteOutcome | undefined>) | undefined
+
+  /** Install/clear the sandbox rewrite hook (plugin wiring). */
+  setSandboxHook(hook: ((exec: ToolExecutionLike) => Promise<SandboxRewriteOutcome | undefined>) | undefined): void {
+    this.sandboxHook = hook
+  }
+
+  /**
+   * Gate-aware sandbox rewrite for the pre-execute waterfall's allow path.
+   * Mirrors {@link decideExecution}'s stand-down: outside the gate's presets
+   * the sandbox must not silently confine either — same scope, same fence.
+   * Returns undefined when not applicable.
+   */
+  async sandboxRewrite(exec: ToolExecutionLike): Promise<SandboxRewriteOutcome | undefined> {
+    const hook = this.sandboxHook
+    if (hook === undefined) return undefined
+    if (!this.gateActive(this.presetOf(exec))) return undefined
+    return hook(exec)
   }
 
   private liveRiskLearning(): RiskLearningState {
