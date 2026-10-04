@@ -45,7 +45,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -55,6 +55,20 @@ const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const RESULTS = path.join(ROOT, '.compat-results')
 const MATRIX = path.join(RESULTS, 'matrix')
 const TGZ_CACHE = path.join(RESULTS, 'host-tgz')
+// 已有矩阵沉淀的宿主 tgz 缓存（date-wrapper P0 / paste-dock P1，15 格全量）——
+// 种子源：命中即硬链接/直拷，不再对宿主跑 pack（pnpm pack 在仓内树上撞
+// workspace 钉的坑，tidy-display P4 定案用 npm pack，这里更进一步直接复用）。
+const SEED_TGZ_DIRS = [
+  path.resolve(ROOT, '..', 'dsh-date-wrapper', '.compat-results', 'host-tgz'),
+  path.resolve(ROOT, '..', 'dsh-paste-dock', '.compat-results', 'host-tgz'),
+]
+// 沙盒基址必须落在「上溯链无 pnpm-workspace.yaml」的中立地（tidy-display 的
+// 「放 os.tmpdir」配方在本机已失效）：本仓根有 allowBuilds-only 的 workspace
+// 文件（仓内 cwd 撞「packages field missing or empty」），且本机 %USERPROFILE%
+// 也有一份——%TEMP% 整棵树同样被污染。E:\test\rewrite-tmp 实测中立（本机
+// 矩阵专用路径；CI 化时改成 runner 分配的干净目录）。产物（日志/探针/结论）
+// 仍落仓内 cell 目录，与 paste-dock 布局一致。
+const SANDBOX_HOME = process.env['DSH_COMPAT_SANDBOX_HOME'] ?? 'E:\\test\\rewrite-tmp\\dsh-perm-gate-compat'
 const WIN32 = process.platform === 'win32'
 const PNPM = WIN32 ? 'pnpm.cmd' : 'pnpm'
 const INSTALL_ARGS = ['install', '--ignore-scripts', '--prefer-offline', '--loglevel=error']
@@ -108,13 +122,21 @@ async function ensureTgz(version) {
   await mkdir(TGZ_CACHE, { recursive: true })
   const dest = path.join(TGZ_CACHE, `deepseek-ai-dsh-${version}.tgz`)
   if (existsSync(dest)) return dest
+  for (const seed of SEED_TGZ_DIRS) {
+    const from = path.join(seed, `deepseek-ai-dsh-${version}.tgz`)
+    if (existsSync(from)) {
+      await copyFile(from, dest)
+      console.log(`       seed host tgz ${version}（${path.relative(ROOT, seed)}）`)
+      return dest
+    }
+  }
   console.log(`       pack host ${version}`)
-  await run(TGZ_CACHE, PNPM, ['pack', `@deepseek-ai/dsh@${version}`, '--loglevel=error'], `pnpm pack host ${version}`)
+  await run(TGZ_CACHE, 'npm', ['pack', `@deepseek-ai/dsh@${version}`, `--pack-destination=${TGZ_CACHE}`, '--registry=https://registry.npmjs.org/', '--loglevel=error'], `npm pack host ${version}`)
   return dest
 }
 
 /** 就绪横幅（宽松：老版本横幅不一定带 dsh 前缀）；带端口捕获供 HTTP 探针。 */
-const READY_RE = /https?:\/\/(127\.0\.0\.1|localhost):(\d+)/
+const READY_RE = /https?:\/\/(127\.0\.0\.1|localhost):(\d+)(\/\S*)?/
 const HMR_WALL_RE = /requires the Cordis HMR service/
 const COMPAT_BLOCK_RE = /is incompatible with dsh/
 const AUDIT_RE = /startup audit|failed to mount|mount error|failed to start/i
@@ -156,32 +178,48 @@ function bootHold(binJs, cwd, env, extraArgs, timeoutSec) {
   return pending
 }
 
-/** 存活窗口内打 events 路由：200 + JSON + events 数组 = 宿主半区功能在位。 */
-function probeEvents(port, timeoutMs = 10_000) {
-  return new Promise((resolve) => {
+/**
+ * 存活窗口内打 events 路由：200 + JSON + events 数组 = 宿主半区功能在位。
+ * webServer 鉴权是签名 cookie（api-gateway isAuthenticated）：先拿 ready 横幅
+ * 的 `?token=` 打首页换 Set-Cookie（dsh-auth-<authority>=v1.…），再带 cookie
+ * 打 API——客户端就是这条流程。
+ */
+function probeEvents(port, readyPath, timeoutMs = 10_000) {
+  const token = /[?&]token=([^&\s]+)/.exec(readyPath ?? '')?.[1] ?? ''
+  const get = (path, cookie) => new Promise((resolve) => {
     const req = http.get(
-      { host: '127.0.0.1', port, path: '/api/dsh-perm-gate/events?since=', timeout: timeoutMs },
+      { host: '127.0.0.1', port, path, timeout: timeoutMs, headers: cookie ? { cookie } : {} },
       (res) => {
         let body = ''
         res.on('data', (d) => { body += d })
-        res.on('end', () => {
-          let parsed = undefined
-          try { parsed = JSON.parse(body) } catch { /* 非 JSON 视为失败 */ }
-          resolve({ status: res.statusCode, ok: res.statusCode === 200 && Array.isArray(parsed?.events), body: body.slice(0, 300) })
-        })
+        res.on('end', () => resolve({ status: res.statusCode, setCookie: res.headers['set-cookie'], body }))
       },
     )
     req.on('timeout', () => { req.destroy(new Error('probe timeout')) })
-    req.on('error', (e) => resolve({ status: 0, ok: false, body: String(e.message ?? e) }))
+    req.on('error', (e) => resolve({ status: 0, setCookie: undefined, body: String(e.message ?? e) }))
   })
+  return (async () => {
+    const page = await get(`/?token=${encodeURIComponent(token)}`)
+    // 老线（≤0.1.1）首页无 token 鉴权：200 且无 Set-Cookie——直接裸打 API。
+    const cookie = page.setCookie?.[0]?.split(';')[0]
+    if (cookie === undefined && page.status !== 200) {
+      return { status: 0, ok: false, body: `no auth cookie from /?token= (status ${page.status})` }
+    }
+    const api = await get('/api/dsh-perm-gate/events?since=', cookie)
+    let parsed
+    try { parsed = JSON.parse(api.body) } catch { /* 非 JSON 视为失败 */ }
+    return { status: api.status, ok: api.status === 200 && Array.isArray(parsed?.events), body: api.body.slice(0, 300) }
+  })()
 }
 
 async function runCell(version) {
   const cell = path.join(MATRIX, version)
-  const sandbox = path.join(cell, 'sandbox')
+  // 沙盒在 os.tmpdir（逃出仓库树，见 SANDBOX_HOME 注释）；先清残再建。
+  const sandbox = path.join(SANDBOX_HOME, version)
   const homeDir = path.join(sandbox, 'home')
   const userProfile = path.join(sandbox, 'user')
   const workspace = path.join(sandbox, 'workspace')
+  await rm(sandbox, { recursive: true, force: true })
   for (const dir of [sandbox, userProfile, workspace]) await mkdir(dir, { recursive: true })
   const env = { ...process.env, DSH_HOME: homeDir, USERPROFILE: userProfile }
   const checks = { version, notes: [] }
@@ -206,13 +244,18 @@ async function runCell(version) {
 
   // 3. 打插件包 → 宿主 CLI 自建 profile 并装入（peer 闸在此步咬合）
   console.log(`       pack plugin …`)
-  await run(ROOT, PNPM, ['pack', '--pack-destination', cell, '--loglevel=error'], 'pnpm pack plugin')
+  await run(ROOT, 'npm', ['pack', `--pack-destination=${cell}`, '--loglevel=error'], 'npm pack plugin')
   const packed = (await readdir(cell)).find((f) => /^dsh-perm-gate-.*\.tgz$/.test(f))
   if (!packed) throw new Error('插件 tgz 打包失败')
   const pluginTgz = path.join(cell, packed)
-  const addRun = spawnSync(WIN32 ? 'cmd.exe' : 'node',
-    WIN32 ? ['/c', binJs, 'plugin', '--profile', 'web', 'add', pluginTgz, REGISTRY] : [binJs, 'plugin', '--profile', 'web', 'add', pluginTgz, REGISTRY],
-    { cwd: sandbox, encoding: 'utf8', shell: false, windowsHide: true, timeout: 10 * 60_000, env })
+  // 直接用 node 起 bin.js：`cmd /c <file.js>` 依赖 .js 文件关联，本机关联缺失
+  // 时静默 exit 0（模板坑，input-traffic 形态在本机翻车实录）——node 直启零歧义。
+  // npm_config_ignore_workspace_root_check：宿主内部 pnpm add 落在 profile
+  // workspace 根，pnpm 默认拒装（ERR_PNPM_ADDING_TO_ROOT，farm 同坑同解）。
+  const addRun = spawnSync(process.execPath,
+    [binJs, 'plugin', '--profile', 'web', 'add', pluginTgz, REGISTRY],
+    { cwd: sandbox, encoding: 'utf8', shell: false, windowsHide: true, timeout: 10 * 60_000,
+      env: { ...env, npm_config_ignore_workspace_root_check: 'true' } })
   const addLog = `${addRun.stdout ?? ''}${addRun.stderr ?? ''}`
   await writeFile(path.join(cell, 'plugin-add.log'), addLog)
   checks.pluginAdded = addRun.status === 0
@@ -253,7 +296,7 @@ async function runCell(version) {
       checks.noCompatBlock = !COMPAT_BLOCK_RE.test(boot.log)
       if (checks.noMountError && checks.noCompatBlock) {
         const port = boot.outcome.port
-        const probe = port ? await probeEvents(port) : { status: 0, ok: false, body: 'no port in ready banner' }
+        const probe = port ? await probeEvents(port, boot.outcome.url) : { status: 0, ok: false, body: 'no port in ready banner' }
         await writeFile(path.join(cell, 'probe.json'), JSON.stringify(probe, null, 2) + '\n')
         checks.probe = probe.ok ? 'ok' : `fail(${probe.status})`
         checks.verdict = checks.noMountError && checks.noDupContext && checks.noCompatBlock && probe.ok
@@ -311,7 +354,7 @@ for (const version of versions) {
     await mkdir(path.join(MATRIX, version), { recursive: true })
     await writeResult(path.join(MATRIX, version), checks)
   }
-  if (!keep) await rm(path.join(MATRIX, version, 'sandbox'), { recursive: true, force: true })
+  if (!keep) await rm(path.join(SANDBOX_HOME, version), { recursive: true, force: true })
 }
 
 const verified = results.filter((r) => r.green).map((r) => r.version)
