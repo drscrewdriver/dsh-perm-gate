@@ -9,7 +9,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SandboxController, type SandboxSettings } from './appcontainer/index.js'
-import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
+import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
@@ -235,7 +235,7 @@ export function makePreExecuteListener(
 export function apply(ctx: Context, config: Record<string, unknown> = {}): PermGateRuntime {
   // Runtime-adjustable config: 0.1.7 hands `.volatile()` fields to apply() as
   // live refs; `current()` shallow-resolves one snapshot per read.
-  const current: () => PermissiveSurface & Record<string, unknown> =
+  let current: () => PermissiveSurface & Record<string, unknown> =
     () => resolveVolatileConfig(config) as never
 
   // ─── Rules (volatile `rules` field on this entry) ─────────────────────────
@@ -254,38 +254,109 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // The inject is a child effect: a host without the settings service leaves
   // the ref unset and the runtime falls back to its rules-file write paths.
   const ENTRY_ID = 'dsh-perm-gate'
-  const settingsRef: { svc?: { update(ns: string, patch: object): Promise<void> } } = {}
+  // compat-legacy:三代宿主的 settings 服务面(≤0.1.5 的方法都是可选——按线出现)。
+  interface SettingsServiceLike {
+    update(ns: string, patch: object): Promise<void>
+    register?(ns: string, schema: unknown, options?: { base?: unknown }): unknown
+    installSection?(owner: unknown, ns: string, schema: unknown, entry: unknown, hooks: {
+      setSource: (source: unknown) => void
+      onChange?: () => void
+    }): unknown
+    configure?(options: unknown, fiber: unknown): unknown
+  }
+  const settingsRef: { svc?: SettingsServiceLike } = {}
   ctx.inject(['settings'], (child) => {
-    const svc = (child as unknown as { settings?: { update(ns: string, patch: object): Promise<void> } }).settings
+    const svc = (child as unknown as { settings?: SettingsServiceLike }).settings
     settingsRef.svc = svc
+    if (svc === undefined) return
+    // setSource 换绑运行时读取源:source 可能是 () => values(≤0.1.5 scope.get)
+    // 或普通对象;base 与运行时读分用两个 resolve(手册 §P1-3)。
+    const rebindFrom = (source: unknown) => {
+      current = () => resolveVolatileConfig(
+        (typeof source === 'function' ? (source as () => Record<string, unknown>)() : (source ?? config)) as Record<string, unknown>,
+      ) as never
+    }
+    const seedDoc = () => ({ ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true })
+    const seedUpdate = (): Promise<void> => svc.update(ENTRY_ID, { rules: seedDoc() })
+    const hooks = {
+      setSource: (source: unknown) => {
+        rebindFrom(source)
+        hooks.onChange()
+      },
+      onChange: () => { applyVolatileUpdate() },
+    }
     // Activation-time seed: a never-configured `rules` field is populated once
     // — from the rules file when one exists (implicit migration), otherwise a
     // bare starter document — and marked `initialized`, so the panel shows a
     // live rules document from the first boot instead of a missing-file
     // fallback. The field watcher below picks the seed up via reload.
-    if (svc !== undefined && readRulesDocument() === undefined) {
-      const seed = { ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true }
-      void (async () => {
-        try {
-          await svc.update(ENTRY_ID, { rules: seed })
-        } catch (e: unknown) {
-          // compat-legacy: ≤0.1.6 的 loader 不会从 Config 自动注册命名空间,
-          // update 拒绝 "not registered"。检测到该错误时用服务自身的 register()
-          // 补注册(schema 复用 Config,base 预种子)后重试;rc.1+ 的命名空间
-          // 已被 loader 占用,此分支自然不会命中(update 直接成功)。
-          const message = e instanceof Error ? e.message : String(e)
-          if (!/not registered/i.test(message) || typeof svc.register !== 'function') {
-            throw e
-          }
-          console.warn(`[dsh-perm-gate] legacy line: registering settings namespace ${ENTRY_ID}`)
-          svc.register(ENTRY_ID, Config, { base: { rules: seed } })
-          await svc.update(ENTRY_ID, { rules: seed })
-          console.warn('[dsh-perm-gate] legacy settings namespace registered + seeded')
-        }
-      })().catch((e: unknown) => {
-        console.warn('[dsh-perm-gate] rules seed write failed:', e)
+    // ── 三代 waist:三分支执行体互斥(P1-1/P1-2),register-retry 仅存活于
+    // 兜底分支且在 rc.1+ 永不命中;rc.1+ 不引入 configure(P1-5)。
+    if (typeof svc.installSection === 'function') {
+      console.warn('[dsh-perm-gate] settings generation = service.installSection (0.1.2/0.1.5 line)')
+      svc.installSection(ctx, ENTRY_ID, Config, resolveConfig(config), {
+        setSource: (source: unknown) => {
+          rebindFrom(source)
+          hooks.onChange()
+        },
+        onChange: () => { applyVolatileUpdate() },
       })
+      if (readRulesDocument() === undefined) {
+        void seedUpdate().catch((e: unknown) => {
+          console.warn('[dsh-perm-gate] legacy seed update failed:', e)
+        })
+      }
+      return
     }
+    void (async () => {
+      try {
+        // 变量说明符:perm-gate 未声明 dsh-settings 依赖(该集成仅在 0.1.0/0.1.1
+        // 的宿主作用域可用),变量形式让 TS 按 any 解析不做模块查证。
+        const legacySpecifier = '@deepseek-ai/dsh-settings'
+        const legacy = (await import(legacySpecifier)) as {
+          installSettingsSection?: (...args: unknown[]) => unknown
+          settingsNamespace?: (ns: string) => unknown
+        }
+        if (typeof legacy.installSettingsSection === 'function' && typeof legacy.settingsNamespace === 'function') {
+          console.warn('[dsh-perm-gate] settings generation = module.installSettingsSection (0.1.0/0.1.1 line)')
+          legacy.installSettingsSection(ctx, legacy.settingsNamespace(ENTRY_ID), Config, resolveConfig(config), {
+            setSource: (source: unknown) => {
+              rebindFrom(source)
+              hooks.onChange()
+            },
+            onChange: () => { applyVolatileUpdate() },
+          })
+          if (readRulesDocument() === undefined) {
+            await seedUpdate().catch((e: unknown) => {
+              console.warn('[dsh-perm-gate] legacy seed update failed:', e)
+            })
+          }
+          return
+        }
+      } catch {
+        // 模块级 legacy API 缺失/导入失败 → 落到 rc.1 兜底
+      }
+      console.warn('[dsh-perm-gate] settings generation = rc1.loader (0.1.7-rc.1+/0.2.0: loader 自动注册 ns,update 直接成功)')
+      if (readRulesDocument() === undefined) {
+        void (async () => {
+          try {
+            await seedUpdate()
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e)
+            // register-retry 兜底:rc.1+ 上 ns 已被 loader 占用,永不命中
+            if (!/not registered/i.test(message) || typeof svc.register !== 'function') {
+              throw e
+            }
+            console.warn(`[dsh-perm-gate] legacy fallback: registering settings namespace ${ENTRY_ID}`)
+            svc.register(ENTRY_ID, Config, { base: { rules: seedDoc() } })
+            await seedUpdate()
+            console.warn('[dsh-perm-gate] legacy fallback registered + seeded')
+          }
+        })().catch((e: unknown) => {
+          console.warn('[dsh-perm-gate] rules seed write failed:', e)
+        })
+      }
+    })()
   })
 
   const settingsWrite = (write: (scope: SettingsRulesScope, seed: unknown) => Promise<boolean>): boolean => {
@@ -558,7 +629,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // The host no longer seeds settings (there is no write path): an empty
   // `allowlist` keeps the rules-file default via `runtime.allowlist()`.
   let lastRulesDocKey: string | undefined
-  ;(ctx as unknown as EventContextLike).on('loader/volatile-update', () => {
+  function applyVolatileUpdate(): void {
     const next = asSurface(current())
     if (next !== undefined) {
       if (Array.isArray(next.allowlist)) {
@@ -584,6 +655,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       lastRulesDocKey = rulesKey
       if (changed) runtime.reload()
     }
+  }
+  ;(ctx as unknown as EventContextLike).on('loader/volatile-update', () => {
+    applyVolatileUpdate()
   })
 
   // Event feed HTTP API (best effort): the dsh webServer service exposes the
