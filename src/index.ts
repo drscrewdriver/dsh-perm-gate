@@ -265,7 +265,24 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // fallback. The field watcher below picks the seed up via reload.
     if (svc !== undefined && readRulesDocument() === undefined) {
       const seed = { ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true }
-      void svc.update(ENTRY_ID, { rules: seed }).catch((e: unknown) => {
+      void (async () => {
+        try {
+          await svc.update(ENTRY_ID, { rules: seed })
+        } catch (e: unknown) {
+          // compat-legacy: ≤0.1.6 的 loader 不会从 Config 自动注册命名空间,
+          // update 拒绝 "not registered"。检测到该错误时用服务自身的 register()
+          // 补注册(schema 复用 Config,base 预种子)后重试;rc.1+ 的命名空间
+          // 已被 loader 占用,此分支自然不会命中(update 直接成功)。
+          const message = e instanceof Error ? e.message : String(e)
+          if (!/not registered/i.test(message) || typeof svc.register !== 'function') {
+            throw e
+          }
+          console.warn(`[dsh-perm-gate] legacy line: registering settings namespace ${ENTRY_ID}`)
+          svc.register(ENTRY_ID, Config, { base: { rules: seed } })
+          await svc.update(ENTRY_ID, { rules: seed })
+          console.warn('[dsh-perm-gate] legacy settings namespace registered + seeded')
+        }
+      })().catch((e: unknown) => {
         console.warn('[dsh-perm-gate] rules seed write failed:', e)
       })
     }
