@@ -164,6 +164,16 @@ const fieldLabelStyle: CSSProperties = { margin: 0, fontSize: '12px', lineHeight
  * default so the section reads as an open page of drawers.
  */
 export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
+  // 诊断守卫（2026-10-07）：scope 未解析时不能在 render 里炸——宿主设置壳对
+  // 内容槽异常静默吞（面板空白无报错），无法与「根本没渲染」区分。守卫后
+  // 面板显式出占位文案，把「渲染了但 scope 没到」与「没渲染」分开。
+  // 注意：守卫分支跳过了下方 hooks，scope 到位后该实例 hook 数会变——
+  // 仅作诊断用途，定位后移除或改为 hook 稳定形态。
+  if (!scope) {
+    return <div style={{ padding: 16, color: 'var(--dsw-alias-label-tertiary, #888)' }}>
+      {t('card.unavailable')}（scope 未解析 — 诊断占位）
+    </div>
+  }
   const [open, setOpen] = useState(true)
   // The api key is kept OUT of the visible value (secret): a fresh typed draft
   // overwrites on blur; an already-set key shows only a masked placeholder.
