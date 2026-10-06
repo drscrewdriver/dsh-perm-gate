@@ -149,6 +149,10 @@ export function apply(ctx: ClientContext): void {
     try {
       fn()
     } catch (e) {
+      // 诊断通道：农场 IAB 拿不到 console，失败面写入 window.__pgSurf 供
+      // evaluate 直接读取（定位后此行可删）。
+      ;(globalThis as Record<string, unknown>).__pgSurf ??= []
+      ;(globalThis as Record<string, unknown>).__pgSurf.push(`${tag}: ${(e as Error)?.message ?? String(e)}`)
       console.warn(`[dsh-perm-gate] client surface '${tag}' failed:`, e)
     }
   }
