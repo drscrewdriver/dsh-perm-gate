@@ -16,6 +16,7 @@
  * = Context`), but that package was removed in 0.1.2-alpha.1 — cordis is the one
  * source that names the same type on both lines.
  */
+import type { JSX } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -25,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // renderer entry declares nothing there. Importing it is a no-op on the old line.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { NS, dictionaries, type PermissiveKey } from './locales.ts'
-import { PermissiveCard, type PermissiveCardInjected } from './card.tsx'
+import { FloatingPermissiveGate, PermissiveCard, type PermissiveCardInjected, type PermissiveCardProps } from './card.tsx'
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
 import { resolveSettingsScope } from './compat.ts'
@@ -155,5 +156,19 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: (): PermissiveCardInjected => ({ scope }),
     }, PermissiveCard)) as unknown
+
+    // 0.1.0/0.1.1 等无设置页宿主的兜底入口:壳级 overlay 浮窗齿轮承载审批门卡
+    // (数据层与上方两个面共用同一 scope;宿主有设置页的线上与既有入口并存)。
+    // shell.overlay 在 0.1.0/0.1.1 宿主槽位实测存在,但不在 0.2.0 槽型联合里
+    // (该线上无渲染宿主=无害空操作)——用松类型别名注册;t 经 inject 显式直传。
+    const overlaySlots = ctx.slots as unknown as {
+      inject: (name: string, factory: () => unknown) => unknown
+      register: (options: { name: string; id?: string; inject: () => PermissiveCardProps }, component: (props: PermissiveCardProps) => JSX.Element) => unknown
+    }
+    overlaySlots.inject('shell.overlay', () => overlaySlots.register({
+      name: 'shell.overlay',
+      id: PERMISSIVE_NS,
+      inject: (): PermissiveCardProps => ({ t, scope }),
+    }, FloatingPermissiveGate))
   })
 }
