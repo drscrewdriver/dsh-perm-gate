@@ -34,29 +34,36 @@ export interface SettingsDocHandle {
   unset(field: string): Promise<void> | unknown
 }
 
+/** Which durable-settings service resolved — `configForms` only exists on
+ * 0.1.7+, `settingsScope` only on ≤0.1.5. Surfaces that are generation-specific
+ * (e.g. the ≤0.1.5 `settings.plugin.item` card) key off this tag. */
+export type SettingsGeneration = 'configForms' | 'settingsScope'
+
 /**
  * Resolve the plugin's durable settings scope through whichever service this
  * host line carries, then hand it to `onScope` exactly once.
  *
  * Both variants are scoped sub-injects: on a host without the service the fiber
  * waits forever WITHOUT blocking the plugin's other faces (same posture as the
- * notice strip's slot-inject when its slot holder is absent).
+ * notice strip's slot-inject when its slot holder is absent). session-guard
+ * 4.1.0 proves the `settingsScope` branch resolves on 0.1.5-rc.3 (its
+ * shell.overlay gear registers inside this callback and renders there).
  */
 export function resolveSettingsScope(
   ctx: ClientContext,
   namespace: string,
-  onScope: (scope: SettingsDocHandle) => void,
+  onScope: (scope: SettingsDocHandle, generation: SettingsGeneration) => void,
 ): void {
   // Modern hosts (0.1.7+): configForms owns cross-entry durable scopes.
   ctx.inject(['configForms'], (configForms: unknown) => {
     const scope = (configForms as { get(namespace: string): SettingsDocHandle }).get(namespace)
-    onScope(scope)
+    onScope(scope, 'configForms')
   })
   // Old hosts (≤0.1.5): namespaced durable scope via bind().
   ctx.inject(['settingsScope'], (settingsScope: unknown) => {
     const scope = (settingsScope as {
       bind(spec: { namespace: string }): SettingsDocHandle
     }).bind({ namespace })
-    onScope(scope)
+    onScope(scope, 'settingsScope')
   })
 }

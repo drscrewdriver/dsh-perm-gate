@@ -73,6 +73,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     // here (the declaring page package is not a dev dependency), mirroring the
     // contract the page renders with (`{ view: 'page', form }` owner props).
     'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
+    // ≤0.1.5 settings-panel plugin-config tab: keyed by the settings namespace,
+    // dispatched as `served namespaces ∩ settings.plugin.item cards` (host
+    // client-ui-settings-plugins ConfigurablePluginsTabController.publish — the
+    // key is compared against the namespaces the host serves, which our
+    // server-side installSection registration provides). Declared here because
+    // the declaring page package is not a dev dependency; the host renders the
+    // card with empty owner props (`renderSlot(..., {}, { entryKey: ns })`).
+    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
   }
 }
 
@@ -129,11 +137,38 @@ export function apply(ctx: ClientContext): void {
 
   // 设置卡注册收进 settings scope 解析回调（input-traffic P2 范式）：卡片
   // inject 值闭包捕获已解析的句柄，注册体只在回调里跑一次——两代服务按代
-  // 互斥，天然不双触发。旧线 ≤0.1.5 经 settingsScope.bind 解析（此时
-  // `plugins.bundle.config` 席位在裸宿主上不存在，shadow-inject 为惰性
-  // no-op，注册体不执行）；0.1.7+ 经 configForms.get 解析。
-  resolveSettingsScope(ctx, PERMISSIVE_NS, (scope) => {
-    // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
+  // 互斥，天然不双触发。旧线 ≤0.1.5 经 settingsScope.bind 解析（session-guard
+  // 4.1.0 在 0.1.5-rc.3 实证该分支会 resolve：它的浮窗齿轮就注册在同一回调里）；
+  // 0.1.7+ 经 configForms.get 解析。
+  //
+  // 每个面独立 safe()（free-search/session-guard 同款纪律）：未知槽名在个别
+  // 宿主线上可能同步抛错，cordis inject 回调抛错会静默吞掉整段 apply——绝不能
+  // 让一个面的失败带走其它面（0.1.5 上浮窗齿轮曾因前面 plugins.bundle.config
+  // 抛错而被连带吞掉的教训）。
+  const safe = (tag: string, fn: () => void): void => {
+    try {
+      fn()
+    } catch (e) {
+      console.warn(`[dsh-perm-gate] client surface '${tag}' failed:`, e)
+    }
+  }
+  // 2026-10-07 农场 0.1.5 实测定案：0.1.5 上 ctx.inject(['settingsScope']) 的
+  // scoped fiber 永不解（free-search 记忆「≤0.1.5 卡片派发 settingsScope 镜像
+  // 未证实」的反面坐实），把注册关进回调 = 卡片永不出。同线实证：free-search
+  // 的卡注册在 apply 顶层（回调只管数据 bind）所以能出；session-guard 露出的
+  // 卡是宿主按 describe 原生渲染的，不是它的回调卡。因此改为 free-search 形态：
+  // 注册全部顶层执行，scope 走活引用——回调解到就填，卡片 inject 每次现读。
+  const scopeRef: { scope?: PermissiveCardInjected['scope'] } = {}
+  resolveSettingsScope(ctx, PERMISSIVE_NS, (scope, _generation) => {
+    scopeRef.scope = scope
+  })
+
+  // 卡片 inject 读活引用：注册先于 scope 解析也不空窗（未解析时卡片自身会
+  // 呈现「设置服务不可用」态，PermissiveCard 对 undefined scope 有守卫）。
+  const cardInjected = (): PermissiveCardInjected => ({ scope: scopeRef.scope }) as PermissiveCardInjected
+
+  // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
+  safe('settings.section', () => {
     ctx.slots.inject('settings.section', function* () {
       yield ctx.slots.register({
         name: 'settings.section',
@@ -141,26 +176,50 @@ export function apply(ctx: ClientContext): void {
         order: 30,
         label: () => t('section.title'),
         locale: NS,
-        inject: (): PermissiveCardInjected => ({ scope }),
+        inject: cardInjected,
       }, PermissiveCard)
     }) as unknown
+  })
 
-    // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
-    // `plugins.bundle.config` 席位（key = package.json 的 name 字段），页面才会
-    // 在 bundle 详情页渲染配置卡。注册同一个 PermissiveCard、传同一份 inject 值
-    // （configForms 里的插件作用域），与上面的设置节共用一个事实来源；卡片自带
-    // 展开壳，不依赖 tab 容器上下文，可独立渲染。
+  // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
+  // `plugins.bundle.config` 席位（key = package.json 的 name 字段），页面才会
+  // 在 bundle 详情页渲染配置卡。
+  safe('plugins.bundle.config', () => {
     ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
       name: 'plugins.bundle.config',
       key: 'dsh-perm-gate',
       locale: NS,
-      inject: (): PermissiveCardInjected => ({ scope }),
+      inject: cardInjected,
     }, PermissiveCard)) as unknown
+  })
 
-    // 0.1.0/0.1.1 等无设置页宿主的兜底入口:壳级 overlay 浮窗齿轮承载审批门卡
-    // (数据层与上方两个面共用同一 scope;宿主有设置页的线上与既有入口并存)。
-    // shell.overlay 在 0.1.0/0.1.1 宿主槽位实测存在,但不在 0.2.0 槽型联合里
-    // (该线上无渲染宿主=无害空操作)——用松类型别名注册;t 经 inject 显式直传。
+  // ≤0.1.5 设置面板「插件配置」tab 的派发卡：宿主按
+  // 「服务端 served namespaces ∩ settings.plugin.item 卡 key」交集派发
+  // （key 必须 = settings namespace，与 installSection 注册的 ENTRY_ID 一致）。
+  // 顶层注册：0.1.7+ 无该槽持有者，注入静默闲置不阻塞（free-search 同款纪律）。
+  safe('settings.plugin.item', () => {
+    // 槽型联合未收录 id/order（0.1.5 宿主 .d.ts 落后于运行时），运行时按
+    // options.id 建行去重——必须带。用松类型别名注册（shell.overlay 同款纪律）。
+    const itemSlots = ctx.slots as unknown as {
+      inject: (name: string, factory: () => unknown) => unknown
+      register: (options: Record<string, unknown>, component: (props: PermissiveCardProps) => JSX.Element) => unknown
+    }
+    itemSlots.inject('settings.plugin.item', () => itemSlots.register({
+      name: 'settings.plugin.item',
+      id: PERMISSIVE_NS,
+      key: PERMISSIVE_NS,
+      order: 40,
+      locale: NS,
+      inject: cardInjected,
+    }, PermissiveCard))
+  })
+
+  // 0.1.0/0.1.1 等无设置页宿主的兜底入口:壳级 overlay 浮窗齿轮承载审批门卡
+  // (数据层与上方几个面共用同一 scope;宿主有设置页的线上与既有入口并存)。
+  // shell.overlay 席位在 0.1.0-0.1.5 的壳布局里无条件渲染(AppFrame
+  // overlayLayer,list 槽),但不在 0.2.0 槽型联合里(该线上无渲染宿主=无害
+  // 空操作)——用松类型别名注册;t 经 inject 显式直传。
+  safe('shell.overlay', () => {
     const overlaySlots = ctx.slots as unknown as {
       inject: (name: string, factory: () => unknown) => unknown
       register: (options: { name: string; id?: string; inject: () => PermissiveCardProps }, component: (props: PermissiveCardProps) => JSX.Element) => unknown
@@ -168,7 +227,7 @@ export function apply(ctx: ClientContext): void {
     overlaySlots.inject('shell.overlay', () => overlaySlots.register({
       name: 'shell.overlay',
       id: PERMISSIVE_NS,
-      inject: (): PermissiveCardProps => ({ t, scope }),
+      inject: (): PermissiveCardProps => ({ t, scope: scopeRef.scope }) as PermissiveCardProps,
     }, FloatingPermissiveGate))
   })
 }
