@@ -336,7 +336,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       } catch {
         // 模块级 legacy API 缺失/导入失败 → 落到 rc.1 兜底
       }
-      console.warn('[dsh-perm-gate] settings generation = rc1.loader (0.1.7-rc.1+/0.2.0: loader 自动注册 ns,update 直接成功)')
+      console.warn('[dsh-perm-gate] settings generation = rc1.loader (rc.1+: loader 自动注册 ns,update 直接成功;register-retry 兜底永不命中)')
       if (readRulesDocument() === undefined) {
         void (async () => {
           try {
