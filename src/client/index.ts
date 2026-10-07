@@ -30,6 +30,7 @@ import { FloatingPermissiveGate, PermissiveCard, type PermissiveCardInjected, ty
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
 import { resolveSettingsScope } from './compat.ts'
+import { BridgeDocHandle } from './bridge-scope.ts'
 
 /** The profile entry id of this plugin — the `configForms` key (kept in lockstep with cordis.patch.yml). */
 const PERMISSIVE_NS = 'dsh-perm-gate'
@@ -167,9 +168,14 @@ export function apply(ctx: ClientContext): void {
     scopeRef.scope = scope
   })
 
-  // 卡片 inject 读活引用：注册先于 scope 解析也不空窗（未解析时卡片自身会
-  // 呈现「设置服务不可用」态，PermissiveCard 对 undefined scope 有守卫）。
-  const cardInjected = (): PermissiveCardInjected => ({ scope: scopeRef.scope }) as PermissiveCardInjected
+  // T13b 双轨数据源的桥轨：settingsScope（≤0.1.5）不解、且 configForms（0.1.7+）
+  // 也没有的线上，卡片数据走自家 webServer 桥（free-search 同架构）。原生句柄
+  // 优先——解到就用原生（0.2.0 实测可解），桥只在原生缺席时兜底。
+  const bridgeScope: PermissiveCardInjected['scope'] = new BridgeDocHandle()
+
+  // 卡片 inject 读活引用：注册先于 scope 解析也不空窗（未解析时回落桥轨，
+  // 桥首拉 pending 期间卡片呈现加载态）。
+  const cardInjected = (): PermissiveCardInjected => ({ scope: scopeRef.scope ?? bridgeScope }) as PermissiveCardInjected
 
   // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
   safe('settings.section', () => {
@@ -231,7 +237,7 @@ export function apply(ctx: ClientContext): void {
     overlaySlots.inject('shell.overlay', () => overlaySlots.register({
       name: 'shell.overlay',
       id: PERMISSIVE_NS,
-      inject: (): PermissiveCardProps => ({ t, scope: scopeRef.scope }) as PermissiveCardProps,
+      inject: (): PermissiveCardProps => ({ t, scope: scopeRef.scope ?? bridgeScope }) as PermissiveCardProps,
     }, FloatingPermissiveGate))
   })
 }

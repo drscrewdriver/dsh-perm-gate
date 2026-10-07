@@ -7,7 +7,7 @@
  * 等其他插件命名空间 → 持有的是宿主共享单例（identitySame=TRUE，H3 孤儿假设死）；
  * 若只有自家 ns → 孤儿实例坐实（H3 成立）。
  */
-interface SettingsServiceLike {
+export interface SettingsServiceLike {
   update(ns: string, patch: object): Promise<void>
   register?(ns: string, schema: unknown, options?: { base?: unknown }): unknown
   installSection?(owner: unknown, ns: string, schema: unknown, entry: unknown, hooks: unknown): unknown

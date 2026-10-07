@@ -15,6 +15,8 @@ import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 // T10b 临时诊断（spec served 七步第 2 步；上线前删）
 import { registerDebugGenerationRoute } from './debug-generation.js'
+// T12 设置数据桥（describe/mutate；client BridgeDocHandle 消费）
+import { registerSettingsBridgeRoutes } from './bridge.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
@@ -711,6 +713,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       // T10b: served 集合自检端点（identitySame 判 H3；诊断完删除）
       const offDebugGen = registerDebugGenerationRoute(webServer, () => settingsRef.svc)
       if (offDebugGen !== undefined) ctx.effect(() => () => { offDebugGen() }, 'dsh-perm-gate: debug-generation route')
+      // T12: 设置数据桥（client 卡在 settingsScope 不解析的线上由此取数/写回）
+      for (const offBridge of registerSettingsBridgeRoutes(webServer, () => settingsRef.svc, ENTRY_ID)) {
+        ctx.effect(() => () => { offBridge() }, 'dsh-perm-gate: settings bridge route')
+      }
       // Network diagnostics: mode, bind, port, proxy liveness, env injection,
       // block counters and recent blocks. Read-only.
       const offNetwork = registerNetworkRoute(webServer, {

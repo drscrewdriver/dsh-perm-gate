@@ -188,7 +188,17 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   )
   const unavailable = snapshot.status === 'unavailable'
   const readonly = unavailable || !snapshot.writable
-  const value = (snapshot.value ?? {}) as Partial<PermissiveCardValue>
+  const raw = (snapshot.value ?? {}) as Record<string, unknown>
+  // 形状防御（T13b 桥轨实测）：宿主各线的 settings 值可能残留非数组形态的
+  // 列表字段（0.1.5 installSection base=resolved config，deployment patch 里
+  // 的历史 allowlist:{} 透传到 value），卡片只认 string[]——非数组一律按空
+  // 处理，用户在卡里保存一次即写回正确形态。
+  const listOf = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const value = {
+    ...raw,
+    allowlist: listOf(raw.allowlist),
+    denyKeywords: listOf(raw.denyKeywords),
+  } as unknown as Partial<PermissiveCardValue>
   const strategies = value.permissiveStrategies ?? {}
   const hasApiKey = typeof value.classifierApiKey === 'string' && value.classifierApiKey !== ''
 
