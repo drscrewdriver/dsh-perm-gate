@@ -101,6 +101,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && tsdown",
+    "prepack": "npm run build",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit",
     "lint": "eslint src test scripts tsdown.config.ts eslint.config.mjs",
