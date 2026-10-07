@@ -13,6 +13,8 @@ import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolv
 import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
+// T10b 临时诊断（spec served 七步第 2 步；上线前删）
+import { registerDebugGenerationRoute } from './debug-generation.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
@@ -278,11 +280,20 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }
     const seedDoc = () => ({ ...(readRulesFileDoc(rulesFilePath) as Record<string, unknown>), initialized: true })
     const seedUpdate = (): Promise<void> => svc.update(ENTRY_ID, { rules: seedDoc() })
-    const hooks = {
-      setSource: (source: unknown) => {
+    // F4 加固（spec served 段判「无论如何无条件做」）：宿主 installSection 在
+    // register 之后同步调 setSource（dsh-settings 0.1.5 lib/index.js:332），换绑
+    // 或 onChange 抛错会从 installSection 一路抛穿插件加载、连带注册失败——
+    // 这里兜住异常保住注册（卡派发依赖 ns∈served，注册比换绑成败更金贵）。
+    const guardedSetSource = (source: unknown) => {
+      try {
         rebindFrom(source)
         hooks.onChange()
-      },
+      } catch (e) {
+        console.warn('[dsh-perm-gate] setSource rebind failed (registration kept):', e)
+      }
+    }
+    const hooks = {
+      setSource: guardedSetSource,
       onChange: () => { applyVolatileUpdate() },
     }
     // Activation-time seed: a never-configured `rules` field is populated once
@@ -295,10 +306,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     if (typeof svc.installSection === 'function') {
       console.warn('[dsh-perm-gate] settings generation = service.installSection (0.1.2/0.1.5 line)')
       svc.installSection(ctx, ENTRY_ID, Config, resolveConfig(config), {
-        setSource: (source: unknown) => {
-          rebindFrom(source)
-          hooks.onChange()
-        },
+        setSource: guardedSetSource,
         onChange: () => { applyVolatileUpdate() },
       })
       if (readRulesDocument() === undefined) {
@@ -310,10 +318,10 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }
     void (async () => {
       try {
-        // 变量说明符:本仓 dependencies 曾硬钉 dsh-settings@0.1.1-rc.2(10e6eda,
-        // 为 legacy 分支能 resolve——但这会 nested 一份孤立副本,正是 0.1.5 设置卡
-        // 不派发的头号嫌疑,见 .agents/plans/cross-version-adaptation-all/spec.md
-        // served 段 T35:改 peer-only 后复测 served 集合)。变量形式让 TS 按 any
+        // 变量说明符:dsh-settings 现为 optional peer(T35,2026-10-07——dependencies
+        // 硬钉 0.1.1-rc.2 已删:六线运行时它本来就无效——0.1.5 分支互斥不加载、老线
+        // nested 链接悬空后动态 import 经 node 向上解析落宿主自身副本,见
+        // cross-version-adaptation-all/findings.md T10b 附录)。变量形式让 TS 按 any
         // 解析不做模块查证;另注意 ctx.get 不跨插件隔离上下文(index.ts:44),
         // legacy 分支只能动态 import,不能 ctx.get 直取宿主单例。
         const legacySpecifier = '@deepseek-ai/dsh-settings'
@@ -700,6 +708,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       if (offLearning !== undefined) ctx.effect(() => () => { offLearning() }, 'dsh-perm-gate: learning route')
       const offHealth = registerHealthRoute(webServer, { check: () => runtime.healthCheck() })
       if (offHealth !== undefined) ctx.effect(() => () => { offHealth() }, 'dsh-perm-gate: health route')
+      // T10b: served 集合自检端点（identitySame 判 H3；诊断完删除）
+      const offDebugGen = registerDebugGenerationRoute(webServer, () => settingsRef.svc)
+      if (offDebugGen !== undefined) ctx.effect(() => () => { offDebugGen() }, 'dsh-perm-gate: debug-generation route')
       // Network diagnostics: mode, bind, port, proxy liveness, env injection,
       // block counters and recent blocks. Read-only.
       const offNetwork = registerNetworkRoute(webServer, {
