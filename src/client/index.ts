@@ -171,7 +171,7 @@ export function apply(ctx: ClientContext): void {
   // T13b 双轨数据源的桥轨：settingsScope（≤0.1.5）不解、且 configForms（0.1.7+）
   // 也没有的线上，卡片数据走自家 webServer 桥（free-search 同架构）。原生句柄
   // 优先——解到就用原生（0.2.0 实测可解），桥只在原生缺席时兜底。
-  const bridgeScope: PermissiveCardInjected['scope'] = new BridgeDocHandle()
+  const bridgeScope: PermissiveCardInjected['scope'] = new BridgeDocHandle(PERMISSIVE_NS)
 
   // 卡片 inject 读活引用：注册先于 scope 解析也不空窗（未解析时回落桥轨，
   // 桥首拉 pending 期间卡片呈现加载态）。

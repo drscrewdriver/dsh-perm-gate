@@ -2,16 +2,22 @@
  * BridgeDocHandle — T13b 双轨数据源的桥轨（≤0.1.5 settingsScope 不解析时的兜底）。
  *
  * 与原生 SettingsDocHandle（configForms.get / settingsScope.bind）同构：
- * getSnapshot/subscribe/set/unset。读 = POST /api/dsh-perm-gate/settings/describe；
+ * getSnapshot/subscribe/set/unset。读 = POST /api/<ns>/settings/describe；
  * 写 = POST …/mutate（ops 转发宿主 settings 服务），成功即用回填描述符刷新快照并
  * 通知订阅者（乐观刷新，无本地第二份状态——权威值始终在宿主服务里）。
  * 初始 describe 拉取在构造时异步发起；拉取完成前快照 status='pending'，卡片据此
  * 呈现加载态。
+ *
+ * T20-b 泛化（2026-10-08）：路由由构造参数 ns 派生（与 server 侧 bridgeRoutesFor
+ * 同式，两半一致性由测试钉死）——同一宿主进程多 ns 各持一个句柄（steward 双 ns）。
+ * client tsconfig include 仅 src/client，故此处持本地派生式而非跨目录 import。
  */
 import type { SettingsDocHandle } from './compat.js'
 
-const DESCRIBE = '/api/dsh-perm-gate/settings/describe'
-const MUTATE = '/api/dsh-perm-gate/settings/mutate'
+/** 与 server 侧 bridgeRoutesFor（src/bridge.ts）必须逐字符一致。 */
+function bridgeRoutesFor(ns: string): { describe: string; mutate: string } {
+  return { describe: `/api/${ns}/settings/describe`, mutate: `/api/${ns}/settings/mutate` }
+}
 
 interface Snapshot { status: string; value: unknown; writable: boolean }
 interface Descriptor { value?: unknown; revision?: number }
@@ -22,8 +28,10 @@ export class BridgeDocHandle implements SettingsDocHandle {
   private listeners = new Set<() => void>()
   private revision: number | undefined
   private inflight: Promise<void> | undefined
+  private readonly routes: { describe: string; mutate: string }
 
-  constructor() {
+  constructor(ns: string) {
+    this.routes = bridgeRoutesFor(ns)
     void this.refresh()
   }
 
@@ -62,7 +70,7 @@ export class BridgeDocHandle implements SettingsDocHandle {
     if (this.inflight !== undefined) return this.inflight
     this.inflight = (async () => {
       try {
-        const body = await this.request(DESCRIBE)
+        const body = await this.request(this.routes.describe)
         if (body.ok && body.value?.descriptor !== undefined) {
           const d = body.value.descriptor
           this.revision = typeof d.revision === 'number' ? d.revision : undefined
@@ -81,7 +89,7 @@ export class BridgeDocHandle implements SettingsDocHandle {
   }
 
   private async mutate(ops: Array<{ op: string; path: string[]; value?: unknown }>): Promise<void> {
-    const body = await this.request(MUTATE, { ops, expectedRevision: this.revision })
+    const body = await this.request(this.routes.mutate, { ops, expectedRevision: this.revision })
     if (body.ok && body.value?.descriptor !== undefined) {
       const d = body.value.descriptor
       this.revision = typeof d.revision === 'number' ? d.revision : undefined
