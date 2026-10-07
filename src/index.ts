@@ -310,8 +310,12 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     }
     void (async () => {
       try {
-        // 变量说明符:perm-gate 未声明 dsh-settings 依赖(该集成仅在 0.1.0/0.1.1
-        // 的宿主作用域可用),变量形式让 TS 按 any 解析不做模块查证。
+        // 变量说明符:本仓 dependencies 曾硬钉 dsh-settings@0.1.1-rc.2(10e6eda,
+        // 为 legacy 分支能 resolve——但这会 nested 一份孤立副本,正是 0.1.5 设置卡
+        // 不派发的头号嫌疑,见 .agents/plans/cross-version-adaptation-all/spec.md
+        // served 段 T35:改 peer-only 后复测 served 集合)。变量形式让 TS 按 any
+        // 解析不做模块查证;另注意 ctx.get 不跨插件隔离上下文(index.ts:44),
+        // legacy 分支只能动态 import,不能 ctx.get 直取宿主单例。
         const legacySpecifier = '@deepseek-ai/dsh-settings'
         const legacy = (await import(legacySpecifier)) as {
           installSettingsSection?: (...args: unknown[]) => unknown
