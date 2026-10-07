@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "5.1.2-compat.6",
+  "version": "5.1.2-compat.7",
   "publishConfig": {
     "tag": "compat"
   },

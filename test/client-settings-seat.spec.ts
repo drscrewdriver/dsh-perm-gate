@@ -1,18 +1,17 @@
 /**
  * Settings-seat contract pin for dsh-perm-gate's browser half.
  *
- * This spec locks WHERE the 自动审查门 settings surface mounts. The 0.1.7rc.2
- * line ships it as a dedicated top-level `settings.section` (id `dsh-perm-gate`,
- * order 30, label `section.title`) and deliberately does NOT register
- * `settings.plugin.item` / `settings.plugins.tab` — the gate is a first-class
- * settings nav entry, not a Plugins-section tab. When a future DSH line moves
- * the seat again, migrate src/client/index.ts AND this file together; the
- * assertions fail on drift:
- *
- *   - the section is injected exactly once;
- *   - no `settings.plugin.item` / `settings.plugins.tab` registration exists;
- *   - section identity (id/order/label/locale), the injected scope, and the
- *     card component stay stable.
+ * Multi-seat reality (2026-10-07 T10b/T12/T13b 定案, all lines verified live):
+ *   - `settings.section`      — top-level nav entry (0.1.5 renders via the
+ *     settings bridge, 0.1.7 renders via native configForms, 0.2.0 silently
+ *     idle — the slot has no consumer there, verified against host source).
+ *   - `settings.plugin.item`  — ≤0.1.5 插件配置 tab dispatch card (key=ns ∩
+ *     served set; card data falls back to the settings bridge).
+ *   - `settings.plugins.tab`  — 0.1.7+/0.2.0「内置插件」page tab (the ONLY
+ *     plugin-page entry on 0.2.0, whose shell has no settings.section consumer).
+ * All seats render the same PermissiveCard with the same dual-source scope
+ * (native handle first, BridgeDocHandle fallback). Migrate src/client/index.ts
+ * AND this file together when a DSH line moves a seat; assertions fail on drift.
  */
 import { describe, expect, it } from 'vitest'
 import { apply, inject as declaredInject } from '../src/client/index.ts'
@@ -75,11 +74,16 @@ describe('settings-seat contract (dedicated top-level settings.section)', () => 
     expect(declaredInject).toEqual(['slots', 'locale'])
   })
 
-  it('injects the settings.section exactly once, and no other settings seat', () => {
+  it('injects every per-line seat exactly once (section + plugin.item + plugins.tab)', () => {
     const { declared, registrations } = collectRegistrations()
-    expect(declared.filter(slot => slot === 'settings.section')).toHaveLength(1)
-    expect(declared).not.toContain('settings.plugin.item')
-    expect(declared).not.toContain('settings.plugins.tab')
+    for (const seat of ['settings.section', 'settings.plugin.item', 'settings.plugins.tab']) {
+      expect(declared.filter(slot => slot === seat)).toHaveLength(1)
+    }
+    // All three seats present, all rendering the same card component.
+    const seats = new Set(['settings.section', 'settings.plugins.tab', 'settings.plugin.item'])
+    const seatRegs = registrations.filter(r => seats.has(r.slot))
+    expect(seatRegs.map(r => r.slot).sort()).toEqual([...seats].sort())
+    for (const reg of seatRegs) expect(reg.component).toBe(PermissiveCard)
     expect(settingsRegistrationOf(registrations)!.slot).toBe('settings.section')
   })
 
@@ -96,6 +100,9 @@ describe('settings-seat contract (dedicated top-level settings.section)', () => 
     expect(Object.keys(face)).toEqual(['scope'])
     // The scope is the compat-resolved durable-settings handle, closure-captured
     // at resolution time (registration happens inside the resolution callback).
+    // Dual-source scope: with configForms present the native handle wins; the
+    // BridgeDocHandle fallback only engages when neither face resolves (0.1.5
+    // settingsScope never resolves — see T10b verdict in the plan docs).
     expect(face['scope']).toBe(scope)
     expect(component).toBe(PermissiveCard)
   })

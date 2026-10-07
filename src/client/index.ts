@@ -151,9 +151,9 @@ export function apply(ctx: ClientContext): void {
       fn()
     } catch (e) {
       // 诊断通道：农场 IAB 拿不到 console，失败面写入 window.__pgSurf 供
-      // evaluate 直接读取（定位后此行可删）。
-      ;(globalThis as Record<string, unknown>).__pgSurf ??= []
-      ;(globalThis as Record<string, unknown>).__pgSurf.push(`${tag}: ${(e as Error)?.message ?? String(e)}`)
+      // evaluate 直接读取（失败才初始化——页面侧读到 undefined 即零失败）。
+      const surf = ((globalThis as Record<string, unknown>).__pgSurf ??= []) as string[]
+      surf.push(`${tag}: ${(e as Error)?.message ?? String(e)}`)
       console.warn(`[dsh-perm-gate] client surface '${tag}' failed:`, e)
     }
   }
@@ -198,6 +198,21 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
       name: 'plugins.bundle.config',
       key: 'dsh-perm-gate',
+      locale: NS,
+      inject: cardInjected,
+    }, PermissiveCard)) as unknown
+  })
+
+  // 0.1.7+/0.2.0「内置插件」页的插件 tab（T14，宿主 client-ui-settings-plugins
+  // SettingsRoot：tab 行 = 本槽 entries 的 {id, order, label}，内容按 only:id 渲染；
+  // 0.2.0 的 settings.section 无消费者——本槽是 0.2.0 唯一插件页入口）。
+  // ≤0.1.5 无该槽持有者，注入静默闲置不阻塞（free-search 同款纪律）。
+  safe('settings.plugins.tab', () => {
+    ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
+      name: 'settings.plugins.tab',
+      id: PERMISSIVE_NS,
+      order: 50,
+      label: () => t('section.title'),
       locale: NS,
       inject: cardInjected,
     }, PermissiveCard)) as unknown

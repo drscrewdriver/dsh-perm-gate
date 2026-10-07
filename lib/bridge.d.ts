@@ -9,7 +9,26 @@
  * 数据面消费方 = client BridgeDocHandle（T13b 双轨数据源：0.1.7+ 原生句柄优先，
  * ≤0.1.5 settingsScope 不解析时落到本桥——free-search 同架构）。
  */
-import type { SettingsServiceLike } from './debug-generation.js';
+interface SettingsServiceLike {
+    update(ns: string, patch: object): Promise<void>;
+    register?(ns: string, schema: unknown, options?: {
+        base?: unknown;
+    }): unknown;
+    installSection?(owner: unknown, ns: string, schema: unknown, entry: unknown, hooks: unknown): unknown;
+    describe?(o?: {
+        redactSecrets?: boolean;
+    }): Array<{
+        ns: unknown;
+        [k: string]: unknown;
+    }>;
+    mutate?(ns: string, ops: Array<{
+        op: string;
+        path: string[];
+        value?: unknown;
+    }>, expectedRevision?: number): Promise<unknown>;
+    writable?: boolean;
+}
 export declare const BRIDGE_DESCRIBE_ROUTE = "/api/dsh-perm-gate/settings/describe";
 export declare const BRIDGE_MUTATE_ROUTE = "/api/dsh-perm-gate/settings/mutate";
 export declare function registerSettingsBridgeRoutes(server: unknown, getSettingsSvc: () => SettingsServiceLike | undefined, ns: string): Array<() => void>;
+export {};
