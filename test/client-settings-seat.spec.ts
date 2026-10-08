@@ -1,18 +1,19 @@
 /**
  * Settings-seat contract pin for dsh-perm-gate's browser half.
  *
- * Consolidated-seat reality (2026-10-08 family-insection 定案, replaces the
- * 2026-10-07 three-seat spread):
- *   - `dsh-family.tab`        — the ONLY settings seat: a contributor tab inside
- *     the 起子插件设置 family section (TL `dsh-family`). The former top-level
- *     `settings.section` (sidebar), `settings.plugins.tab` (plugins-page tab,
+ * Standalone-section reality (2026-10-08 回退定案, replaces the same-day
+ * family-insection consolidation — perm-gate was never in tab-ification scope):
+ *   - `settings.section`      — the ONLY settings-nav seat: a standalone sidebar
+ *     section (自动审查门, order 30). `settings.plugins.tab` (plugins-page tab,
  *     rendered on 0.1.0 too) and `settings.plugin.item` (≤0.1.5 dispatch card)
- *     duplicated that surface three times and are all removed — the family tab
- *     is the single entry. Kept non-settings seats: `plugins.bundle.config`
- *     (0.2.0 bundle detail page) and `shell.overlay` (0.1.0/0.1.1 gear fallback).
- *   - The tab renders the same PermissiveCard with the same dual-source scope
- *     (native handle first, BridgeDocHandle fallback). Migrate src/client/index.ts
- *     AND this file together when a DSH line moves a seat; assertions fail on drift.
+ *     stay retired — both duplicated the standalone section — and the one-day
+ *     `dsh-family.tab` contributor tab is gone with the revert.
+ *     Kept non-settings seats: `plugins.bundle.config` (0.2.0 bundle detail
+ *     page) and `shell.overlay` (0.1.0/0.1.1 gear fallback).
+ *   - The section renders the same PermissiveCard with the same dual-source
+ *     scope (native handle first, BridgeDocHandle fallback). Migrate
+ *     src/client/index.ts AND this file together when a DSH line moves a seat;
+ *     assertions fail on drift.
  */
 import { describe, expect, it } from 'vitest'
 import { apply, inject as declaredInject } from '../src/client/index.ts'
@@ -61,7 +62,7 @@ function collectRegistrations(): { declared: string[]; registrations: CapturedRe
   return { declared, registrations, scope }
 }
 
-describe('settings-seat contract (single family in-section tab)', () => {
+describe('settings-seat contract (standalone settings.section; plugins tab/item stay retired)', () => {
   it('declares generation-neutral plugin-level inject only (no durable-settings face)', () => {
     // configForms (0.1.7+) / settingsScope (≤0.1.5) are generation-exclusive:
     // keeping either in the plugin-level inject list silently kills the whole
@@ -69,12 +70,13 @@ describe('settings-seat contract (single family in-section tab)', () => {
     expect(declaredInject).toEqual(['slots', 'locale'])
   })
 
-  it('registers dsh-family.tab once and none of the removed seats', () => {
+  it('registers settings.section once and none of the retired seats', () => {
     const { declared, registrations } = collectRegistrations()
-    expect(declared.filter(slot => slot === 'dsh-family.tab')).toHaveLength(1)
-    // The three former seats must stay gone — they duplicated the family tab
-    // (sidebar 自动审查门 + plugins-page tab + ≤0.1.5 dispatch card).
-    for (const gone of ['settings.section', 'settings.plugins.tab', 'settings.plugin.item']) {
+    expect(declared.filter(slot => slot === 'settings.section')).toHaveLength(1)
+    // Retired seats must stay gone: the plugins-page tab and the ≤0.1.5
+    // dispatch card duplicated the standalone section, and the one-day
+    // family-tab contributor left with the 2026-10-08 revert.
+    for (const gone of ['settings.plugins.tab', 'settings.plugin.item', 'dsh-family.tab']) {
       expect(declared).not.toContain(gone)
       expect(registrations.find(r => r.slot === gone)).toBeUndefined()
     }
@@ -86,12 +88,12 @@ describe('settings-seat contract (single family in-section tab)', () => {
     expect(registrations.find(r => r.slot === 'shell.overlay')).toBeDefined()
   })
 
-  it('pins the family-tab identity (id/order/label/locale) and the card component', () => {
+  it('pins the section identity (id/order/label/locale) and the card component', () => {
     const { registrations, scope } = collectRegistrations()
-    const reg = registrations.find(r => r.slot === 'dsh-family.tab')!
+    const reg = registrations.find(r => r.slot === 'settings.section')!
     const { options, component } = reg
     expect(options['id']).toBe('dsh-perm-gate')
-    expect(options['order']).toBe(45)
+    expect(options['order']).toBe(30)
     expect(options['locale']).toBe('dsh-perm-gate')
     // Read-time label thunk: follows the active locale without re-registration.
     expect((options['label'] as () => string)()).toBe('section.title')

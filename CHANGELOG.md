@@ -9,6 +9,19 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.9] - 2026-10-08
+
+### Changed
+
+- **回退家族 tab 收拢（用户定案：自动审查门不在 tab 化范围内）**：顶级
+  `settings.section`（侧栏「自动审查门」独立节，order 30）恢复为唯一设置导航
+  入口；同日上午加入的 `dsh-family.tab`（order 45）撤除。
+- `settings.plugins.tab`（插件页 tab，0.1.0 实测与独立节双渲染）与
+  `settings.plugin.item`（≤0.1.5 派发卡）维持退役——与独立节重复；
+  `plugins.bundle.config` 详情卡与 `shell.overlay` 浮窗齿轮不变。
+- 席位契约测试（test/client-settings-seat.spec.ts）改钉单节形态：
+  settings.section 恰一次（order 30 / PermissiveCard），三个退役席位断言缺席。
+
 ## [2.6.0] - 2026-09-17
 
 ### Added

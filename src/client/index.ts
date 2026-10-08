@@ -1,10 +1,10 @@
 /**
  * dsh-perm-gate — browser half.
  *
- * Registers the `dsh-perm-gate` dictionaries and one `settings.plugins.tab`
- * page keyed by the plugin's settings namespace, so the Plugins section of the
- * settings panel renders an editable page: the single 自动审查 tier switch
- * plus the four combinable backend approval strategies.
+ * Registers the `dsh-perm-gate` dictionaries and one top-level `settings.section`
+ * entry (自动审查门) so the settings sidebar renders a standalone editable
+ * section: the single 自动审查 tier switch plus the four combinable backend
+ * approval strategies.
  *
  * All @deepseek-ai/* imports are type-only at the value level: collaboration
  * happens through cordis services (`slots`, `locale`, `configForms`) and slot
@@ -74,14 +74,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     // here (the declaring page package is not a dev dependency), mirroring the
     // contract the page renders with (`{ view: 'page', form }` owner props).
     'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
-    // （settings.plugin.item 槽型镜像已随 2026-10-08 席位移除一并删除——
-    // 注册面收拢进 dsh-family.tab，见下方 family.tab 注释。）
-    // 家族节子席位（TL `dsh-family` 顶级节声明；session-guard/IT/steward 等同款）：
-    // 2026-10-08 用户定案——设置面收拢进家族 in-section tab，本插件的顶级
-    // settings.section / 插件页 settings.plugins.tab / settings.plugin.item
-    // 三席位全部让位（与宿主原生节重复的导航面逐一消失），自动审查门卡只从
-    // 这里出。壳（TL）缺席时该注入静默 pending——五格实证 TL 常驻，可接受。
-    'dsh-family.tab': { kind: 'list'; scope: 'root' }
+    // （settings.plugin.item 槽型镜像已随该席位退役一并删除——与顶级独立节
+    // 重复的 ≤0.1.5 派发卡不再出现。settings.section 的槽型由
+    // @deepseek-ai/dsh-client-ui-settings/client 的声明提供，无需本地镜像。）
   }
 }
 
@@ -177,21 +172,22 @@ export function apply(ctx: ClientContext): void {
   // 桥首拉 pending 期间卡片呈现加载态）。
   const cardInjected = (): PermissiveCardInjected => ({ scope: scopeRef.scope ?? bridgeScope }) as PermissiveCardInjected
 
-  // 家族节 contributor tab（2026-10-08 设置面收拢定案）：自动审查门卡唯一入口 =
-  // 起子插件设置（TL `dsh-family` 节）里的「自动审查门」tab。原三个面——顶级
-  // settings.section（侧栏节）、settings.plugins.tab（插件页 tab，0.1.0 实测也
-  // 渲染）、settings.plugin.item（≤0.1.5 插件配置卡）——全部移除，与宿主原生节
-  // 重复的导航面不再出现。卡组件与数据臂（原生句柄优先 + 桥兜底）原样复用；
-  // server 侧数据面（installSection 三代 + 桥路由）不动。
-  safe('dsh-family.tab', () => {
-    ctx.slots.inject('dsh-family.tab', () => ctx.slots.register({
-      name: 'dsh-family.tab',
-      id: PERMISSIVE_NS,
-      order: 45,
-      label: () => t('section.title'),
-      locale: NS,
-      inject: cardInjected,
-    }, PermissiveCard)) as unknown
+  // 独立顶级设置节（范式 A；2026-10-08 回退定案：本插件不在家族 tab 化范围内
+  // ——自动审查门是独立 insection，与「权限/上下文优化独立分节」的参考样本
+  // 一致）。卡组件与数据臂（原生句柄优先 + 桥兜底）原样复用；server 侧数据面
+  // （installSection 三代 + 桥路由）不动。与插件页 tab / ≤0.1.5 派发卡的
+  // 去重取舍见下方注释。
+  safe('settings.section', () => {
+    ctx.slots.inject('settings.section', function* () {
+      yield ctx.slots.register({
+        name: 'settings.section',
+        id: PERMISSIVE_NS,
+        order: 30,
+        label: () => t('section.title'),
+        locale: NS,
+        inject: cardInjected,
+      }, PermissiveCard)
+    }) as unknown
   })
 
   // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
@@ -206,12 +202,13 @@ export function apply(ctx: ClientContext): void {
     }, PermissiveCard)) as unknown
   })
 
-  // 0.1.7+/0.2.0「内置插件」页的插件 tab（T14）已于 2026-10-08 移除：插件页
-  // tab 行与家族节 tab 重复（0.1.0 实测两处都渲染），设置面收拢进家族节。
+  // 0.1.7+/0.2.0「内置插件」页的插件 tab（T14）已于 2026-10-08 移除：0.1.0
+  // 实测它与顶级 settings.section 同时渲染，同一张卡出现两次；顶级独立节是
+  // 唯一设置导航入口（同日家族 tab 收拢已回退——本插件不在 tab 化范围内）。
 
-  // ≤0.1.5 设置面板「插件配置」tab 的派发卡（settings.plugin.item）已于
-  // 2026-10-08 移除：与家族节 tab 重复。server 侧 installSection 数据面保留
-  // ——它同时是桥 describe/mutate 与 served ns 的来源。
+  // ≤0.1.5 设置面板「插件配置」tab 的派发卡（settings.plugin.item）同批退役：
+  // 与顶级独立节重复。server 侧 installSection 数据面保留——它同时是桥
+  // describe/mutate 与 served ns 的来源。
 
   // 0.1.0/0.1.1 等无设置页宿主的兜底入口:壳级 overlay 浮窗齿轮承载审批门卡
   // (数据层与上方几个面共用同一 scope;宿主有设置页的线上与既有入口并存)。
