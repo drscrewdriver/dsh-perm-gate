@@ -74,14 +74,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     // here (the declaring page package is not a dev dependency), mirroring the
     // contract the page renders with (`{ view: 'page', form }` owner props).
     'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
-    // ≤0.1.5 settings-panel plugin-config tab: keyed by the settings namespace,
-    // dispatched as `served namespaces ∩ settings.plugin.item cards` (host
-    // client-ui-settings-plugins ConfigurablePluginsTabController.publish — the
-    // key is compared against the namespaces the host serves, which our
-    // server-side installSection registration provides). Declared here because
-    // the declaring page package is not a dev dependency; the host renders the
-    // card with empty owner props (`renderSlot(..., {}, { entryKey: ns })`).
-    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: Record<string, unknown> }
+    // （settings.plugin.item 槽型镜像已随 2026-10-08 席位移除一并删除——
+    // 注册面收拢进 dsh-family.tab，见下方 family.tab 注释。）
+    // 家族节子席位（TL `dsh-family` 顶级节声明；session-guard/IT/steward 等同款）：
+    // 2026-10-08 用户定案——设置面收拢进家族 in-section tab，本插件的顶级
+    // settings.section / 插件页 settings.plugins.tab / settings.plugin.item
+    // 三席位全部让位（与宿主原生节重复的导航面逐一消失），自动审查门卡只从
+    // 这里出。壳（TL）缺席时该注入静默 pending——五格实证 TL 常驻，可接受。
+    'dsh-family.tab': { kind: 'list'; scope: 'root' }
   }
 }
 
@@ -177,18 +177,21 @@ export function apply(ctx: ClientContext): void {
   // 桥首拉 pending 期间卡片呈现加载态）。
   const cardInjected = (): PermissiveCardInjected => ({ scope: scopeRef.scope ?? bridgeScope }) as PermissiveCardInjected
 
-  // 独立顶级设置节（范式 A）：自动审查门，不再挂在「插件」节的 tab 下。
-  safe('settings.section', () => {
-    ctx.slots.inject('settings.section', function* () {
-      yield ctx.slots.register({
-        name: 'settings.section',
-        id: PERMISSIVE_NS,
-        order: 30,
-        label: () => t('section.title'),
-        locale: NS,
-        inject: cardInjected,
-      }, PermissiveCard)
-    }) as unknown
+  // 家族节 contributor tab（2026-10-08 设置面收拢定案）：自动审查门卡唯一入口 =
+  // 起子插件设置（TL `dsh-family` 节）里的「自动审查门」tab。原三个面——顶级
+  // settings.section（侧栏节）、settings.plugins.tab（插件页 tab，0.1.0 实测也
+  // 渲染）、settings.plugin.item（≤0.1.5 插件配置卡）——全部移除，与宿主原生节
+  // 重复的导航面不再出现。卡组件与数据臂（原生句柄优先 + 桥兜底）原样复用；
+  // server 侧数据面（installSection 三代 + 桥路由）不动。
+  safe('dsh-family.tab', () => {
+    ctx.slots.inject('dsh-family.tab', () => ctx.slots.register({
+      name: 'dsh-family.tab',
+      id: PERMISSIVE_NS,
+      order: 45,
+      label: () => t('section.title'),
+      locale: NS,
+      inject: cardInjected,
+    }, PermissiveCard)) as unknown
   })
 
   // 插件页配置卡：Plugins 页不会自动渲染 volatile 配置表单——只有客户端注册
@@ -203,41 +206,12 @@ export function apply(ctx: ClientContext): void {
     }, PermissiveCard)) as unknown
   })
 
-  // 0.1.7+/0.2.0「内置插件」页的插件 tab（T14，宿主 client-ui-settings-plugins
-  // SettingsRoot：tab 行 = 本槽 entries 的 {id, order, label}，内容按 only:id 渲染；
-  // 0.2.0 的 settings.section 无消费者——本槽是 0.2.0 唯一插件页入口）。
-  // ≤0.1.5 无该槽持有者，注入静默闲置不阻塞（free-search 同款纪律）。
-  safe('settings.plugins.tab', () => {
-    ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({
-      name: 'settings.plugins.tab',
-      id: PERMISSIVE_NS,
-      order: 50,
-      label: () => t('section.title'),
-      locale: NS,
-      inject: cardInjected,
-    }, PermissiveCard)) as unknown
-  })
+  // 0.1.7+/0.2.0「内置插件」页的插件 tab（T14）已于 2026-10-08 移除：插件页
+  // tab 行与家族节 tab 重复（0.1.0 实测两处都渲染），设置面收拢进家族节。
 
-  // ≤0.1.5 设置面板「插件配置」tab 的派发卡：宿主按
-  // 「服务端 served namespaces ∩ settings.plugin.item 卡 key」交集派发
-  // （key 必须 = settings namespace，与 installSection 注册的 ENTRY_ID 一致）。
-  // 顶层注册：0.1.7+ 无该槽持有者，注入静默闲置不阻塞（free-search 同款纪律）。
-  safe('settings.plugin.item', () => {
-    // 槽型联合未收录 id/order（0.1.5 宿主 .d.ts 落后于运行时），运行时按
-    // options.id 建行去重——必须带。用松类型别名注册（shell.overlay 同款纪律）。
-    const itemSlots = ctx.slots as unknown as {
-      inject: (name: string, factory: () => unknown) => unknown
-      register: (options: Record<string, unknown>, component: (props: PermissiveCardProps) => JSX.Element) => unknown
-    }
-    itemSlots.inject('settings.plugin.item', () => itemSlots.register({
-      name: 'settings.plugin.item',
-      id: PERMISSIVE_NS,
-      key: PERMISSIVE_NS,
-      order: 40,
-      locale: NS,
-      inject: cardInjected,
-    }, PermissiveCard))
-  })
+  // ≤0.1.5 设置面板「插件配置」tab 的派发卡（settings.plugin.item）已于
+  // 2026-10-08 移除：与家族节 tab 重复。server 侧 installSection 数据面保留
+  // ——它同时是桥 describe/mutate 与 served ns 的来源。
 
   // 0.1.0/0.1.1 等无设置页宿主的兜底入口:壳级 overlay 浮窗齿轮承载审批门卡
   // (数据层与上方几个面共用同一 scope;宿主有设置页的线上与既有入口并存)。
