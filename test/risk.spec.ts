@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { classifyRisk, isHardRisk, parseRiskVerdict, type RiskVerdict } from '../src/risk.js'
+import { DEFAULT_DENY_KEYWORDS } from '../src/deny-defaults.js'
+import { hardDenyReason } from '../src/engine.js'
+import { classifyRisk, HARD_RISK_CATEGORIES, isHardRisk, parseRiskVerdict, type RiskVerdict } from '../src/risk.js'
 
 const CFG = { endpoint: 'https://llm.example/v1', model: 'grader-x', apiKey: 'sk-test', timeoutMs: 200 }
 
@@ -25,6 +27,8 @@ describe('parseRiskVerdict', () => {
     expect(parseRiskVerdict('{"risk":"safe","reason":"ok"}')).toEqual({ kind: 'safe', reason: 'ok' })
     expect(parseRiskVerdict('{"risk":"risky","category":"deletion","reason":"rm"}')).toEqual({ kind: 'risky', category: 'deletion', reason: 'rm' })
     expect(parseRiskVerdict('{"risk":"risky","category":"NEUTRAL"}')).toEqual({ kind: 'risky', category: 'neutral', reason: undefined })
+    expect(parseRiskVerdict('{"risk":"risky","category":"unknown-target","reason":"opaque"}'))
+      .toEqual({ kind: 'risky', category: 'unknown-target', reason: 'opaque' })
   })
 
   it('rejects off-protocol output instead of guessing', () => {
@@ -40,10 +44,21 @@ describe('parseRiskVerdict', () => {
 })
 
 describe('isHardRisk', () => {
-  it('hard categories are exactly the irreversible five; unknown counts as hard', () => {
-    for (const c of ['deletion', 'credential', 'remote', 'system', 'bulk']) expect(isHardRisk(c)).toBe(true)
+  it('hard categories are exactly the irreversible five plus the U tier; unknown counts as hard', () => {
+    for (const c of ['deletion', 'credential', 'remote', 'system', 'bulk', 'unknown-target']) expect(isHardRisk(c)).toBe(true)
     expect(isHardRisk('neutral')).toBe(false)
     expect(isHardRisk('something-else')).toBe(true)
+  })
+
+  it('the U tier is a category the grader may name, and naming it cannot produce a deny', () => {
+    // T8.2 shape guard: `unknown-target` belongs to the ask protocol only. It is
+    // hard (never auto-allowed, never learned) and it is deliberately absent from
+    // every deterministic wordlist — "cannot be seen" is not evidence of malice,
+    // and a deny handed out for opacity alone could not be appealed.
+    expect(HARD_RISK_CATEGORIES).toContain('unknown-target')
+    expect(DEFAULT_DENY_KEYWORDS.some((k) => String(k).includes('unknown-target'))).toBe(false)
+    expect(hardDenyReason({ tool: 'bash', args: { command: 'npm install left-pad' }, cwd: '/work' } as never))
+      .toBeUndefined()
   })
 })
 

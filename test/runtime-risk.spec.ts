@@ -105,6 +105,31 @@ describe('verdict learning end-to-end (refineAsk + settleExecution)', () => {
     expect(r.pendingCount()).toBe(0)
   })
 
+  it('unknown-target keeps asking forever and never becomes a deny (T8.2)', async () => {
+    // The U tier: the grader could not read what the call acts on. Hard means
+    // *always ask*, never *refuse* — and repeated human approvals must not
+    // sediment it into an auto-allow, because the thing being approved was never
+    // visible in the first place.
+    const r = new PermGateRuntime({
+      rulesFile: RULES,
+      permissive: true,
+      permissiveStrategies: { llmAssist: true },
+      riskHook: async () => ({ kind: 'risky', category: 'unknown-target' }),
+      readRiskLearning: () => ({ enabled: true, threshold: 1 }),
+    })
+    for (let round = 0; round < 4; round += 1) {
+      const ask = r.decideExecution(EXEC)
+      const refined = await r.refineAsk(EXEC, ask as never)
+      expect(refined?.kind).toBe('ask')
+      expect(refined?.kind).not.toBe('deny')
+      expect(r.pendingCount()).toBe(0)
+      r.settleExecution(EXEC) // as if the human approved, four times over
+    }
+    expect(r.learningSnapshot().confirmed).toEqual({})
+    const last = await r.refineAsk(EXEC, r.decideExecution(EXEC) as never)
+    expect(last?.kind).toBe('ask')
+  })
+
   it('learning state persists across runtime instances', async () => {
     const dir = tmpDir()
     const learningFile = join(dir, 'perm-gate', 'learning.json')

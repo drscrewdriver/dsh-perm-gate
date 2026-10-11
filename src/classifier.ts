@@ -7,9 +7,16 @@
  * transport, parsing, or schema error returns `ask` so the human seam stays
  * authoritative — an LLM can widen to `allow`/`deny` but never silence the review.
  *
+ * @deprecated No production call site: the live grading path is `risk.ts`
+ * (`classifyRisk`). Kept because `test/feature.spec.ts` and the published
+ * `./classifier` export depend on it. Its `deny` output must never be acted on by
+ * the runtime — a probabilistic verdict may not create an unappealable block.
+ *
  * The transport layer (`chatCompletion`) is shared with `risk.ts`, which layers
  * the risk-category protocol on top of the same custom-endpoint setup.
  */
+import { graderRulesText } from './grader-rules.js'
+
 export type ClassifyVerdict = 'allow' | 'deny' | 'ask'
 
 /** Setup for one classifier call. */
@@ -24,10 +31,16 @@ export interface ClassifierConfig {
   timeoutMs?: number
 }
 
-/** The call being judged (bounded/redacted before it leaves the host). */
+/** The call being judged. Callers MUST pass args already through `redactArgs`. */
 export interface ClassifyRequest {
   readonly tool: string
-  /** Redacted/bounded argument snapshot (secrets already stripped upstream). */
+  /**
+   * Bounded argument snapshot with secret values masked by `redactArgs` from
+   * `./redact.js`. This used to be documented as "secrets already stripped
+   * upstream" while nothing upstream stripped anything — the raw args object
+   * was serialized straight to a user-configured third-party endpoint. Redaction
+   * is now a real, tested layer; passing unredacted args here is a bug.
+   */
   readonly args: unknown
   /** The deterministic reason the call reached the LLM-assist seam. */
   readonly reason: string
@@ -157,10 +170,14 @@ export async function classifyWithLLM(
   req: ClassifyRequest,
   nowFetch: typeof fetch = fetch,
 ): Promise<ClassifyVerdict> {
+  // The rule text is shared with `risk.ts` through `grader-rules.ts`: two graders
+  // with different standards grade the same call differently (a local `cat .env`
+  // denied by one, allowed by the other). Only the output shape differs here.
   const system =
     'You are a permission classifier for a coding agent. Judge one tool call and reply with ONLY JSON ' +
-    '{"verdict":"allow"|"deny"|"ask","reason":"short"}. allow only for clearly safe, in-scope operations; ' +
-    'deny for destructive, credential, or exfiltration-adjacent operations; ask on any doubt. Never reveal secrets.'
+    '{"verdict":"allow"|"deny"|"ask","reason":"short"}.\n' +
+    'allow = proceed; deny = refuse; ask = needs the human.\n' +
+    graderRulesText()
 
   const user = JSON.stringify({
     tool: req.tool,
