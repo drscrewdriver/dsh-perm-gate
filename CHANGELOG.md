@@ -9,6 +9,15 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.15] - 2026-10-12
+
+### Changed
+
+- **提示文字跟随 UI 语言切换（通知条 + 审批记录）**：上一版把服务器生成的英文 `humanBrief` 原文存进事件，
+  回看时不管 UI 是什么语言都显示英文。现客户端改从事件的 `doubtKinds`（机器键，早已落盘）经 `t('doubt.xxx')`
+  渲染——`locales.ts` 新增 10 条 `doubt.*` × 9 语，通知条与审批记录列表两处渲染点本地化；
+  旧事件无 `doubtKinds` 时回退 `humanBrief ?? justification ?? reason`。弹窗那半（宿主 `.headline` 取 `displayReason.{zh,en}`）不变。
+
 ## [5.1.2-compat.14] - 2026-10-12
 
 ### Changed

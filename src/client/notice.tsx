@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { followEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent, type GateFeedBatch } from './feed.ts'
+import type { PermissiveKey } from './locales.ts'
 
 const AUTO_HIDE_MS = 4_000
 
@@ -118,8 +119,10 @@ export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | nu
         }}
       >
         <code style={{ font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary, inherit)' }}>{notice.tool}</code>
-        {' — '}
-        {notice.reason}
+        {' \u2014 '}
+        {notice.doubtKinds !== undefined && notice.doubtKinds.length > 0
+          ? notice.doubtKinds.map((k) => t(`doubt.${k}` as PermissiveKey)).join(' \u00b7 ')
+          : notice.reason}
       </span>
       <button
         type="button"

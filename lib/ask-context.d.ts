@@ -158,12 +158,22 @@ export declare function askDoubtKinds(ctx: AskContext, extra?: {
     readonly modelFlagged?: boolean;
 }): DoubtKind[];
 /**
- * The card a human decides from: why it asks, what it touches, what each button
- * costs. One builder feeds both the popup and the durable event, so the review
- * panel can show the same text the decision was made on — the two copies drifting
- * apart is what made past approvals unreconstructable.
+ * The card a human decides from, as three prose clauses with **no command in them**.
+ *
+ * The command does not belong here. The host's approval panel renders the pending
+ * tool call's command in its own monospace block (ui-chat registers
+ * `conversation.approval.detail` → `ApprovalCommand`, styled `.command`), while the
+ * resolved `displayReason` goes into `.headline`, a plain div with no
+ * `white-space: pre-line` — so any `\n` in it collapses and a command embedded in
+ * prose ends up buried mid-sentence. Keeping the two in their own channels is what
+ * makes the popup readable.
+ *
+ * The event still carries the command separately (`humanCommand`) because the
+ * review list has no host-provided command block next to it.
  */
 export declare function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds?: ("write" | "delete" | "remote-write" | "exec-external" | "never-learn" | "no-rule" | "opaque" | "irreversible" | "outside-paths" | "model-flagged")[]): string;
+/** The redacted command alone, for the channels that have nowhere else to show it. */
+export declare function humanCommand(ctx: AskContext): string;
 /** What goes on the durable event, for later attribution. */
 export interface EventFields {
     readonly inputDigest?: string;
@@ -175,6 +185,8 @@ export interface EventFields {
     readonly doubtKinds?: readonly DoubtKind[];
     /** The English form of the card the human decided from (audit language). */
     readonly humanBrief?: string;
+    /** The redacted command on its own, so the review list can show it as code. */
+    readonly humanCommand?: string;
 }
 /**
  * Project for the event log: a salted digest (raw args never land on disk) plus

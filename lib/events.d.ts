@@ -51,6 +51,8 @@ export interface GateEvent {
      * once read a full explanation.
      */
     readonly humanBrief?: string;
+    /** The redacted command, stored apart from the prose so a list can render it as code. */
+    readonly humanCommand?: string;
 }
 export interface GateEventInput {
     readonly sessionId?: string;
@@ -69,6 +71,7 @@ export interface GateEventInput {
     readonly promptVersion?: string;
     readonly doubtKinds?: readonly string[];
     readonly humanBrief?: string;
+    readonly humanCommand?: string;
     /** Session working directory, used to resolve relative snapshot paths. */
     readonly baseDir?: string;
 }

@@ -125,6 +125,7 @@ interface PendingAsk {
      * and then vanished.
      */
     readonly humanBrief?: string;
+    readonly humanCommand?: string;
     readonly doubtKinds?: readonly string[];
 }
 export interface PermGateRuntimeOptions extends PermGateConfig {

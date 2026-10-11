@@ -596,7 +596,9 @@ export function HistoryView({ t, ...props }: HistoryViewProps): JSX.Element | nu
                           <span style={{ marginLeft: 'auto', flex: '0 0 auto', fontSize: '11px', color: 'var(--dsw-alias-label-tertiary)' }}>{clockTime(ev.ts)}</span>
                         </div>
                         <div style={{ marginTop: '2px', fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-secondary, inherit)', overflowWrap: 'anywhere' }}>
-                          {ev.humanBrief ?? ev.justification ?? ev.reason}
+                          {ev.doubtKinds !== undefined && ev.doubtKinds.length > 0
+                            ? ev.doubtKinds.map((k) => t(`doubt.${k}` as PermissiveKey)).join(' · ')
+                            : (ev.humanBrief ?? ev.justification ?? ev.reason)}
                         </div>
                         {ev.humanCommand === undefined || ev.humanCommand === ''
                           ? null
