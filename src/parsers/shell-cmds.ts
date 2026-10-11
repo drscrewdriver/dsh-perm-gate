@@ -15,7 +15,19 @@
 
 import type { CommandParser, CommandSemantics } from '../command-semantics.js'
 
-/** Commands that are inherently destructive (only dangerous ones trigger canParse) */
+/**
+ * Commands that are inherently destructive (only dangerous ones trigger canParse).
+ *
+ * The Windows storage/volume cmdlets are here because the ones listed are Level 5
+ * *by name* — `Clear-Disk`, `Optimize-VHD`, `Set-Disk` have no benign reading worth
+ * preserving, so no argument shape is required. Arg-dependent tools are deliberately
+ * **not** in this table (`vssadmin`, `cipher`): they live in `DESTRUCTIVE_PATTERNS`
+ * below, so `vssadmin` alone does not classify as a wipe. The decision path itself
+ * does not read this table — irreversibility is decided once, in `irreversible.ts`,
+ * which both P0 and the reversibility tier consume. Keeping the parser in agreement
+ * is what stops it from reporting `unknown` to any future consumer (rule dimension,
+ * explanation view) of `destructiveness`.
+ */
 const DESTRUCTIVE_COMMANDS: Record<string, number> = {
   // Level 5: Extreme (system-wide, data loss)
   'dd': 5,
@@ -24,6 +36,13 @@ const DESTRUCTIVE_COMMANDS: Record<string, number> = {
   'fdisk': 5,
   'mkfs': 5,
   'rm-sudo': 5,
+  'optimize-vhd': 5,
+  'clear-disk': 5,
+  'initialize-disk': 5,
+  'set-disk': 5,
+  'remove-vhd': 5,
+  'mount-disk': 5,
+  'sdelete': 5,
 
   // Level 4: High (significant file deletion/modification)
   'rm': 4,
@@ -61,18 +80,34 @@ const DESTRUCTIVE_PATTERNS = [
   /mkfs\./i,                        // format filesystem
   />\s*\//i,                         // redirect to /
   />>\s*\//i,                       // append to /
+  // Arg-shaped destruction: the program alone is ordinary administration, so it
+  // is matched with its argument rather than added to the name table above.
+  /vssadmin\s+delete\s+shadows/i,   // deletes every shadow copy (last local backup)
+  /cipher\s+\/w/i,                  // cipher /w overwrites free space
 ]
 
 export class ShellDangerousParser implements CommandParser {
   readonly name = 'shell-dangerous'
   readonly priority = 20
 
+  /**
+   * Level for a base name, tolerating the tool-suffix spelling real calls use.
+   *
+   * The table stores `mkfs`, the command on the wire is `mkfs.ext4` — so a plain
+   * lookup gave a format-the-disk Level 1 while the pattern route still flagged the
+   * command, leaving the two halves of this parser disagreeing about the same call
+   * (`irreversible.ts` already matches on the dotted prefix; now the parser does too).
+   */
+  private levelOf(baseName: string): number | undefined {
+    return DESTRUCTIVE_COMMANDS[baseName] ?? DESTRUCTIVE_COMMANDS[baseName.split('.')[0] ?? '']
+  }
+
   canParse(command: string): boolean {
     const cmd = command.trim().toLowerCase()
     const baseName = this.extractBaseName(cmd)
 
     // Check if it's a known destructive command
-    if (DESTRUCTIVE_COMMANDS[baseName] !== undefined) {
+    if (this.levelOf(baseName) !== undefined) {
       return true
     }
 
@@ -90,7 +125,7 @@ export class ShellDangerousParser implements CommandParser {
     const cmd = trimmed.toLowerCase()
     const baseName = this.extractBaseName(cmd)
 
-    let destructiveness = DESTRUCTIVE_COMMANDS[baseName] || 1
+    let destructiveness = this.levelOf(baseName) || 1
     let operation = baseName
     let targets: string[] = []
     let destructiveFlags = false

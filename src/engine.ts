@@ -9,13 +9,15 @@
  * Strictly fail-closed: P0 wins over every later stage.
  */
 import { isProtectedDestructiveTarget, isSensitivePath, isWithin } from './path.js'
+import { commandIrreversibleReason, irreversibleReason } from './irreversible.js'
+import { executableVariants, normalizeCommandText } from './command-normalize.js'
 // SHELL_TOOLS 是**值的导入**：这份名单必须与 evaluate.ts / runtime.ts 共用同一个
 // 事实源。此处曾经自带一份 `/(?:bash|pwsh|sh|cmd)$/` 正则，漏掉了 `shell` /
 // `terminal` / `powershell`——于是 P0 的 shell 检查对 DSH 的**主 shell 工具**
 // 完全失效（实测：同一句 `echo x > /etc/passwd`，bash 被拦截，shell 放行）。
 // 同名事实的第二份副本必然腐烂，这里不再保留副本。
 import { SHELL_TOOLS, type Decision, type ToolCallContext } from './evaluate.js'
-import { isForceDeletion, isRecursiveDeletion, decomposeShellCommand, type SimpleCommand } from './shell.js'
+import { decomposeShellCommand, type SimpleCommand } from './shell.js'
 import { dispatchCommand } from './command-dispatcher.js'
 
 export type EngineStage = 'hard-deny' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier'
@@ -106,9 +108,43 @@ function operationText(args: Record<string, unknown>, depth = 0): string {
   return parts.join(' ')
 }
 
+/**
+ * Credential or private-key material a call carries.
+ *
+ * Two clauses were removed on purpose, both because this predicate reads one flat
+ * string and therefore cannot tell *using* a secret from *moving* one — and P0 is
+ * the layer nobody can appeal:
+ *
+ * - `Bearer <token>`: putting a token in its own `Authorization` header is how every
+ *   API is called. The benign-encoding corpus measured it as a false hard-deny
+ *   (`curl -H "Authorization: Bearer …" https://api.internal/v1/me`); a command that
+ *   cannot be shown to anyone is also a command that never reaches the popup.
+ * - a read-only look at a key file: `Test-Path ~/.ssh/id_rsa` moves nothing. The
+ *   plan's own grading rule says so ("reading a local credential is not itself the
+ *   act"), and the deny layer must not contradict the prompt it hands the model.
+ *
+ * What is left is the theft shape: a secret *artifact* plus a channel out, or any
+ * non-readonly verb touching one. That pairing lives in `irreversible.ts`, so both
+ * layers agree.
+ */
+const CREDENTIAL_MATERIAL = /(?:BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b|\.ssh[\\/](?:id_|config)|credentials\.yaml)/i
+
+/** Verbs that only look. A call made of nothing else cannot have leaked anything. */
+const READ_ONLY_HEAD = /^(?:test-path|test|ls|dir|get-childitem|get-content|get-item|cat|type|more|head|tail|stat|file|select-string|where|which|exists)$/i
+
+/** Whether every segment of this command text is a read-only look. */
+function readonlyProbe(text: string): boolean {
+  const segments = text.split(/[;&|\n]+/).map((s) => s.trim()).filter((s) => s !== '')
+  if (segments.length === 0) return false
+  return segments.every((seg) => {
+    const head = (seg.replace(/^["'`]+/, '').split(/[\s/]+/)[0] ?? '').toLowerCase()
+    return READ_ONLY_HEAD.test(head)
+  })
+}
+
 function containsCredentialMaterial(args: Record<string, unknown>): boolean {
-  return /(?:BEGIN (?:RSA |OPENSSH )?PRIVATE KEY|\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b|Bearer\s+[A-Za-z0-9._~+\/-]{8,}|\.ssh[\\/](?:id_|config)|credentials\.yaml)/i
-    .test(operationText(args))
+  const text = operationText(args)
+  return CREDENTIAL_MATERIAL.test(text) && !readonlyProbe(text)
 }
 
 function pathArgument(args: Record<string, unknown>): string | undefined {
@@ -121,6 +157,15 @@ function pathArgument(args: Record<string, unknown>): string | undefined {
 
 /** 廉价前缀过滤：绝大多数 shell 调用不是 push，先过一遍正则再动用解析器。 */
 const GIT_PUSH_TEXT = /\bgit\s+push\b/
+
+/**
+ * Irreversibility itself is **not** defined here: it lives in `irreversible.ts`,
+ * shared with the tier grading in `ask-context.ts`. Two copies of that fact drift,
+ * and the drift was observed — `Optimize-VHD` was known to no rule while no graded
+ * model hard-denied it either. P0 consumes the shared judgement, and only ever
+ * turns it into a deny for the command as received plus the decoded variants the
+ * original will actually execute.
+ */
 
 /**
  * 远端历史改写：`git push` 强制覆盖或删除**保护分支**。
@@ -161,20 +206,35 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
   const args = ctx.args
   if (containsCredentialMaterial(args)) return 'call contains credential or private-key material'
   if (SHELL_TOOLS.has(ctx.tool) && typeof args.command === 'string') {
+    // Encoded layers are resolved **first**: `-EncodedCommand` hides the act from
+    // every word-boundary rule below, and the visible shell form can itself be
+    // undecodable to the parser (unbalanced quotes), whose early exit must not
+    // also skip this check. Only variants the original hands to an execution
+    // primitive are trusted, and they can only ever add a deny — nothing here
+    // widens, and no decoded text is written back to the call or the log.
+    let decodedReason: string | undefined
+    for (const variant of executableVariants(normalizeCommandText(args.command))) {
+      const hidden = irreversibleReason(variant)
+      if (hidden !== undefined) {
+        decodedReason = `${hidden} (decoded from an encoded layer)`
+        break
+      }
+    }
     let commands: ReturnType<typeof decomposeShellCommand>['commands'] = []
     try {
       commands = decomposeShellCommand(args.command).commands
     } catch {
-      return undefined // undecidable syntax -> route to ask (P4), never allow
+      // Undecidable syntax routes to ask (P4), never allow — unless a decode
+      // already proved an irreversible act.
+      return decodedReason
     }
     for (const cmd of commands) {
-      if (cmd.command === 'rm' && (isRecursiveDeletion(cmd) || isForceDeletion(cmd))) {
-        // Guarded further by path rules; root-level deletion denied below only
-        // when the explicit target is a protected root.
-      }
       const redir = cmd.redirects.find((r) => isProtectedDestructiveTarget(r, ctx.dshHome))
       if (redir !== undefined) return `shell redirect targets protected path: ${redir}`
+      const wipe = commandIrreversibleReason(cmd)
+      if (wipe !== undefined) return wipe
     }
+    if (decodedReason !== undefined) return decodedReason
     const rewrite = gitRemoteRewriteReason(commands)
     if (rewrite !== undefined) return rewrite
   }

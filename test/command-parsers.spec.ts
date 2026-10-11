@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 import { dispatchCommand, registerParser, clearParsers } from '../src/command-dispatcher'
 import { GitParser } from '../src/parsers/git'
 import { ShellDangerousParser } from '../src/parsers/shell-cmds'
+import { WIPE_UTILITIES } from '../src/irreversible'
 
 describe('Git Parser', () => {
   const parser = new GitParser()
@@ -281,5 +282,56 @@ describe('Command Dispatcher', () => {
     const result = dispatchCommand('git status')
     expect(result).not.toBeNull()
     expect(result!.parseTimeMs).toBeGreaterThanOrEqual(0)
+  })
+})
+
+/**
+ * The Windows storage-wipe family, and the agreement between the two places that
+ * know about it.
+ *
+ * Irreversibility is decided once (`src/irreversible.ts`), and that module — not
+ * this parser — gates P0 and the reversibility tier. The parser still has to agree:
+ * if it reports `unknown` for `Clear-Disk`, then every consumer of `destructiveness`
+ * (a future rule dimension, the explanation view) inherits a second, weaker opinion
+ * about the same fact. That divergence is what left `Optimize-VHD` with no rule and
+ * no model denial in the first place.
+ */
+describe('shell parser agrees with the irreversibility source', () => {
+  const parser = new ShellDangerousParser()
+
+  const LEVEL5: readonly (readonly [string, string])[] = [
+    ['Optimize-VHD -Path disk.vhdx -Mode Full', 'optimize-vhd'],
+    ['Clear-Disk -Number 0 -RemoveData -Confirm:$false', 'clear-disk'],
+    ['Initialize-Disk -Number 1', 'initialize-disk'],
+    ['Set-Disk -Number 2 -IsOffline $true', 'set-disk'],
+    ['Remove-VHD -Path disk.vhdx', 'remove-vhd'],
+    ['Mount-Disk -Path disk.vhdx', 'mount-disk'],
+    ['sdelete -z C:', 'sdelete'],
+    ['diskpart /s clean.txt', 'diskpart'],
+    ['mkfs.ext4 /dev/sda1', 'mkfs'],
+  ]
+
+  it.each(LEVEL5)('Level 5 by name: %s', (command) => {
+    expect(parser.canParse(command), command).toBe(true)
+    expect(parser.parse(command)?.destructiveness, command).toBe(5)
+  })
+
+  it('requires the argument shape for the arg-dependent tools', () => {
+    // The pattern route is what flags these; a numeric Level 5 is reserved for the
+    // names that are wipes by themselves. Nothing on the decision path reads the
+    // number anyway — P0 and the tier consume `irreversible.ts`.
+    expect(parser.canParse('vssadmin delete shadows /all /quiet')).toBe(true)
+    expect(parser.canParse('cipher /w:C:\\')).toBe(true)
+    expect(parser.canParse('vssadmin')).toBe(false)
+    expect(parser.canParse('cipher')).toBe(false)
+    expect(parser.canParse('Get-Command cipher')).toBe(false)
+  })
+
+  it('covers every name the deny layer calls a wipe utility', () => {
+    for (const name of WIPE_UTILITIES) {
+      // `mkfs` is stored bare while real calls carry a suffix (`mkfs.ext4`).
+      const probe = name === 'mkfs' ? 'mkfs.ext4 /dev/sda1' : `${name} -Number 0`
+      expect(parser.canParse(probe), name).toBe(true)
+    }
   })
 })
