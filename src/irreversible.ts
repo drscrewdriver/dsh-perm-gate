@@ -105,8 +105,13 @@ const DESTRUCTIVE_API = /(?:_delete_by_query|_delete_by_reindex|db\.dropdatabase
  * silently un-does every decision the gate has learned.
  */
 /** `HKLM\SYSTEM` / `HKEY_LOCAL_MACHINE\SYSTEM` (and user hives) under `reg delete`. */
-// Separator optional because the shell parser strips `\` before this runs.
-const REGISTRY_DESTROY = /\breg\s+delete\b[^\n]*\b(?:hklm|hkey_local_machine|hku|hkey_users)[\\/]?system\b/i
+// No separator in the pattern and no trailing word boundary: the shell parser
+// strips `\` before this runs, so `HKLM\SYSTEM\CurrentControlSet\…` arrives as
+// `HKLMSYSTEMCurrentControlSet…`. A `\b` after `system` used to miss every real
+// subkey delete — which is the whole shape of the attack (`reg delete
+// HKLM\SYSTEM\…\Lsa\FipsAlgorithmPolicy /f`), while the bare `HKLM\SYSTEM` it did
+// match is not a thing anyone runs.
+const REGISTRY_DESTROY = /\breg\s+delete\b[^\n]*\b(?:hklm|hkey_local_machine|hku|hkey_users)[\\/]?system/i
 /** Any delete verb aimed at the gate's own durable state (approvals, grants, audit). */
 const OWN_STATE_PATH = /(?:~|\$env:USERPROFILE|\\Users\\[^\\]+)\\?\/\.dsh|\.dsh[\\/]taskboard/i
 

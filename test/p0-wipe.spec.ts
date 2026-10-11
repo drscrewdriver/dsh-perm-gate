@@ -34,6 +34,11 @@ describe('P0 hard-deny — encoded layers cannot hide an irreversible act', () =
     ['wipe chained after a benign prefix', 'git status; Write-Output "cleaning"; Clear-Disk -Number 0 -RemoveData'],
     ['nested FromBase64String', '$q=[Convert]::FromBase64String("' + Buffer.from('diskpart /s x.txt').toString('base64') + '")'],
     ['machine-wide registry hive', 'reg delete HKLM\\SYSTEM /f'],
+    // The shape that actually gets used: nobody deletes the hive root, every real
+    // attack names a subkey. A trailing `\b` in the pattern missed all of them
+    // because the parser folds `HKLM\SYSTEM\Lsa` into `HKLMSYSTEMLsa`.
+    ['registry hive subkey', 'reg delete HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\FipsAlgorithmPolicy /f'],
+    ['registry hive, quoted', 'reg delete "HKLM\\SYSTEM\\MountedSoftware" /f'],
     ['the gate own state db', 'sqlite3 ~/.dsh/taskboard.sqlite ".delete audit" ; rm -f ~/.dsh/*.sqlite-wal'],
     ['system root with separators stripped by the parser', 'Remove-Item -Recurse -Force C:\\Windows\\System32'],
     ['profile tree, same parser artefact', 'Remove-Item -Recurse -Force C:\\Users'],
@@ -77,6 +82,10 @@ describe('P0 hard-deny — must not fire on ordinary text', () => {
     'git commit -m "never run reg delete HKLM\\SYSTEM"',
     'Get-Content ~/.dsh/perm-gate/rules.yml',
     'npm run docker:volume-rm',
+    // Deleting a non-hive value is ordinary administration; the rule names SYSTEM
+    // under the machine/user hives only.
+    'reg delete HKCU\\Software\\GateDryRun\\Value /f',
+    'reg delete HKLM\\SOFTWARE\\Vendor\\App\\Value /f',
   ])('allows: %s', (command) => {
     expect(hardDenyReason(shell(command))).toBeUndefined()
   })

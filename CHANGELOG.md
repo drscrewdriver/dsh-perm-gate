@@ -9,6 +9,18 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.12] - 2026-10-11
+
+### Fixed
+
+- **`reg delete` 只匹配了 hive 根，没匹配真实在用的子键形**：`REGISTRY_DESTROY` 在 `system` 后留了个 `\b`，
+  而解析器已把 `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy` 剥成 `HKLMSYSTEMCurrentControlSet…`——
+  于是**所有带子键的删除全部绕过 P0**（只落到 ask），而无人在跑的裸 hive 根反而被拦。
+  现去掉尾部边界；新预例：`reg delete HKLM\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy /f`、
+  `reg delete "HKLM\SYSTEM\MountedSoftware" /f` 均为 deny；
+  `reg delete HKCU\Software\…`、`reg delete HKLM\SOFTWARE\…`（非 hive）仍放行。
+  发现的途径：给真宿主组装可粘贴测试集时，把每一行先过一遍已装副本的 dry-run（`scripts/gate-dryrun-check.mjs`），29 行里就它一条 DIFF。
+
 ## [5.1.2-compat.11] - 2026-10-11
 
 ### Added
