@@ -42,6 +42,15 @@ export interface GateEvent {
     readonly inputDigest?: string;
     /** Which grading prompt produced this verdict, so wording changes are traceable. */
     readonly promptVersion?: string;
+    /** Machine keys of "why this asked", so the panel can localize them later. */
+    readonly doubtKinds?: readonly string[];
+    /**
+     * The card the human actually decided from (why it asks / what it touches / what
+     * each button costs). Stored because a review list that shows only the audit
+     * `reason` cannot be read back: the person sees `no rule matched` where they
+     * once read a full explanation.
+     */
+    readonly humanBrief?: string;
 }
 export interface GateEventInput {
     readonly sessionId?: string;
@@ -58,6 +67,8 @@ export interface GateEventInput {
     readonly threshold?: number;
     readonly inputDigest?: string;
     readonly promptVersion?: string;
+    readonly doubtKinds?: readonly string[];
+    readonly humanBrief?: string;
     /** Session working directory, used to resolve relative snapshot paths. */
     readonly baseDir?: string;
 }

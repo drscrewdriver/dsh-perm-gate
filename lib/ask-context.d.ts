@@ -97,6 +97,73 @@ export declare function toHumanCard(ctx: AskContext, maxFiles?: number): HumanCa
  * without a format change.
  */
 export declare function humanCardLine(ctx: AskContext, maxFiles?: number): string;
+/**
+ * Why this call has no answer yet, in words a person who does not know this
+ * codebase can read. The tokens (`tier=C target=write`) were never a decision aid:
+ * they name the gate's internals, not the user's exposure, and a mislabelled one
+ * (`target=write` on a directory listing) teaches people to stop reading the card.
+ *
+ * Keys are stable machine identifiers so the client panel can localize them later;
+ * the popup gets `zh`/`en` text because the host resolves `displayReason` by UI
+ * locale and falls back to `en` for the other seven languages.
+ */
+export declare const DOUBT_COPY: {
+    readonly 'no-rule': {
+        readonly zh: "没有规则覆盖这次调用，按默认策略交给人 — 这不表示它危险";
+        readonly en: "no rule covers this call, so the default is to ask — that does not mean it is dangerous";
+    };
+    readonly opaque: {
+        readonly zh: "命令载荷读不懂（编码过 / 工作区外的脚本 / 认不出程序名），规则层无法定位目标";
+        readonly en: "the payload cannot be read (encoded, a script outside the workspace, or no recognisable program), so no rule can locate its target";
+    };
+    readonly irreversible: {
+        readonly zh: "规则判定不可逆：跑完无法撤回";
+        readonly en: "a rule says this is irreversible: it cannot be undone once run";
+    };
+    readonly 'never-learn': {
+        readonly zh: "这类确认不会沉淀，下次同样的操作还会再问";
+        readonly en: "this answer will not be learned; the same call will ask again next time";
+    };
+    readonly delete: {
+        readonly zh: "会删除内容";
+        readonly en: "it deletes content";
+    };
+    readonly 'remote-write': {
+        readonly zh: "会产生对外可见的副作用（推送 / 发布 / 写请求），撤回需要额外手动操作";
+        readonly en: "it has an externally visible effect (push / publish / write request); undoing it takes extra manual steps";
+    };
+    readonly 'exec-external': {
+        readonly zh: "会执行工作区之外的代码，本次调用无法静态看清它做什么";
+        readonly en: "it runs code from outside the workspace, which this call cannot inspect";
+    };
+    readonly 'outside-paths': {
+        readonly zh: "涉及工作区之外的路径";
+        readonly en: "it touches paths outside the workspace";
+    };
+    readonly 'model-flagged': {
+        readonly zh: "风险模型认为可疑（它只能升级，不能放行）";
+        readonly en: "the risk model flagged it (it can only escalate, never clear)";
+    };
+    readonly write: {
+        readonly zh: "会写入或修改文件";
+        readonly en: "it writes or modifies files";
+    };
+};
+export type DoubtKind = keyof typeof DOUBT_COPY;
+/**
+ * The machine keys behind "why am I being asked". Derived, never passed in: the
+ * caller cannot forget to add a doubt, and a doubt cannot contradict the facts.
+ */
+export declare function askDoubtKinds(ctx: AskContext, extra?: {
+    readonly modelFlagged?: boolean;
+}): DoubtKind[];
+/**
+ * The card a human decides from: why it asks, what it touches, what each button
+ * costs. One builder feeds both the popup and the durable event, so the review
+ * panel can show the same text the decision was made on — the two copies drifting
+ * apart is what made past approvals unreconstructable.
+ */
+export declare function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds?: ("write" | "delete" | "remote-write" | "exec-external" | "never-learn" | "no-rule" | "opaque" | "irreversible" | "outside-paths" | "model-flagged")[]): string;
 /** What goes on the durable event, for later attribution. */
 export interface EventFields {
     readonly inputDigest?: string;
@@ -104,6 +171,10 @@ export interface EventFields {
     readonly permissionPreset?: string;
     readonly sandboxMode?: string;
     readonly approvalPolicy?: string;
+    /** The machine keys of "why it asked", so the panel can localize them. */
+    readonly doubtKinds?: readonly DoubtKind[];
+    /** The English form of the card the human decided from (audit language). */
+    readonly humanBrief?: string;
 }
 /**
  * Project for the event log: a salted digest (raw args never land on disk) plus

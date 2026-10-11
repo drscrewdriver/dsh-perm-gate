@@ -32,6 +32,11 @@ export interface Decision {
  * command-content inspection below for the primary tool — every `git push`,
  * `chmod`, redirect and `tee` would fall through to `defaultAction`.
  */
+/**
+ * Executor names, re-exported for the rule layer's `tools` dimension and for
+ * learning/appcontainer consumers. The list itself lives in `tool-names.ts` so the
+ * "is this an executed command?" question has one answer in the codebase.
+ */
 export declare const SHELL_TOOLS: Set<string>;
 /** Whether one compiled rule matches the given call context. */
 export declare function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[]): boolean;

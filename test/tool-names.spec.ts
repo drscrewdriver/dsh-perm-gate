@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { hardDenyReason } from '../src/engine.js'
-import { buildAskContext, humanBrief, askDoubtKinds } from '../src/ask-context.js'
+import { buildAskContext, humanBrief, humanCommand, askDoubtKinds } from '../src/ask-context.js'
 
 const CTX = (tool: string, args: Record<string, unknown>) => ({
   tool,
@@ -67,6 +67,17 @@ describe('the human brief says stakes, not internals', () => {
     expect(zh).toContain('疑点')
     expect(zh).toContain('影响面')
     expect(zh).toContain('允许 =')
+  })
+
+  /**
+   * The popup's headline is a plain div: newlines collapse, so a command embedded in
+   * prose reads as one run-on sentence. The host already renders the pending call's
+   * command in its own monospace block (`.command`), so the prose must not repeat it.
+   */
+  it('keeps the command out of the prose and in its own field', () => {
+    expect(humanBrief(listing, 'en')).not.toMatch(/command:/)
+    expect(humanBrief(listing, 'zh')).not.toContain('命令：')
+    expect(humanCommand(listing)).toContain('Get-ChildItem')
   })
 
   it('escalates the cost line when the act cannot be undone', () => {

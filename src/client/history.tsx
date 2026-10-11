@@ -598,6 +598,29 @@ export function HistoryView({ t, ...props }: HistoryViewProps): JSX.Element | nu
                         <div style={{ marginTop: '2px', fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-secondary, inherit)', overflowWrap: 'anywhere' }}>
                           {ev.humanBrief ?? ev.justification ?? ev.reason}
                         </div>
+                        {ev.humanCommand === undefined || ev.humanCommand === ''
+                          ? null
+                          : (
+                            /*
+                             * The command gets its own block in the host's code font, the way the approval
+                             * popup shows it (`.command` vs `.headline`): prose and payload must not share a
+                             * line, or the reader cannot tell what they are about to run from why they are
+                             * being asked.
+                             */
+                            <div
+                              style={{
+                                marginTop: '4px',
+                                fontFamily: 'var(--ds-font-family-code, monospace)',
+                                fontSize: '12px',
+                                lineHeight: '18px',
+                                whiteSpace: 'pre-wrap',
+                                overflowWrap: 'anywhere',
+                                color: 'var(--dsw-alias-label-primary, inherit)',
+                              }}
+                            >
+                              {ev.humanCommand}
+                            </div>
+                          )}
                         {chips.length === 0
                           ? null
                           : (

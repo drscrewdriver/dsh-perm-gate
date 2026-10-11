@@ -68,6 +68,8 @@ export interface GateEvent {
    * once read a full explanation.
    */
   readonly humanBrief?: string
+  /** The redacted command, stored apart from the prose so a list can render it as code. */
+  readonly humanCommand?: string
 }
 
 export interface GateEventInput {
@@ -87,6 +89,7 @@ export interface GateEventInput {
   readonly promptVersion?: string
   readonly doubtKinds?: readonly string[]
   readonly humanBrief?: string
+  readonly humanCommand?: string
   /** Session working directory, used to resolve relative snapshot paths. */
   readonly baseDir?: string
 }
@@ -378,6 +381,7 @@ export class EventLog {
         // Bounded: this is a card, not a transcript, and the event file is read back
         // into a UI list where a long entry pushes the rest off screen.
         ...(input.humanBrief === undefined ? {} : { humanBrief: String(input.humanBrief).slice(0, 600) }),
+        ...(input.humanCommand === undefined || input.humanCommand === '' ? {} : { humanCommand: String(input.humanCommand).slice(0, 400) }),
       }
       mkdirSync(dirname(this.filePath), { recursive: true })
       appendFileSync(this.filePath, JSON.stringify(ev) + '\n', 'utf8')

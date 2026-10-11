@@ -118,6 +118,14 @@ interface PendingAsk {
     readonly snapshotId: number;
     /** Set when this ask also registered a learning candidate (drives the progress chip). */
     readonly learningKey?: string;
+    /**
+     * The card the human was shown, kept so the terminal event can carry it.
+     * Without this the approval list shows only the audit `reason` and a past
+     * decision cannot be read back — the popup's explanation existed for seconds
+     * and then vanished.
+     */
+    readonly humanBrief?: string;
+    readonly doubtKinds?: readonly string[];
 }
 export interface PermGateRuntimeOptions extends PermGateConfig {
     /** Workspace root for chain resolution. Defaults to process.cwd(). */

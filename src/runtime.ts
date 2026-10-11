@@ -21,7 +21,7 @@ import { canonicalizeCall, GrantRegistry } from './grant.js'
 import { learnKey, operationFingerprint, RiskLearning } from './learning.js'
 import { ArtifactRegistry } from './path.js'
 import { classifyRisk, classifyRiskWith, RISK_SYSTEM_PROMPT_VERSION, type RiskRequest, type RiskVerdict } from './risk.js'
-import { askDoubtKinds, buildAskContext, humanBrief, humanCardLine, toEventFields, type AskContext } from './ask-context.js'
+import { askDoubtKinds, buildAskContext, humanBrief, humanCardLine, humanCommand, toEventFields, type AskContext } from './ask-context.js'
 import { redactCommandText } from './redact.js'
 import { executableVariants, normalizeCommandText } from './command-normalize.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
@@ -230,6 +230,7 @@ interface PendingAsk {
    * and then vanished.
    */
   readonly humanBrief?: string
+  readonly humanCommand?: string
   readonly doubtKinds?: readonly string[]
 }
 
@@ -1154,6 +1155,7 @@ export class PermGateRuntime {
       inputDigest?: string
       promptVersion?: string
       humanBrief?: string
+      humanCommand?: string
       doubtKinds?: readonly string[]
     } = {},
   ): void {
@@ -1172,6 +1174,7 @@ export class PermGateRuntime {
       inputDigest: extra.inputDigest,
       promptVersion: extra.promptVersion,
       humanBrief: extra.humanBrief,
+      humanCommand: extra.humanCommand,
       doubtKinds: extra.doubtKinds,
       baseDir: cwdOf(exec),
     })
@@ -1212,7 +1215,11 @@ export class PermGateRuntime {
       learningKey,
       ...(askCtx === undefined
         ? {}
-        : { humanBrief: humanBrief(askCtx, 'en'), doubtKinds: askDoubtKinds(askCtx) }),
+        : {
+          humanBrief: humanBrief(askCtx, 'en'),
+          humanCommand: humanCommand(askCtx),
+          doubtKinds: askDoubtKinds(askCtx),
+        }),
     }
     this.pendingAsks.set(this.askKey(exec), pending)
     // Save pre-change snapshots so the review page can diff/revert later.
@@ -1928,6 +1935,7 @@ export class PermGateRuntime {
         verdict: 'human-approved',
         files: ask.files,
         humanBrief: ask.humanBrief,
+        humanCommand: ask.humanCommand,
         doubtKinds: ask.doubtKinds,
         learningCount,
         threshold: learning.enabled ? learning.threshold : undefined,
@@ -1935,11 +1943,11 @@ export class PermGateRuntime {
       return
     }
     if (outcome === 'rejected') {
-      this.recordEvent(exec, 'manual-rejected', ask.reason, { verdict: 'human-rejected', files: ask.files, humanBrief: ask.humanBrief, doubtKinds: ask.doubtKinds })
+      this.recordEvent(exec, 'manual-rejected', ask.reason, { verdict: 'human-rejected', files: ask.files, humanBrief: ask.humanBrief, humanCommand: ask.humanCommand, doubtKinds: ask.doubtKinds })
       return
     }
     if (outcome === 'cancelled') {
-      this.recordEvent(exec, 'manual-cancelled', ask.reason, { verdict: 'human-cancelled', files: ask.files, humanBrief: ask.humanBrief, doubtKinds: ask.doubtKinds })
+      this.recordEvent(exec, 'manual-cancelled', ask.reason, { verdict: 'human-cancelled', files: ask.files, humanBrief: ask.humanBrief, humanCommand: ask.humanCommand, doubtKinds: ask.doubtKinds })
       return
     }
     // `unavailable`: no human was involved — the ask degraded to a denial.

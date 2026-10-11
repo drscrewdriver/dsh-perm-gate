@@ -9,6 +9,17 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.14] - 2026-10-12
+
+### Changed
+
+- **命令不再夹在文案里**。宿主审批面板的排版是固定的：`.headline`（放 `displayReason`，一个普通 div，**不保留换行**）
+  + `.command`（等宽代码块，由 ui-chat 注册的 `conversation.approval.detail` 填充）。
+  上一版把命令塞进 `displayReason` 的“影响面”一句，结果换行被吞掉、命令埋在句子中间读不出来。
+  现 `humanBrief()` 只输出三段文案（疑点 / 影响面 / 代价），命令走它自己的通道：
+  弹窗交给宿主的代码块，审批记录则落在新的事件字段 `humanCommand`（脱敏、上限 400 字），
+  面板用等宽 + `white-space: pre-wrap` 单独成块渲染。
+
 ## [5.1.2-compat.13] - 2026-10-11
 
 ### Added

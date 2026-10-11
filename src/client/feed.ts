@@ -35,6 +35,8 @@ export interface GateEvent {
    * I just approve, and why".
    */
   readonly humanBrief?: string
+  /** The redacted command, kept apart from the prose so the list can show it as code. */
+  readonly humanCommand?: string
   /** Machine keys of "why it asked", for localized rendering. */
   readonly doubtKinds?: readonly string[]
   /** Sandbox mode involved, when known. */

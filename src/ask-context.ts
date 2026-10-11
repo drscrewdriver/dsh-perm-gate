@@ -483,10 +483,18 @@ export function askDoubtKinds(ctx: AskContext, extra: { readonly modelFlagged?: 
 }
 
 /**
- * The card a human decides from: why it asks, what it touches, what each button
- * costs. One builder feeds both the popup and the durable event, so the review
- * panel can show the same text the decision was made on — the two copies drifting
- * apart is what made past approvals unreconstructable.
+ * The card a human decides from, as three prose clauses with **no command in them**.
+ *
+ * The command does not belong here. The host's approval panel renders the pending
+ * tool call's command in its own monospace block (ui-chat registers
+ * `conversation.approval.detail` → `ApprovalCommand`, styled `.command`), while the
+ * resolved `displayReason` goes into `.headline`, a plain div with no
+ * `white-space: pre-line` — so any `\n` in it collapses and a command embedded in
+ * prose ends up buried mid-sentence. Keeping the two in their own channels is what
+ * makes the popup readable.
+ *
+ * The event still carries the command separately (`humanCommand`) because the
+ * review list has no host-provided command block next to it.
  */
 export function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds = askDoubtKinds(ctx)): string {
   const card = toHumanCard(ctx)
@@ -500,10 +508,14 @@ export function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds = askDoubtK
       ? `文件 ${card.fileCount} 个：${card.files.join(', ')}${card.files.length < card.fileCount ? ` 等${card.fileCount}个` : ''}`
       : `${card.fileCount} file(s): ${card.files.join(', ')}`)
   }
-  if (card.command !== '') scope.push(lang === 'zh' ? `命令：${card.command}` : `command: ${card.command}`)
   parts.push(`${lang === 'zh' ? '影响面' : 'what it touches'}: ${scope.join(joiner)}`)
   parts.push(COST_COPY[card.reversibility][lang])
   return parts.join('  ·  ')
+}
+
+/** The redacted command alone, for the channels that have nowhere else to show it. */
+export function humanCommand(ctx: AskContext): string {
+  return toHumanCard(ctx).command
 }
 
 /** What goes on the durable event, for later attribution. */
@@ -517,6 +529,8 @@ export interface EventFields {
   readonly doubtKinds?: readonly DoubtKind[]
   /** The English form of the card the human decided from (audit language). */
   readonly humanBrief?: string
+  /** The redacted command on its own, so the review list can show it as code. */
+  readonly humanCommand?: string
 }
 
 /** The salted pre-image of one event digest: knobs + redacted args, never raw. */
@@ -548,6 +562,7 @@ export function toEventFields(ctx: AskContext): EventFields {
     ...(ctx.cwd === undefined || ctx.cwd === '' ? {} : { cwd: ctx.cwd }),
     ...(ctx.targetKind === undefined ? {} : { doubtKinds: askDoubtKinds(ctx) }),
     humanBrief: humanBrief(ctx, 'en'),
+    ...(humanCommand(ctx) === '' ? {} : { humanCommand: humanCommand(ctx) }),
     ...(typeof hash !== 'function'
       ? {}
       : { inputDigest: hash(`${ctx.salt ?? ''}\u0000${ctx.callId ?? ''}\u0000${digestBody(ctx)}`) }),

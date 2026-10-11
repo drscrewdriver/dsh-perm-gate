@@ -247,21 +247,29 @@ describe('tool-call asks carry a presentation field of their own', () => {
    * task. They go in `displayReason` because `reason` is the audited 200-character
    * string and cannot hold a command line.
    */
-  it('shows the command being approved, with the secret inside it masked', () => {
+  it('keeps the command out of the headline and masks the secret in the field it persists', () => {
     // Not a `Bearer …` form: that trips P0's credential pre-screen, so the call is
     // denied before any popup exists (see the pinned decision item). `--password=`
     // reaches the ask seam and still has to be masked on its way to the human.
+    const file = join(mkdtempSync(join(tmpdir(), 'perm-gate-cmd-')), 'events.jsonl')
     const exec = {
-      name: 'bash', cwd: 'E:\\work\\proj', sessionId: 't2',
+      name: 'bash', cwd: 'E:\\work\\proj', sessionId: 't2', callId: 'c-cmd',
       arguments: { command: 'curl -s --header "X-Api-Key: Sup3rSecretTokenValue999" https://api.example.com/v1/jobs' },
     }
-    const ask = new PermGateRuntime({ rulesFile: undefined, permissive: true }).decideExecution(exec)
+    const r = new PermGateRuntime({ rulesFile: undefined, permissive: true, eventsFile: file })
+    const ask = r.decideExecution(exec)
     expect(ask?.kind).toBe('ask')
-    const shown = ask?.displayReason?.en ?? ''
-    expect(shown).toContain('curl')
-    expect(shown).toContain('api.example.com')
-    expect(shown).not.toContain('Sup3rSecretTokenValue999')
-    expect(shown).toMatch(/X-Api-Key|header/i)
+    // The headline is prose only. The host renders the pending call's command in its
+    // own monospace block, and the review list gets it as `humanCommand` — embedding
+    // it here is what turned the card into one run-on sentence.
+    expect(ask?.displayReason?.en).not.toContain('curl')
+    expect(ask?.displayReason?.en).not.toContain('Sup3rSecretTokenValue999')
+    expect(r.settleAskOutcome('c-cmd', 'allowed-once')).toBe(true)
+    const events = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>)
+    const settled = events.find((e) => e.verdict === 'human-approved')
+    expect(String(settled?.humanCommand)).toContain('curl')
+    expect(String(settled?.humanCommand)).toContain('api.example.com')
+    expect(String(settled?.humanCommand)).not.toContain('Sup3rSecretTokenValue999')
   })
 
   it('names the files a write touches, and says how many there really are', () => {
