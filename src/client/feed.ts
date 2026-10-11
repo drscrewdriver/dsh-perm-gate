@@ -38,6 +38,10 @@ export interface GateEvent {
   readonly learningCount?: number
   /** Confirmations required before that key auto-allows (manual-approve events). */
   readonly threshold?: number
+  /** Salted digest of the redacted input behind the decision, when recorded. */
+  readonly inputDigest?: string
+  /** Which grading prompt produced this verdict, when recorded. */
+  readonly promptVersion?: string
 }
 
 /**

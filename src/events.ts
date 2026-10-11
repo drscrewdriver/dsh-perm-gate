@@ -49,6 +49,16 @@ export interface GateEvent {
   readonly learningCount?: number
   /** Confirmations required before that key auto-allows (manual-approve events). */
   readonly threshold?: number
+  /**
+   * Salted digest of the redacted input behind this decision.
+   *
+   * Lives as its own field rather than riding in `reason`, because `reason` is
+   * truncated to REASON_MAX on write — attribution data must not be the part
+   * that gets cut. Raw arguments are never stored.
+   */
+  readonly inputDigest?: string
+  /** Which grading prompt produced this verdict, so wording changes are traceable. */
+  readonly promptVersion?: string
 }
 
 export interface GateEventInput {
@@ -64,6 +74,8 @@ export interface GateEventInput {
   readonly files?: readonly string[]
   readonly learningCount?: number
   readonly threshold?: number
+  readonly inputDigest?: string
+  readonly promptVersion?: string
   /** Session working directory, used to resolve relative snapshot paths. */
   readonly baseDir?: string
 }
@@ -349,6 +361,8 @@ export class EventLog {
         ...(files === undefined ? {} : { files }),
         ...(input.learningCount === undefined ? {} : { learningCount: input.learningCount }),
         ...(input.threshold === undefined ? {} : { threshold: input.threshold }),
+        ...(input.inputDigest === undefined ? {} : { inputDigest: input.inputDigest }),
+        ...(input.promptVersion === undefined ? {} : { promptVersion: input.promptVersion }),
       }
       mkdirSync(dirname(this.filePath), { recursive: true })
       appendFileSync(this.filePath, JSON.stringify(ev) + '\n', 'utf8')

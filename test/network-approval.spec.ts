@@ -282,6 +282,26 @@ describe('runtime network attribution', () => {
 
     expect(requestApproval).toHaveBeenCalledTimes(2)
   })
+
+  it('sends the human a presentation line naming asker and cost, beside the raw reason', async () => {
+    const requestApproval = vi.fn().mockResolvedValue('allowed-once')
+    const r = runtime({ requestApproval })
+    r.beginShellExecution({ name: 'pwsh', arguments: {}, agent: {}, sessionId: 's1', callId: 'call-9' })
+    await r.askNetwork({ host: 'api.example', port: 443, ips: [] }, 'unlisted destination: api.example', 1000)
+
+    const sent = requestApproval.mock.calls[0]?.[0] as {
+      reason: string; displayReason?: { en?: string; [k: string]: string }
+    }
+    // The durable reason is untouched: rules, audit and grants key off it.
+    expect(sent.reason).toBe('unlisted destination: api.example')
+    const display = sent.displayReason?.en ?? ''
+    expect(display).toContain('unlisted destination: api.example')
+    expect(display).toContain('pwsh')
+    expect(display).toContain('call-9')
+    // It must say what each choice costs, not just restate the verdict.
+    expect(display).toMatch(/Denying blocks this connection only/)
+    expect(display).toMatch(/remembered for this session/)
+  })
 })
 
 // ─── Rule review stays authoritative end-to-end ────────────────────────────

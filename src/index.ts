@@ -463,6 +463,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           toolName: req.toolName,
           ...(req.callId !== undefined ? { callId: req.callId } : {}),
           reason: req.reason,
+          // Host-sanctioned presentation field (`ApprovalRequestEvent.displayReason`):
+          // read by the answerer UI, deliberately not written to the audit pair. The
+          // service persists only id/toolName/callId/reason, so forwarding it costs
+          // nothing on hosts that ignore it.
+          ...(req.displayReason !== undefined ? { displayReason: req.displayReason } : {}),
           ...(req.signal !== undefined ? { signal: req.signal } : {}),
         })
         return APPROVAL_OUTCOMES.has(String(outcome))

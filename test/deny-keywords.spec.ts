@@ -41,6 +41,33 @@ describe('preset deny-keyword layer (inherited from dsh-approval-gate)', () => {
     expect(decision?.kind).toBe('deny')
   })
 
+  /**
+   * B6 wiring. The point of scanning decoded layers is the encoded blob, not the
+   * plain one: `-EncodedCommand` is invisible to every keyword otherwise. The
+   * payload chosen is one P0 does *not* deny (a force push to a non-protected
+   * branch), so a deny here can only have come from this layer.
+   */
+  it('matches a keyword that only exists inside an encoded layer', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined })
+    const blob = Buffer.from('git push --force origin feature/x', 'utf16le').toString('base64')
+    const command = `powershell -EncodedCommand ${blob}`
+    const decision = r.decideExecution({ name: 'pwsh', arguments: { command }, commandText: command, cwd: '/work', sessionId: 's1' })
+    expect(decision?.kind).toBe('deny')
+    expect(decision?.reason).toContain('push --force')
+    // The reason names the keyword and never the decoded blob (no secret replay).
+    expect(decision?.reason).not.toContain(blob)
+  })
+
+  it('does not treat base64 that is merely data, not input to an execution primitive, as an act', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined })
+    const blob = Buffer.from('git push --force origin main').toString('base64')
+    const decision = r.decideExecution({
+      name: 'bash', arguments: { command: `git commit -m "stored payload ${blob}"` },
+      commandText: `git commit -m "stored payload ${blob}"`, cwd: '/work', sessionId: 's1',
+    })
+    expect(decision?.kind).not.toBe('deny')
+  })
+
   it('keeps the preset list non-empty and deny-shaped', () => {
     expect(DEFAULT_DENY_KEYWORDS.length).toBeGreaterThan(20)
     expect(DEFAULT_DENY_KEYWORDS).toContain('rm -rf')
