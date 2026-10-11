@@ -9,6 +9,24 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.13] - 2026-10-11
+
+### Added
+
+- **弹窗不再只给内部代号**：`humanBrief()` 把一次 ask 翻成三段人话——**疑点**（为什么没结论：无规则覆盖 / 载荷读不懂 / 规则判不可逆 / 模型只能升级不能放行）、**影响面**（目标类型 + 可逆性 + 看到哪些文件 + 脱敏命令）、**两个按钮各花什么钱**（按 R/C/I/U 分档，I 档写明“无法撤回”）。
+  进 `displayReason: { zh, en }`，宿主按 UI 语言取，其余七语回退 `en`；审计 `reason` 保持英文短标签不变。
+- **审批记录可回溯**：同一份 brief 随人工终态事件落盘（`humanBrief` + `doubtKinds`），面板优先渲染它。之前弹窗里的解释只存在几秒钟，回看时只剩 `no rule matched; default action`。
+
+### Fixed
+
+- **只读命令被标成 `target=write`**：只读判定是“读动词 + 全局无管道”，于是 `Get-ChildItem -Force | Select-Object Name`（PowerShell 会话里最常见的形状）在卡片上被说成会写。现逐段判定：首段是读动词、后面全是重排过滤器（`Select-Object`/`Where-Object`/`Out-String`/`Format-Table` …）、且无重定向，才算只读；管道进写入器/网络工具/`Stop-Process` 仍不算。
+- **工具名白名单是个绕过面**：P0 与规则链都靠 `SHELL_TOOLS` 认“这是不是一条命令”，而模型已经会打出 `pash` 这种名字（实测日志可见）——不认识的 runner 带着 `diskpart /s x.txt` 就跳过了所有命令级检查。现按**形状**判定（参数里有 `command`/`cmd`/`script` 串），并保留已知非执行器（`read`/`write`/内部工具）的例外，否则一份引用了命令的文档会被当成执行了它。
+  名单本身（`READ_TOOLS`/`INTERNAL_TOOLS`/`WRITE_TOOLS`/`SHELL_TOOLS`）集中到 `src/tool-names.ts`，之前“这是一条被执行的命令吗”在代码里有两个答案。
+
+### Known gap
+
+- 面板端的 `doubtKinds` 目前直接显示英文 brief（审计语言）；按 9 语渲染疑点文案需给 `locales.ts` 补 10 个键 × 9 语，已记为后续页。
+
 ## [5.1.2-compat.12] - 2026-10-11
 
 ### Fixed

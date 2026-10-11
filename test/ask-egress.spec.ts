@@ -204,15 +204,25 @@ describe('refineAsk — what the grader is handed, and how failure reads', () =>
 describe('tool-call asks carry a presentation field of their own', () => {
   const EXEC = { name: 'bash', arguments: { command: 'git push origin feature/x' }, cwd: 'E:\\work\\proj', sessionId: 't1' }
 
-  it('the plain ask (llmAssist off) still tells the human what is being asked', () => {
+  it('the plain ask (llmAssist off) tells a novice what is at stake', () => {
     const r = new PermGateRuntime({ rulesFile: undefined, permissive: true })
     const ask = r.decideExecution(EXEC)
     expect(ask?.kind).toBe('ask')
-    expect(ask?.displayReason?.en).toContain('tier=C')
-    expect(ask?.displayReason?.en).toContain('target=remote-write')
-    expect(ask?.displayReason?.en).toMatch(/denying blocks only this call/i)
-    // The machine-readable reason must stay exactly what it was.
+    const en = ask?.displayReason?.en ?? ''
+    // Three sections a person can read without knowing this codebase: why it asks,
+    // what it touches, what each button costs.
+    expect(en).toMatch(/^why it asks:/)
+    expect(en).toMatch(/no rule covers this call/i)
+    expect(en).toMatch(/target=remote-write/)
+    expect(en).toMatch(/reversibility=C/)
+    expect(en).toMatch(/deny = blocks only this call/i)
+    // The host resolves `displayReason` by UI locale, so the plugin's own Chinese
+    // form has to ride along; the other seven languages fall back to `en`.
+    expect(ask?.displayReason?.zh).toContain('疑点')
+    expect(ask?.displayReason?.zh).toContain('影响面')
+    // The machine-readable reason stays exactly what it was: audit text, no prose.
     expect(ask?.reason).not.toContain('tier=')
+    expect(ask?.reason).not.toContain('疑点')
   })
 
   it('a grader-refined ask carries it too', async () => {
@@ -224,8 +234,9 @@ describe('tool-call asks carry a presentation field of their own', () => {
     })
     const ask = rt.decideExecution(EXEC)
     const refined = await rt.refineAsk(EXEC, ask as never)
-    expect(refined?.displayReason?.en).toContain('risky:deletion')
-    expect(refined?.displayReason?.en).toContain('tier=')
+    // The audit reason keeps the machine label; the brief says it in words.
+    expect(refined?.reason).toContain('risky:deletion')
+    expect(refined?.displayReason?.en).toMatch(/risk model flagged it/i)
   })
 
   /**
@@ -261,14 +272,36 @@ describe('tool-call asks carry a presentation field of their own', () => {
     }
     const ask = new PermGateRuntime({ rulesFile: undefined, permissive: true }).decideExecution(exec)
     const shown = ask?.displayReason?.en ?? ''
-    expect(shown).toMatch(/files: .*(a\.ts|f0\.ts)/)
-    expect(shown).toMatch(/files=1|files: /)
+    // The gate lists the files it can actually see on the call; the count it shows
+    // must be the count it lists, never an inflated total.
+    expect(shown).toMatch(/1 file\(s\): .*a\.ts/)
+    expect(shown).not.toMatch(/f11\.ts/)
   })
 
-  it('leads with why the gate is asking, not only with the labels', () => {
+  it('leads with the doubt, not with an internal label', () => {
     const ask = new PermGateRuntime({ rulesFile: undefined, permissive: true }).decideExecution(EXEC)
     const shown = ask?.displayReason?.en ?? ''
-    expect(shown.split('\n')[0]).toBe(ask?.reason)
+    expect(shown.startsWith('why it asks:')).toBe(true)
+  })
+
+  /**
+   * The review list used to show only the audit reason, so a decision made weeks
+   * ago could not be read back: the explanation existed in the popup for seconds
+   * and then vanished. The same brief now rides on the terminal event.
+   */
+  it('carries the brief onto the durable event so the approval list can be read back', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'perm-gate-brief-')), 'events.jsonl')
+    const r = new PermGateRuntime({ rulesFile: undefined, permissive: true, eventsFile: file })
+    const exec = { name: 'bash', arguments: { command: 'git push origin feature/x' }, cwd: 'E:\\work\\proj', sessionId: 't9', callId: 'c-brief' }
+    expect(r.decideExecution(exec)?.kind).toBe('ask')
+    // The human's terminal answer is what lands in the review list.
+    expect(r.settleAskOutcome('c-brief', 'allowed-once')).toBe(true)
+    const lines = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>)
+    const settled = lines.find((e) => e.verdict === 'human-approved')
+    expect(settled).toBeDefined()
+    expect(String(settled?.humanBrief)).toMatch(/^why it asks:/)
+    expect(String(settled?.humanBrief)).toMatch(/target=remote-write/)
+    expect(settled?.doubtKinds).toContain('remote-write')
   })
 })
 

@@ -16,6 +16,11 @@ import { compileCidr, compilePortSpec, compileDomainPattern } from './compiler.j
 import { dispatchCommand } from './command-dispatcher.js'
 import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
 import type { CompiledBranchDimension } from './rule.js'
+import {
+  SHELL_TOOLS as IMPORTED_SHELL_TOOLS,
+  WRITE_TOOLS as IMPORTED_WRITE_TOOLS,
+  executableCommandOf,
+} from './tool-names.js'
 
 export interface ToolCallContext {
   readonly tool: string
@@ -51,7 +56,12 @@ export interface Decision {
  * command-content inspection below for the primary tool — every `git push`,
  * `chmod`, redirect and `tee` would fall through to `defaultAction`.
  */
-export const SHELL_TOOLS = new Set(['shell', 'terminal', 'bash', 'pwsh', 'sh', 'cmd', 'powershell'])
+/**
+ * Executor names, re-exported for the rule layer's `tools` dimension and for
+ * learning/appcontainer consumers. The list itself lives in `tool-names.ts` so the
+ * "is this an executed command?" question has one answer in the codebase.
+ */
+export const SHELL_TOOLS = IMPORTED_SHELL_TOOLS
 
 /** Whether one compiled rule matches the given call context. */
 export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[]): boolean {
@@ -134,7 +144,7 @@ export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, comma
   return true
 }
 
-const WRITE_TOOLS = new Set(['write', 'edit'])
+const WRITE_TOOLS = IMPORTED_WRITE_TOOLS
 
 /**
  * Shell write/execution patterns. When NONE of these match, the command is
@@ -197,10 +207,8 @@ function pathAndCommandDefault(
   }
 
   // shell/pwsh/terminal: command-content-aware (write pattern → ask)
-  if (SHELL_TOOLS.has(ctx.tool)) {
-    const commandText = commandTextOf(ctx)
-    if (commandText !== undefined && isWriteCommand(commandText)) return 'ask'
-  }
+  const commandText = commandTextOf(ctx)
+  if (commandText !== undefined && isWriteCommand(commandText)) return 'ask'
 
   return defaultAction
 }
@@ -214,13 +222,15 @@ function pathAndCommandDefault(
  */
 function commandTextOf(ctx: ToolCallContext): string | undefined {
   if (typeof ctx.commandText === 'string') return ctx.commandText
-  const raw = ctx.args?.['command']
-  return typeof raw === 'string' ? raw : undefined
+  return executableCommandOf(ctx.tool, ctx.args)
 }
 
 /** Compute the deterministic first-match decision (P2 chain). */
 export function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Decision {
-  const shellText = SHELL_TOOLS.has(ctx.tool) ? commandTextOf(ctx) : undefined
+  // Command-bearing calls are decomposed by **shape**, not by whether the tool's
+  // name is in SHELL_TOOLS: an unfamiliar executor name must not make the command
+  // dimensions of every rule silently stop matching.
+  const shellText = commandTextOf(ctx)
   const commands = shellText !== undefined ? decomposeSafe(shellText) : []
   const pathCands = extractPathCandidates(ctx.args)
   const urlCands = extractUrlCandidates(ctx.args)
@@ -240,7 +250,7 @@ export function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Dec
   // shell/pwsh/terminal tools check the command for write patterns.
   // Outside safety checks → ask; inside or read-only → defaultAction.
   let action = ruleset.defaultAction
-  if (WRITE_TOOLS.has(ctx.tool) || SHELL_TOOLS.has(ctx.tool)) {
+  if (WRITE_TOOLS.has(ctx.tool) || shellText !== undefined) {
     action = pathAndCommandDefault(ctx, pathCands, action)
   }
   if (action === 'allow' || action === 'ask') {

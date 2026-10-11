@@ -28,6 +28,15 @@ export interface GateEvent {
   readonly verdict?: string
   /** The model's stated intent. */
   readonly justification?: string
+  /**
+   * The card the human decided from (why it asks / what it touches / what each
+   * button costs). Preferred over `reason` in the review list: the audit reason is
+   * a machine label, and a list of machine labels cannot be read back as "what did
+   * I just approve, and why".
+   */
+  readonly humanBrief?: string
+  /** Machine keys of "why it asked", for localized rendering. */
+  readonly doubtKinds?: readonly string[]
   /** Sandbox mode involved, when known. */
   readonly mode?: string
   /** Risk category name (deletion / credential / neutral …). */

@@ -59,6 +59,15 @@ export interface GateEvent {
   readonly inputDigest?: string
   /** Which grading prompt produced this verdict, so wording changes are traceable. */
   readonly promptVersion?: string
+  /** Machine keys of "why this asked", so the panel can localize them later. */
+  readonly doubtKinds?: readonly string[]
+  /**
+   * The card the human actually decided from (why it asks / what it touches / what
+   * each button costs). Stored because a review list that shows only the audit
+   * `reason` cannot be read back: the person sees `no rule matched` where they
+   * once read a full explanation.
+   */
+  readonly humanBrief?: string
 }
 
 export interface GateEventInput {
@@ -76,6 +85,8 @@ export interface GateEventInput {
   readonly threshold?: number
   readonly inputDigest?: string
   readonly promptVersion?: string
+  readonly doubtKinds?: readonly string[]
+  readonly humanBrief?: string
   /** Session working directory, used to resolve relative snapshot paths. */
   readonly baseDir?: string
 }
@@ -363,6 +374,10 @@ export class EventLog {
         ...(input.threshold === undefined ? {} : { threshold: input.threshold }),
         ...(input.inputDigest === undefined ? {} : { inputDigest: input.inputDigest }),
         ...(input.promptVersion === undefined ? {} : { promptVersion: input.promptVersion }),
+        ...(input.doubtKinds === undefined || input.doubtKinds.length === 0 ? {} : { doubtKinds: input.doubtKinds.slice(0, 4) }),
+        // Bounded: this is a card, not a transcript, and the event file is read back
+        // into a UI list where a long entry pushes the rest off screen.
+        ...(input.humanBrief === undefined ? {} : { humanBrief: String(input.humanBrief).slice(0, 600) }),
       }
       mkdirSync(dirname(this.filePath), { recursive: true })
       appendFileSync(this.filePath, JSON.stringify(ev) + '\n', 'utf8')

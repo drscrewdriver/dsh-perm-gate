@@ -11,60 +11,18 @@
 import { isProtectedDestructiveTarget, isSensitivePath, isWithin } from './path.js'
 import { commandIrreversibleReason, irreversibleReason } from './irreversible.js'
 import { executableVariants, normalizeCommandText } from './command-normalize.js'
-// SHELL_TOOLS 是**值的导入**：这份名单必须与 evaluate.ts / runtime.ts 共用同一个
-// 事实源。此处曾经自带一份 `/(?:bash|pwsh|sh|cmd)$/` 正则，漏掉了 `shell` /
-// `terminal` / `powershell`——于是 P0 的 shell 检查对 DSH 的**主 shell 工具**
-// 完全失效（实测：同一句 `echo x > /etc/passwd`，bash 被拦截，shell 放行）。
-// 同名事实的第二份副本必然腐烂，这里不再保留副本。
-import { SHELL_TOOLS, type Decision, type ToolCallContext } from './evaluate.js'
+// 工具名名单归 `tool-names.ts` 所有（不得在此处再抄一份）。P0 **不看工具名白名单**：
+// 它看 `executableCommandOf`——已知非执行器（read/write/内部工具）的 `command` 参数是数据，
+// 其余任何带命令串的调用都按命令对待，所以工具叫什么（包括模型打错的 `pash`）都不是绕过面。
+import { INTERNAL_TOOLS, READ_TOOLS, executableCommandOf } from './tool-names.js'
+import { type Decision, type ToolCallContext } from './evaluate.js'
 import { decomposeShellCommand, type SimpleCommand } from './shell.js'
 import { dispatchCommand } from './command-dispatcher.js'
 
 export type EngineStage = 'hard-deny' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier'
 
 const DESTRUCTIVE_TOOL = /(?:^|[_-])(?:delete|remove|rm|destroy|erase|purge|wipe|unlink|rmdir|reset)(?:$|[_-]|recursive)/i
-/**
- * Read-only tools that can never modify the workspace or execute anything. P0
- * still protects sensitive path reads outside the workspace root, and the
- * deny-keyword layer still runs first, so a search whose query contains a
- * blacklisted phrase is still vetoed.
- */
-const READ_TOOLS = new Set([
-  'read', 'read_image', 'grep', 'glob', 'ls', 'lsp',
-  // Search / lookup: every one of these only READS. `web_search` and
-  // `modlens_read_image` also reach the network, but through DSH's own client
-  // rather than a subprocess — see the network note below.
-  'web_search', 'modlens_read_image',
-  'advanced_search', 'platform_search', 'free_search_test',
-  // Session-scoped reads: they disclose already-recorded state, never mutate.
-  'context_compression_retrieve', 'memory_search_graph', 'memory_expand_graph_node',
-])
-/** DSH internal coordination / management tools — not workspace-modifying. */
-const INTERNAL_TOOLS = new Set([
-  // AgentTeams coordination
-  'agent_teams_create', 'agent_teams_add_member', 'agent_teams_remove_member',
-  'agent_teams_delete', 'agent_teams_edit_plan', 'agent_teams_reassign_task',
-  'agent_teams_claim_task', 'agent_teams_create_task', 'agent_teams_send_message',
-  'agent_teams_approve', 'agent_teams_resume',
-  // AgentTeams status reads
-  'agent_teams_status', 'agent_teams_update_task',
-  // DSH session/memory/goal/taskboard management. The memory store is the
-  // agent's own state, not the workspace: writing it is not a workspace write.
-  'conversation_search',
-  'memory_add', 'memory_delete', 'memory_read_scene', 'memory_search',
-  'memory_import', 'memory_ruminate', 'memory_ruminate_cancel', 'memory_ruminate_status',
-  'get_goal', 'update_goal', 'create_goal',
-  'taskboard_get', 'taskboard_list', 'taskboard_claim', 'taskboard_block',
-  'taskboard_comment', 'taskboard_release_claim', 'taskboard_submit_review',
-  'taskboard_relate',
-  // Job/agent management
-  'job_list', 'job_output', 'job_kill',
-  'list_agents', 'interrupt_agent', 'send_message',
-  // Session-local UI / plan / todo state (no workspace write, no execution)
-  'todo_write', 'render_ui', 'validate_dsh_ui', 'ask_user_question', 'exit_plan_mode',
-  // Background / planning delegation (the delegated work is gated separately)
-  'subagent', 'subagent_fork', 'ralph', 'workflow', 'skill',
-])
+
 
 /** No user-configured extra auto-allow names. */
 const NO_EXTRA_AUTO_ALLOW: ReadonlySet<string> = new Set()
@@ -205,7 +163,12 @@ function gitRemoteRewriteReason(segments: readonly SimpleCommand[]): string | un
 export function hardDenyReason(ctx: ToolCallContext): string | undefined {
   const args = ctx.args
   if (containsCredentialMaterial(args)) return 'call contains credential or private-key material'
-  if (SHELL_TOOLS.has(ctx.tool) && typeof args.command === 'string') {
+  // **Shape, not a name whitelist** (see tool-names.ts): a call that carries a
+  // command string and is not a known non-executor is a command call whatever the
+  // tool is called, or an unfamiliar name would skip P0 with `diskpart /s x.txt`
+  // sitting right there in `args`.
+  const commandText = executableCommandOf(ctx.tool, args)
+  if (commandText !== undefined) {
     // Encoded layers are resolved **first**: `-EncodedCommand` hides the act from
     // every word-boundary rule below, and the visible shell form can itself be
     // undecodable to the parser (unbalanced quotes), whose early exit must not
@@ -213,7 +176,7 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
     // primitive are trusted, and they can only ever add a deny — nothing here
     // widens, and no decoded text is written back to the call or the log.
     let decodedReason: string | undefined
-    for (const variant of executableVariants(normalizeCommandText(args.command))) {
+    for (const variant of executableVariants(normalizeCommandText(commandText))) {
       const hidden = irreversibleReason(variant)
       if (hidden !== undefined) {
         decodedReason = `${hidden} (decoded from an encoded layer)`
@@ -222,7 +185,7 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
     }
     let commands: ReturnType<typeof decomposeShellCommand>['commands'] = []
     try {
-      commands = decomposeShellCommand(args.command).commands
+      commands = decomposeShellCommand(commandText).commands
     } catch {
       // Undecidable syntax routes to ask (P4), never allow — unless a decode
       // already proved an irreversible act.

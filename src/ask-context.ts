@@ -89,8 +89,25 @@ export interface AskContext extends AskContextSource {
   readonly readOnly: boolean
 }
 
-/** Verbs that only look. Matching is on the leading word of the command. */
-const READ_ONLY = /^(?:ls|dir|Get-ChildItem|Get-Content|cat|head|tail|less|stat|test|Test-Path|Select-String|Get-Command|Get-Process|where|which|whoami|hostname|(?:git|svn)\s+(?:status|log|diff|show|blame|branch|remote|config\s+--get))\b/i
+/** Verbs that only look. */
+const READ_ONLY = /^(?:ls|dir|Get-ChildItem|Get-Content|Get-Item|cat|head|tail|less|more|stat|test|Test-Path|Select-String|Get-Command|Get-Process|Get-Member|where|which|whoami|hostname|pwd|cd|echo|Write-Output|findstr|(?:git|svn)\s+(?:status|log|diff|show|blame|branch|remote|config\s+--get))\b/i
+
+/**
+ * Pipe stages that reshape output without producing any.
+ *
+ * Read-only used to be judged as "a known read verb **and no pipe anywhere**", so
+ * `Get-ChildItem -Force | Select-Object Name` — the single most common shape in a
+ * PowerShell agent session — was reported to the human as `target=write`. That is
+ * not a harmless label: the card is what a person reads before deciding, and a
+ * listing that claims to write trains them to ignore the card.
+ *
+ * A mis-split inside a quoted pattern can only make this **stricter** (an unknown
+ * head is not read-only), which is the safe direction.
+ */
+const PIPE_FILTER = /^(?:Select-Object|Where-Object|Sort-Object|Group-Object|Measure-Object|Format-Table|Format-List|Format-Wide|Out-String|Out-Host|Out-Default|Tee-Object|ForEach-Object|foreach|select|sort|uniq|cut|tr|wc|head|tail|grep)$/i
+
+/** Heads that write, run, or send — a pipeline containing one is not read-only. */
+const WRITING_HEAD = /^(?:Set-Content|Add-Content|Out-File|Out-Null|New-Item|Set-Item|Remove-Item|Clear-Content|Move-Item|Rename-Item|Copy-Item|Install-Module|Start-Process|Stop-Process|Invoke-Expression|Invoke-Command|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|curl|wget|scp|rsync|nc|ncat|ssh|rm|mv|cp|dd|tee|sed|awk|npm|pnpm|yarn|pip|pip3|python|node|npx|dotnet|go|cargo|make|docker|kubectl|git|svn|reg|diskpart|format|cipher|vssadmin|taskkill|New-ScheduledTask|Set-MpPreference)$/i
 
 /** Recoverable external side effect. */
 const RECOVERABLE_EXTERNAL = /\b(git\s+push|gh\s+pr\s+create|gh\s+api\b|--method\s+POST|npm\s+publish|docker\s+push|kubectl\s+apply|terraform\s+apply|git\s+push\s+--force|config\s+--global|config\s+--system|sslVerify\s+false|GIT_SSL_NO_VERIFY|ServerCertificateValidationCallback|Stop-Process|taskkill|docker\s+system\s+prune|git\s+clean\s+-[a-z]*x|icacls|reg\s+(?:add|delete))\b/i
@@ -195,9 +212,18 @@ function inspect(source: AskContextSource): Inspection {
     // A tool invoked with no arguments at all: nothing to read, nothing to trust.
     return { kind: 'unknown', resolvable: false, readOnly: false, irreversible, unlearnable }
   }
-  // Read-only means a known-readonly verb and no pipe/redirect that could turn a
-  // read into an exfiltration (`cat ~/.ssh/id_rsa | curl -d @- ...`).
-  const readOnly = text !== '' && READ_ONLY.test(text) && !/[|><]/.test(text)
+  // Read-only means every stage of the pipeline only looks: a known read verb at the
+  // head of each segment, nothing but reshaping filters after the pipes, and no
+  // redirect (`cat key > out.txt` is a copy, not a read).
+  const readOnly = text !== '' && !/[<>]/.test(text) && (() => {
+    const stages = text.split(/[;&|]+/).map((s) => s.trim()).filter((s) => s !== '')
+    if (stages.length === 0) return false
+    return stages.every((stage, i) => {
+      const head = (stage.replace(/^["'`]+/, '').split(/[\s/]+/)[0] ?? '')
+      if (i === 0) return READ_ONLY.test(head)
+      return PIPE_FILTER.test(head) && !WRITING_HEAD.test(head)
+    })
+  })()
   const first = text.split(/\s/)[0] ?? ''
   const runner = /\b(?:python|node|pwsh|powershell|bash|sh|zsh|npx|deno|ruby|perl)\b/i.test(cmd)
   const execExternal = runner && (outsideWorkspace(cmd, source.workspaceRoot) || unseenScript(cmd, source.workspaceRoot))
@@ -357,6 +383,129 @@ export function humanCardLine(ctx: AskContext, maxFiles = 3): string {
   return bits.join(' ')
 }
 
+/**
+ * Why this call has no answer yet, in words a person who does not know this
+ * codebase can read. The tokens (`tier=C target=write`) were never a decision aid:
+ * they name the gate's internals, not the user's exposure, and a mislabelled one
+ * (`target=write` on a directory listing) teaches people to stop reading the card.
+ *
+ * Keys are stable machine identifiers so the client panel can localize them later;
+ * the popup gets `zh`/`en` text because the host resolves `displayReason` by UI
+ * locale and falls back to `en` for the other seven languages.
+ */
+export const DOUBT_COPY = {
+  'no-rule': {
+    zh: '没有规则覆盖这次调用，按默认策略交给人 — 这不表示它危险',
+    en: 'no rule covers this call, so the default is to ask — that does not mean it is dangerous',
+  },
+  'opaque': {
+    zh: '命令载荷读不懂（编码过 / 工作区外的脚本 / 认不出程序名），规则层无法定位目标',
+    en: 'the payload cannot be read (encoded, a script outside the workspace, or no recognisable program), so no rule can locate its target',
+  },
+  'irreversible': {
+    zh: '规则判定不可逆：跑完无法撤回',
+    en: 'a rule says this is irreversible: it cannot be undone once run',
+  },
+  'never-learn': {
+    zh: '这类确认不会沉淀，下次同样的操作还会再问',
+    en: 'this answer will not be learned; the same call will ask again next time',
+  },
+  'delete': {
+    zh: '会删除内容',
+    en: 'it deletes content',
+  },
+  'remote-write': {
+    zh: '会产生对外可见的副作用（推送 / 发布 / 写请求），撤回需要额外手动操作',
+    en: 'it has an externally visible effect (push / publish / write request); undoing it takes extra manual steps',
+  },
+  'exec-external': {
+    zh: '会执行工作区之外的代码，本次调用无法静态看清它做什么',
+    en: 'it runs code from outside the workspace, which this call cannot inspect',
+  },
+  'outside-paths': {
+    zh: '涉及工作区之外的路径',
+    en: 'it touches paths outside the workspace',
+  },
+  'model-flagged': {
+    zh: '风险模型认为可疑（它只能升级，不能放行）',
+    en: 'the risk model flagged it (it can only escalate, never clear)',
+  },
+  'write': {
+    zh: '会写入或修改文件',
+    en: 'it writes or modifies files',
+  },
+} as const
+
+export type DoubtKind = keyof typeof DOUBT_COPY
+
+/** The cost of each button, per reversibility tier. */
+const COST_COPY: Record<Reversibility, { readonly zh: string; readonly en: string }> = {
+  R: {
+    zh: '允许 = 照常执行这一次；拒绝 = 只挡这一次调用，agent 还可以再问',
+    en: 'allow = run this call as shown; deny = blocks only this call, the agent can ask again',
+  },
+  C: {
+    zh: '允许 = 副作用对外可见，撤回要你自己手动做（删远端分支 / 回滚发布）；拒绝 = 只挡这一次调用',
+    en: 'allow = the side effect becomes visible to others and you undo it by hand; deny = blocks only this call',
+  },
+  I: {
+    zh: '允许 = **无法撤回**（数据 / 卷 / 影子副本没了就是没了）；拒绝 = 只挡这一次调用',
+    en: 'allow = **cannot be undone** (the data / volume / shadow copies are gone); deny = blocks only this call',
+  },
+  U: {
+    zh: '允许 = 后果无法预估（看不清要做什么）；拒绝 = 只挡这一次调用',
+    en: 'allow = the blast radius is unknown (what it does cannot be read); deny = blocks only this call',
+  },
+}
+
+/**
+ * The machine keys behind "why am I being asked". Derived, never passed in: the
+ * caller cannot forget to add a doubt, and a doubt cannot contradict the facts.
+ */
+export function askDoubtKinds(ctx: AskContext, extra: { readonly modelFlagged?: boolean } = {}): DoubtKind[] {
+  const kinds: DoubtKind[] = []
+  if (!ctx.targetResolvable) kinds.push('opaque')
+  if (ctx.reversibility === 'I' || ctx.irreversible) kinds.push('irreversible')
+  if (ctx.unlearnable) kinds.push('never-learn')
+  switch (ctx.targetKind) {
+    case 'delete': kinds.push('delete'); break
+    case 'remote-write': kinds.push('remote-write'); break
+    case 'exec-external': kinds.push('exec-external'); break
+    case 'write': kinds.push('write'); break
+    default: break
+  }
+  if (extra.modelFlagged === true) kinds.push('model-flagged')
+  if (ctx.ruleReason !== undefined && /no rule matched|default action/i.test(ctx.ruleReason)) kinds.push('no-rule')
+  const root = ctx.workspaceRoot
+  if (root !== undefined && (ctx.files ?? []).some((f) => f.startsWith('..') || (f.startsWith('/') && !f.startsWith(root)))) kinds.push('outside-paths')
+  // De-duplicated and capped: four clauses is already more than a person reads.
+  return [...new Set(kinds)].slice(0, 4)
+}
+
+/**
+ * The card a human decides from: why it asks, what it touches, what each button
+ * costs. One builder feeds both the popup and the durable event, so the review
+ * panel can show the same text the decision was made on — the two copies drifting
+ * apart is what made past approvals unreconstructable.
+ */
+export function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds = askDoubtKinds(ctx)): string {
+  const card = toHumanCard(ctx)
+  const joiner = lang === 'zh' ? '；' : '; '
+  const doubts = kinds.map((k) => DOUBT_COPY[k][lang])
+  const parts: string[] = []
+  parts.push(`${lang === 'zh' ? '疑点' : 'why it asks'}: ${doubts.length > 0 ? doubts.join(joiner) : (lang === 'zh' ? '规则层要求人工确认' : 'a rule asks a human')}`)
+  const scope = [`${lang === 'zh' ? '目标' : 'target'}=${card.targetKind}`, `${lang === 'zh' ? '可逆性' : 'reversibility'}=${card.reversibility}`]
+  if (card.fileCount > 0) {
+    scope.push(lang === 'zh'
+      ? `文件 ${card.fileCount} 个：${card.files.join(', ')}${card.files.length < card.fileCount ? ` 等${card.fileCount}个` : ''}`
+      : `${card.fileCount} file(s): ${card.files.join(', ')}`)
+  }
+  if (card.command !== '') scope.push(lang === 'zh' ? `命令：${card.command}` : `command: ${card.command}`)
+  parts.push(`${lang === 'zh' ? '影响面' : 'what it touches'}: ${scope.join(joiner)}`)
+  parts.push(COST_COPY[card.reversibility][lang])
+  return parts.join('  ·  ')
+}
+
 /** What goes on the durable event, for later attribution. */
 export interface EventFields {
   readonly inputDigest?: string
@@ -364,6 +513,10 @@ export interface EventFields {
   readonly permissionPreset?: string
   readonly sandboxMode?: string
   readonly approvalPolicy?: string
+  /** The machine keys of "why it asked", so the panel can localize them. */
+  readonly doubtKinds?: readonly DoubtKind[]
+  /** The English form of the card the human decided from (audit language). */
+  readonly humanBrief?: string
 }
 
 /** The salted pre-image of one event digest: knobs + redacted args, never raw. */
@@ -393,6 +546,8 @@ export function toEventFields(ctx: AskContext): EventFields {
     ...(k?.sandboxMode === undefined ? {} : { sandboxMode: k.sandboxMode }),
     ...(k?.approvalPolicy === undefined ? {} : { approvalPolicy: k.approvalPolicy }),
     ...(ctx.cwd === undefined || ctx.cwd === '' ? {} : { cwd: ctx.cwd }),
+    ...(ctx.targetKind === undefined ? {} : { doubtKinds: askDoubtKinds(ctx) }),
+    humanBrief: humanBrief(ctx, 'en'),
     ...(typeof hash !== 'function'
       ? {}
       : { inputDigest: hash(`${ctx.salt ?? ''}\u0000${ctx.callId ?? ''}\u0000${digestBody(ctx)}`) }),

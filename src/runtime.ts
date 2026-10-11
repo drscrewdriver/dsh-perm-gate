@@ -21,7 +21,7 @@ import { canonicalizeCall, GrantRegistry } from './grant.js'
 import { learnKey, operationFingerprint, RiskLearning } from './learning.js'
 import { ArtifactRegistry } from './path.js'
 import { classifyRisk, classifyRiskWith, RISK_SYSTEM_PROMPT_VERSION, type RiskRequest, type RiskVerdict } from './risk.js'
-import { buildAskContext, humanCardLine, toEventFields, toHumanCard, type AskContext } from './ask-context.js'
+import { askDoubtKinds, buildAskContext, humanBrief, humanCardLine, toEventFields, type AskContext } from './ask-context.js'
 import { redactCommandText } from './redact.js'
 import { executableVariants, normalizeCommandText } from './command-normalize.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
@@ -223,6 +223,14 @@ interface PendingAsk {
   readonly snapshotId: number
   /** Set when this ask also registered a learning candidate (drives the progress chip). */
   readonly learningKey?: string
+  /**
+   * The card the human was shown, kept so the terminal event can carry it.
+   * Without this the approval list shows only the audit `reason` and a past
+   * decision cannot be read back — the popup's explanation existed for seconds
+   * and then vanished.
+   */
+  readonly humanBrief?: string
+  readonly doubtKinds?: readonly string[]
 }
 
 export interface PermGateRuntimeOptions extends PermGateConfig {
@@ -1145,6 +1153,8 @@ export class PermGateRuntime {
       threshold?: number
       inputDigest?: string
       promptVersion?: string
+      humanBrief?: string
+      doubtKinds?: readonly string[]
     } = {},
   ): void {
     this.events?.append({
@@ -1161,6 +1171,8 @@ export class PermGateRuntime {
       threshold: extra.threshold,
       inputDigest: extra.inputDigest,
       promptVersion: extra.promptVersion,
+      humanBrief: extra.humanBrief,
+      doubtKinds: extra.doubtKinds,
       baseDir: cwdOf(exec),
     })
   }
@@ -1173,7 +1185,7 @@ export class PermGateRuntime {
   }
 
   /** Remember one ask so either settlement channel can record its terminal answer. */
-  private trackAsk(exec: ToolExecutionLike, reason: string, learningKey?: string): void {
+  private trackAsk(exec: ToolExecutionLike, reason: string, learningKey?: string, askCtx?: AskContext): void {
     if (this.pendingAsks.size >= PENDING_CAP) {
       // Evicting the oldest pending ask silently loses a human decision that was
       // never given: the call settles through `tools/result` against no tracked
@@ -1198,6 +1210,9 @@ export class PermGateRuntime {
       baseDir: cwdOf(exec),
       snapshotId,
       learningKey,
+      ...(askCtx === undefined
+        ? {}
+        : { humanBrief: humanBrief(askCtx, 'en'), doubtKinds: askDoubtKinds(askCtx) }),
     }
     this.pendingAsks.set(this.askKey(exec), pending)
     // Save pre-change snapshots so the review page can diff/revert later.
@@ -1448,8 +1463,9 @@ export class PermGateRuntime {
     if (decision.action === 'ask') {
       // Track before returning: the approval observer can settle this ask
       // before the call ever reaches `tools/result`.
-      this.trackAsk(exec, decision.reason)
-      return this.askDecision(this.contextFor(exec, decision.reason), decision.reason)
+      const askCtx = this.contextFor(exec, decision.reason)
+      this.trackAsk(exec, decision.reason, undefined, askCtx)
+      return this.askDecision(askCtx, decision.reason)
     }
     // A genuine allow (grant / rule / classifier / permissive default): remember it
     // so a sandbox escalation raised from inside this same call is answered here
@@ -1681,7 +1697,7 @@ export class PermGateRuntime {
             ? 'irreversible by rule → ask'
             : 'payload=opaque → ask'
         const vetoReason = `${decision.reason} [${why}, grader said ${risk.kind}] · ${humanCardLine(askCtx)}`
-        this.trackAsk(exec, vetoReason, undefined)
+        this.trackAsk(exec, vetoReason, undefined, askCtx)
         return this.askDecision(askCtx, vetoReason)
       }
     }
@@ -1712,8 +1728,8 @@ export class PermGateRuntime {
         // they are NEVER learnable, so repeated confirmations cannot sediment
         // them into an auto-allow.
         const hardReason = `${decision.reason} [llm-assist risky:${risk.category} → ask] · ${humanCardLine(askCtx)}`
-        this.trackAsk(exec, hardReason, undefined)
-        return this.askDecision(askCtx, hardReason)
+        this.trackAsk(exec, hardReason, undefined, askCtx)
+        return this.askDecision(askCtx, hardReason, true)
       }
 
       const learning = this.liveRiskLearning()
@@ -1737,8 +1753,8 @@ export class PermGateRuntime {
       const neutralReason = `${decision.reason} [llm-assist risky:neutral] · ${humanCardLine(askCtx)}`
       // The refined reason supersedes the raw ask, and the candidate key lets the
       // terminal event report the post-approval learning progress.
-      this.trackAsk(exec, neutralReason, learning.enabled ? key : undefined)
-      return this.askDecision(askCtx, neutralReason)
+      this.trackAsk(exec, neutralReason, learning.enabled ? key : undefined, askCtx)
+      return this.askDecision(askCtx, neutralReason, true)
     }
 
     // unresolved: keep the ask, learn nothing — and label it. Without a marker
@@ -1747,7 +1763,7 @@ export class PermGateRuntime {
     // security judgement. Tagged via `reason` rather than a new event `kind`,
     // because `presentation()` maps an unknown kind to a green ALLOW.
     const unresolvedReason = `${decision.reason} [llm-assist unresolved → ask] · ${humanCardLine(askCtx)}`
-    this.trackAsk(exec, unresolvedReason)
+    this.trackAsk(exec, unresolvedReason, undefined, askCtx)
     return this.askDecision(askCtx, unresolvedReason)
   }
 
@@ -1783,21 +1799,18 @@ export class PermGateRuntime {
    * each button costs. Without the command line a person is asked to approve an
    * operation they cannot read, which is the complaint this task exists to fix.
    */
-  private askDecision(askCtx: AskContext, reason: string): PreToolDecisionLike {
-    const card = toHumanCard(askCtx)
-    const lines: string[] = [reason]
-    if (card.command !== '') lines.push(card.command)
-    if (card.files.length > 0) {
-      lines.push(card.fileCount > card.files.length
-        ? `files: ${card.files.join(', ')} (+${card.fileCount - card.files.length} more)`
-        : `files: ${card.files.join(', ')}`)
-    }
-    lines.push(humanCardLine(askCtx))
-    lines.push('Allowing runs this call as shown; denying blocks only this call, and the agent can ask again.')
+  private askDecision(askCtx: AskContext, reason: string, modelFlagged = false): PreToolDecisionLike {
+    // `reason` stays the audit string: short, English, machine-tokened. Everything a
+    // person reads goes into `displayReason`, which the host resolves by UI locale
+    // (`zh` here; the other seven fall back to `en`) and never persists.
+    const kinds = askDoubtKinds(askCtx, { modelFlagged })
     return {
       kind: 'ask',
       reason,
-      displayReason: { en: lines.join('\n') },
+      displayReason: {
+        zh: humanBrief(askCtx, 'zh', kinds),
+        en: humanBrief(askCtx, 'en', kinds),
+      },
     }
   }
 
@@ -1914,17 +1927,19 @@ export class PermGateRuntime {
       this.recordEvent(exec, 'manual-approved', ask.reason, {
         verdict: 'human-approved',
         files: ask.files,
+        humanBrief: ask.humanBrief,
+        doubtKinds: ask.doubtKinds,
         learningCount,
         threshold: learning.enabled ? learning.threshold : undefined,
       })
       return
     }
     if (outcome === 'rejected') {
-      this.recordEvent(exec, 'manual-rejected', ask.reason, { verdict: 'human-rejected', files: ask.files })
+      this.recordEvent(exec, 'manual-rejected', ask.reason, { verdict: 'human-rejected', files: ask.files, humanBrief: ask.humanBrief, doubtKinds: ask.doubtKinds })
       return
     }
     if (outcome === 'cancelled') {
-      this.recordEvent(exec, 'manual-cancelled', ask.reason, { verdict: 'human-cancelled', files: ask.files })
+      this.recordEvent(exec, 'manual-cancelled', ask.reason, { verdict: 'human-cancelled', files: ask.files, humanBrief: ask.humanBrief, doubtKinds: ask.doubtKinds })
       return
     }
     // `unavailable`: no human was involved — the ask degraded to a denial.
