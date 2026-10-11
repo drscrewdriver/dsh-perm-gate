@@ -9,6 +9,14 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2] - 2026-10-12
+
+### Changed
+
+- **正式发行版**：将 `compat-legacy` 线上已验证的 compat.2 … compat.15 全部工作（B1 脱敏原语 / B5 P0 单一不可逆真源 / B6 旁路解码 / B7-B8 grader 规则 / B2-B4+B6 接线 / compat.11 版本修正 / compat.12 `reg delete` 子键修复 / compat.13-15 弹窗三段人话 + 审批回溯 + 提示随 UI 语言切换）毕业为干净版 `5.1.2`，
+  从 `main` 线发布并将 `latest` 从 `5.1.0` 指向 `5.1.2`。`publishConfig.tag` 回为 `latest`。
+  目标宿主范围与旧 `latest`(5.1.0) 一致（engines 0.1.0-rc.2 … 0.2.0-rc.2），仅同主线的预发布线仍留在 `compat` 标签。
+
 ## [5.1.2-compat.15] - 2026-10-12
 
 ### Changed
