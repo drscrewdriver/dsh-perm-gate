@@ -8,9 +8,22 @@ import { type HostLlmLike, type HostModelSelection } from './host-llm.js';
 import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import type { NetworkTarget } from './network.js';
 import { type SessionEventLike } from './preset.js';
+/**
+ * The gate's answer to the host's pre-execute waterfall.
+ *
+ * `displayReason` is part of the host's own ask contract: the registry forwards it
+ * to `approval/request` for presentation only, while `reason` remains the durable,
+ * machine-readable text that rules, audit and grants key off. Keeping the human-
+ * facing explanation in a separate field is what lets the popup say *what is about
+ * to happen* without polluting the record used for decisions.
+ */
 export interface PreToolDecisionLike {
     kind: 'deny' | 'ask';
     reason: string;
+    displayReason?: {
+        readonly en: string;
+        readonly [locale: string]: string;
+    };
 }
 /** The sandbox hook's verdict for one allowed shell call (appcontainer seam). */
 export type SandboxRewriteOutcome = {
@@ -228,6 +241,11 @@ export type ApprovalOutcomeLike = 'allowed-once' | 'rejected' | 'cancelled' | 'u
  * One approval ask the gate raises on behalf of a subprocess network
  * connection. Structurally the subset of the DSH `ApprovalRequest` the gate
  * supplies — the host service adds the borrowed session/log handling.
+ *
+ * `displayReason` is the host's own field (`ApprovalRequestEvent`), for localized
+ * presentation that is deliberately never persisted into the audit pair. It exists
+ * so a human can be shown *what is about to happen* rather than one opaque
+ * internal sentence; `reason` stays the durable, machine-readable record.
  */
 export interface NetworkApprovalRequest {
     /** The host agent the question is asked on behalf of (routes the prompt). */
@@ -237,6 +255,11 @@ export interface NetworkApprovalRequest {
     /** The exact tool call, when the host gave one — lets the UI attach the prompt. */
     readonly callId?: string;
     readonly reason: string;
+    /** Presentation-only text, keyed by locale (`en` required). */
+    readonly displayReason?: {
+        readonly en: string;
+        readonly [locale: string]: string;
+    };
     readonly signal?: AbortSignal;
 }
 /** The attribution the proxy layer receives for one connection. */
@@ -437,6 +460,13 @@ export declare class PermGateRuntime {
      * allow path (deny wins over allow). Purely additive to P0 — it can only ever
      * deny, never widen. Matching is boundary-aware and skips document bodies, so
      * a keyword can no longer veto an unrelated identifier or a file's text.
+     *
+     * Decoded layers are scanned too (B6 wiring). An `-EncodedCommand` blob is
+     * invisible to every keyword below, and this layer — unlike P0 — is a blacklist
+     * the user edits, so "the text you told me to refuse is in there" is exactly
+     * what it should be able to say. Only variants the visible command really hands
+     * to an execution primitive qualify, and no decoded text is written back to the
+     * call, the reason, or the event: the reason names the keyword, never the blob.
      */
     private denyKeywordHit;
     /**
@@ -451,8 +481,32 @@ export declare class PermGateRuntime {
     private trackAsk;
     /** Drop one tracked ask without recording it (the call never needed a human). */
     private untrackAsk;
+    /**
+     * Record that a pending ask was evicted by capacity, so "the popup never came
+     * back" is diagnosable instead of silent. Audited rather than fed to the event
+     * feed: no new event `kind` is introduced, so nothing can be mis-rendered as an
+     * allow by `presentation()`'s default branch.
+     */
+    private recordAskEviction;
     /** Asks currently awaiting a terminal answer (diagnostics/tests). */
     pendingAskCount(): number;
+    /**
+     * Pending-ask capacity health: how many asks are in flight, the cap, and how
+     * many have been evicted. Surfaces the case where the gate asks more than it can
+     * track, which otherwise looks identical to a lost approval.
+     */
+    pendingAskStats(): {
+        size: number;
+        cap: number;
+        evictions: number;
+        lastEviction?: {
+            key: string;
+            tool: string;
+            reason: string;
+        };
+    };
+    private askEvictions;
+    private lastAskEviction;
     /**
      * Remember that the gate positively allowed one call, so an approval raised from
      * inside that same call can be answered from this verdict.
@@ -552,6 +606,25 @@ export declare class PermGateRuntime {
      * settled by {@link settleExecution} when the call actually executes.
      */
     refineAsk(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined>;
+    /**
+     * One frozen view of a call, built the same way for every ask path so the
+     * popup cannot disagree with what the grader was shown.
+     */
+    private contextFor;
+    /**
+     * An ask plus the card the human actually needs, in the host's presentation-only field.
+     *
+     * The plan's B4 clause lists five things for the popup — the redacted command,
+     * the files with their true total, the category, the reversibility and the tier
+     * knobs. `reason` alone cannot carry them: it is the audited string, and `REASON_MAX`
+     * truncates at 200 characters. `displayReason` is the host's own channel for
+     * presentation that never enters the audit pair, so the card goes there — starting
+     * with the audited reason (why the gate is asking at all), then the redacted
+     * command, the file list, the language-neutral tokens and the sentence about what
+     * each button costs. Without the command line a person is asked to approve an
+     * operation they cannot read, which is the complaint this task exists to fix.
+     */
+    private askDecision;
     /**
      * Record the human's terminal answer for one tracked ask. This is the primary
      * channel, driven by the `approval/request` observer, which sees the closed

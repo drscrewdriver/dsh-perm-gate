@@ -9,7 +9,9 @@
  *     stay retired — both duplicated the standalone section — and the one-day
  *     `dsh-family.tab` contributor tab is gone with the revert.
  *     Kept non-settings seats: `plugins.bundle.config` (0.2.0 bundle detail
- *     page) and `shell.overlay` (0.1.0/0.1.1 gear fallback).
+ *     page) only — the `shell.overlay` floating gear was retired with
+ *     5.1.2-compat.10, because `settings.section` renders on every supported
+ *     line (2026-10-08 call: a fixed-corner gear is redundant fleet-wide).
  *   - The section renders the same PermissiveCard with the same dual-source
  *     scope (native handle first, BridgeDocHandle fallback). Migrate
  *     src/client/index.ts AND this file together when a DSH line moves a seat;
@@ -74,18 +76,18 @@ describe('settings-seat contract (standalone settings.section; plugins tab/item 
     const { declared, registrations } = collectRegistrations()
     expect(declared.filter(slot => slot === 'settings.section')).toHaveLength(1)
     // Retired seats must stay gone: the plugins-page tab and the ≤0.1.5
-    // dispatch card duplicated the standalone section, and the one-day
-    // family-tab contributor left with the 2026-10-08 revert.
-    for (const gone of ['settings.plugins.tab', 'settings.plugin.item', 'dsh-family.tab']) {
+    // dispatch card duplicated the standalone section, the one-day family-tab
+    // contributor left with the 2026-10-08 revert, and the fixed-corner gear
+    // followed in compat.10 (every line renders `settings.section`).
+    for (const gone of ['settings.plugins.tab', 'settings.plugin.item', 'dsh-family.tab', 'shell.overlay']) {
       expect(declared).not.toContain(gone)
       expect(registrations.find(r => r.slot === gone)).toBeUndefined()
     }
   })
 
-  it('keeps the non-settings seats (bundle detail card + shell overlay)', () => {
+  it('keeps the one non-settings seat (the 0.2.0 bundle detail card)', () => {
     const { registrations } = collectRegistrations()
     expect(registrations.find(r => r.slot === 'plugins.bundle.config')).toBeDefined()
-    expect(registrations.find(r => r.slot === 'shell.overlay')).toBeDefined()
   })
 
   it('pins the section identity (id/order/label/locale) and the card component', () => {

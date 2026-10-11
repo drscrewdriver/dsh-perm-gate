@@ -9,6 +9,39 @@ undefined
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.2-compat.11] - 2026-10-11
+
+### Added
+
+- **`src/redact.ts`**：有界且幂等的脱敏原语（`[redacted:<len>:<kind>]`、文档体→字节数+哈希）。此前 `classifier.ts` 声称“密钥已在上游剥离”，实际并未剥离 —— grader 载荷是整包 args 原文外送第三方端点的。
+- **`src/ask-context.ts`**：一次构造、三个投影（grader 载荷 / 人侧卡片 / 事件归因）。档位三字段（preset/sandbox/approval）只进弹窗与事件流，**绝不进 grader prompt**（实测喂给模型会让它顺着规则层答而不是自己判，打扰 67.1%→87.8%）。
+- **`src/irreversible.ts`**：不可逆性的单一真源，分三层 —— P0 deny / never-clear ask（模型不能洗白、确认不能沉淀）/ 可学习 ask。所有函数只返回 `string | undefined`，结构上无法产生 allow。
+- **`src/command-normalize.ts`**：base64（UTF-16LE/UTF-8 双读）/hex/变量展开的旁路解码，四条护栏：不回写、限长限深限变体、超预算丢弃部分成果、自家 `--exec-b64` wrapper 认出但不豁免解码。
+- **`src/grader-rules.ts`**：classifier 与 risk 共享的唯一判据真源（分开成文件以避开 ESM 循环引用）；`classifyWithLLM` 标 `@deprecated`，其 deny 永不进决策路径。
+- 弹窗 `displayReason`（宿主正式字段，不进审计）：为何在问 / 脱敏命令 / 文件清单+真实总数 / `tier=target=payload=opaque never-learn` 标 / 两个按钮的代价。
+- `PENDING_CAP` FIFO 淘汰可观测：`evictions` 计数 + 事件告警 + `pendingAskStats()`。
+
+### Changed
+
+- `unknown-target` 成为 risk 协议的**硬类目**（永不 auto-allow、永不学习），且刻意不进任何 deny 词表：“看不见”不是“确定坏”。
+- 判定层按程序名位置匹配，不做自由文本词匹配；`unresolved` 用 `verdict` 标签区分（不新增 `kind`，因为 `presentation()` 的 default 分支会把未知 kind 渲染成绿色 ALLOW）。
+- 提示词版本化：`v7-terse-budget`。延迟门槛按服务端 `timings.prompt_ms` 量（墙钟在共享端点上会被排队淹没）：v5 +36.0ms → v6 +1.9ms → v7 −0.1ms 且 token 持平 714。
+
+### Fixed
+
+- `decomposeShellCommand` 会剥掉裸参数里的反斜杠，导致所有要求 `\` 分隔符的 Windows 规则（`HKLM\SYSTEM`、`C:\Windows\System32`）在主判定路径上默默落空 —— 现同时匹配“去分隔符”形态（要求驱动号前缀，避免把仓内目录名当系统根）。
+- 同一解析器不拆 `;` 链且剥引号，致使 `Select-String -Pattern "vssadmin|cipher|diskpart"` 被当成执行 `diskpart` 并不可申诉地拒绝 —— 现改用解析器给出的权威程序名、仅在 arg 边界取链、分段器改为引号感知；链式 wipe 覆盖不回退。
+- `containsCredentialMaterial` 对参数里任意 `Bearer <token>` 与只读探测（`Test-Path ~/.ssh/id_rsa`）直接 P0 硬拒 —— 两条都是误拦（正当编码反例集 1/20 → 0/20），且带密钥的命令根本到不了弹窗；同一物料一旦移动（`scp`/`Copy-Item`/管道入 `curl`）仍拒。
+- 流水拆段使“密件 + 外发通道”分属两段、per-command deny 看不到成对关系 —— 现由整调用视图的 `tier=I` 否决兑住（只否决模型，不产生 deny）。
+- `dsh.plugin.json` 版本号与 `package.json` 差一个发布号（宿主读的是前者）。
+- `client-settings-seat` 测试仍断言 compat.10 已退役的 `shell.overlay` 席位（基线红），现跟随退役决定修正。
+
+## [5.1.2-compat.10] - 2026-10-08
+
+### Removed
+
+- 退役 `shell.overlay` 悬浮齿轮：设置面在所有宿主线上都由 `settings.section` 渲染（+ bridge describe/mutate），固定角落的齿轮全机冗余。
+
 ## [5.1.2-compat.9] - 2026-10-08
 
 ### Changed

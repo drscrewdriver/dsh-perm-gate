@@ -1,15 +1,3 @@
-/**
- * LLM-assist classifier for dsh-perm-gate's `llmAssist` strategy.
- *
- * Calls an OpenAI-compatible `/chat/completions` endpoint (the user may point it
- * at any custom API via `classifierEndpoint` / `classifierModel` / `classifierApiKey`)
- * and asks for a structured verdict on one tool call. Strictly fail-closed: any
- * transport, parsing, or schema error returns `ask` so the human seam stays
- * authoritative — an LLM can widen to `allow`/`deny` but never silence the review.
- *
- * The transport layer (`chatCompletion`) is shared with `risk.ts`, which layers
- * the risk-category protocol on top of the same custom-endpoint setup.
- */
 export type ClassifyVerdict = 'allow' | 'deny' | 'ask';
 /** Setup for one classifier call. */
 export interface ClassifierConfig {
@@ -22,10 +10,16 @@ export interface ClassifierConfig {
     /** Abort after this many milliseconds. Default 30s. */
     timeoutMs?: number;
 }
-/** The call being judged (bounded/redacted before it leaves the host). */
+/** The call being judged. Callers MUST pass args already through `redactArgs`. */
 export interface ClassifyRequest {
     readonly tool: string;
-    /** Redacted/bounded argument snapshot (secrets already stripped upstream). */
+    /**
+     * Bounded argument snapshot with secret values masked by `redactArgs` from
+     * `./redact.js`. This used to be documented as "secrets already stripped
+     * upstream" while nothing upstream stripped anything — the raw args object
+     * was serialized straight to a user-configured third-party endpoint. Redaction
+     * is now a real, tested layer; passing unredacted args here is a bug.
+     */
     readonly args: unknown;
     /** The deterministic reason the call reached the LLM-assist seam. */
     readonly reason: string;

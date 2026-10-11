@@ -16,7 +16,6 @@
  * = Context`), but that package was removed in 0.1.2-alpha.1 — cordis is the one
  * source that names the same type on both lines.
  */
-import type { JSX } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -26,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // renderer entry declares nothing there. Importing it is a no-op on the old line.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { NS, dictionaries, type PermissiveKey } from './locales.ts'
-import { PermissiveCard, type PermissiveCardInjected, type PermissiveCardProps } from './card.tsx'
+import { PermissiveCard, type PermissiveCardInjected } from './card.tsx'
 import { NoticeStrip } from './notice.tsx'
 import { HistoryView } from './history.tsx'
 import { resolveSettingsScope } from './compat.ts'
