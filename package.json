@@ -62,8 +62,8 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-perm-gate": "./lib/cli.js",
-    "dsh-perm-gate-patch-glyph": "./scripts/patch-permission-glyph.mjs"
+    "dsh-perm-gate": "lib/cli.js",
+    "dsh-perm-gate-patch-glyph": "scripts/patch-permission-glyph.mjs"
   },
   "engines": {
     "node": ">=24",
