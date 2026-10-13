@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { SandboxController, type SandboxSettings } from './appcontainer/index.js'
 import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
+import { mergePresetIntoRaw } from './preset-rules.js'
 import { runDryRun } from './dry-run.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
 // T12 设置数据桥（describe/mutate；client BridgeDocHandle 消费）
@@ -267,6 +268,24 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     configure?(options: unknown, fiber: unknown): unknown
   }
   const settingsRef: { svc?: SettingsServiceLike } = {}
+  // 预设拒绝表播种：一次性、只走宿主设置面（写回落进 profile patch 的本插件
+  // config 条目）。刻意不再写插件自有的 `perm-gate/rules.yml` —— 那是用户手维护的
+  // 规则源，混进 51 条预设会让「我的规则」与「插件注入的规则」不可区分。
+  // 两条经实测定下的约束：① 必须在各分支「注册完成之后」调（0.1.5 上 ns 要等
+  // installSection 才注册，提前写报 `settings namespace ... is not registered`）；
+  // ② 规则与幂等位必须合成一次 update（拆两次时 0.1.7 第二次报 `Plugin entry ... is
+  // no longer configurable`，幂等位永远落不下去 ⇒ 用户全删后会被重新塞回）。
+  // 写失败不阻断启动也不置幂等位 ⇒ 下次激活重试。
+  const seedPresetDenyTable = (svc: SettingsServiceLike): void => {
+    void (async () => {
+      if (current().presetRulesSeeded === true) return
+      const merged = mergePresetIntoRaw(readVolatileValue(config.rules))
+      await svc.update(ENTRY_ID, { rules: merged.doc, presetRulesSeeded: true })
+      console.log(`[dsh-perm-gate] preset deny table seeded via settings (+${merged.added} rules)`)
+    })().catch((e: unknown) => {
+      console.warn('[dsh-perm-gate] preset deny table 播种失败（不阻断启动，下次激活重试）:', e)
+    })
+  }
   ctx.inject(['settings'], (child) => {
     const svc = (child as unknown as { settings?: SettingsServiceLike }).settings
     settingsRef.svc = svc
@@ -314,6 +333,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           console.warn('[dsh-perm-gate] legacy seed update failed:', e)
         })
       }
+      seedPresetDenyTable(svc)
       return
     }
     void (async () => {
@@ -343,6 +363,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
               console.warn('[dsh-perm-gate] legacy seed update failed:', e)
             })
           }
+          seedPresetDenyTable(svc)
           return
         }
       } catch {
@@ -368,6 +389,7 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
           console.warn('[dsh-perm-gate] rules seed write failed:', e)
         })
       }
+      seedPresetDenyTable(svc)
     })()
   })
 
@@ -390,6 +412,8 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   const dataDir = resolveDataDir(typeof config.dshHome === 'string' ? config.dshHome : undefined)
 
   const rulesFilePath = resolveRulesFile(typeof config.rulesFile === 'string' ? config.rulesFile : undefined, dataDir)
+
+  // 预设拒绝表的播种在上面的 settings inject 回调里（那里才有 svc）。
 
   // Host model-group services (typed minimally; supplied by the dsh runtime
   // through the loader `inject` — dsh-approval-gate demonstrates the same

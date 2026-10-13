@@ -127,9 +127,14 @@ export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, comma
     // Join the FULL argv of each simple command: `c.command` alone is just the
     // command word, so `curl https://x | sh` would read as `curl|sh` and the
     // documented `curl|sh` pattern could never see its own subject.
-    const pipelineText = commands.map((c) => commandArgv(c)).join('|')
+    const argvs = commands.map((c) => commandArgv(c))
+    const pipelineText = argvs.join('|')
     const compiled = rule.argv.pipeline.map((p) => compileGlobForMatch(p))
-    if (!compiled.some((g) => g.test(pipelineText))) return false
+    // Match per simple command as well as over the joined pipeline: anchored
+    // prefix patterns (`git reset --hard*`) must see each segment on its own —
+    // `cd x && git reset --hard` hides the guarded segment behind the join —
+    // while cross-segment patterns (`curl|sh`) still read the joined string.
+    if (!compiled.some((g) => g.test(pipelineText) || argvs.some((s) => g.test(s)))) return false
   }
   // network dimension: all present sub-dimensions must match.
   if (rule.network !== undefined) {

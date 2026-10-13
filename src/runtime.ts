@@ -1463,7 +1463,12 @@ export class PermGateRuntime {
     // user's terminal answer comes back through tools/result anyway.
     if (outcome !== 'ask') {
       this.audit.append(makeEntry({ callId, tool: exec.name, outcome, source, reason: decision.reason, at: Date.now() }))
-      this.recordEvent(exec, outcome === 'allow' ? 'auto' : outcome === 'deny' ? 'deny' : 'ask', decision.reason, { verdict: source })
+      // Preset deny-table entries tag their reason with `[deny-rule:<id>]`
+      // (see preset-rules.ts): surface the tag as the verdict so the audit,
+      // the feed and per-rule revocation attribute the exact entry instead of
+      // the whole `rule` partition.
+      const ruleTag = decision.stage === 'rule' ? /\[deny-rule:[a-z0-9._-]+\]/.exec(decision.reason)?.[0] : undefined
+      this.recordEvent(exec, outcome === 'allow' ? 'auto' : outcome === 'deny' ? 'deny' : 'ask', decision.reason, { verdict: ruleTag ?? source })
     }
 
     if (decision.action === 'deny') return { kind: 'deny', reason: decision.reason }

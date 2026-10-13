@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "5.1.2",
+  "version": "5.2.0",
   "publishConfig": {
     "tag": "latest"
   },
@@ -26,6 +26,7 @@
     "CHANGELOG.md",
     "CHANGELOG.ja.md",
     "CHANGELOG.ko.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "main": "lib/index.js",

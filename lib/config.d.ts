@@ -96,6 +96,13 @@ export interface PermGateConfig {
      */
     readonly denyKeywords?: string[];
     /**
+     * One-shot marker for the preset deny-table seed (`preset-rules.ts`, ported
+     * from cc-safety-net): set once the `[deny-rule:*]` entries have been merged
+     * into the live rules source. A full revocation (deleting every preset entry)
+     * persists — the seed never re-adds them.
+     */
+    readonly presetRulesSeeded?: boolean;
+    /**
      * Extra tool names classified as read-only/internal and therefore auto-allowed.
      *
      * The gate already auto-allows DSH's own read-only and session-local tools
@@ -332,126 +339,128 @@ export declare function readRulesFromSettings(scope: {
 export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     rulesFile: z<string, string, "plain">;
     dshHome: z<string, string, "plain">;
-    defaultAction: z<"allow" | "ask" | "deny", "allow" | "ask" | "deny", "volatile-defined">;
-    caseInsensitivePaths: z<boolean, boolean, "volatile-defined">;
-    classifierEnabled: z<boolean, boolean, "volatile-defined">;
-    classifierEndpoint: z<string, string, "volatile">;
-    classifierModel: z<string, string, "volatile-defined">;
-    classifierApiKey: z<string, string, "volatile">;
-    riskTimeoutMs: z<number, number, "volatile-defined">;
-    riskLearning: z<boolean, boolean, "volatile-defined">;
-    riskSediment: z<boolean, boolean, "volatile-defined">;
-    classifierSource: z<"host" | "custom", "host" | "custom", "volatile-defined">;
-    classifierProvider: z<string, string, "volatile">;
-    riskThreshold: z<number, number, "volatile-defined">;
+    defaultAction: z<"allow" | "ask" | "deny", "allow" | "ask" | "deny", "defined">;
+    caseInsensitivePaths: z<boolean, boolean, "defined">;
+    classifierEnabled: z<boolean, boolean, "defined">;
+    classifierEndpoint: z<string, string, "plain">;
+    classifierModel: z<string, string, "defined">;
+    classifierApiKey: z<string, string, "plain">;
+    riskTimeoutMs: z<number, number, "defined">;
+    riskLearning: z<boolean, boolean, "defined">;
+    riskSediment: z<boolean, boolean, "defined">;
+    classifierSource: z<"host" | "custom", "host" | "custom", "defined">;
+    classifierProvider: z<string, string, "plain">;
+    riskThreshold: z<number, number, "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
-    grantTtlMs: z<number, number, "volatile-defined">;
-    grantMaxUses: z<number, number, "volatile-defined">;
-    permissive: z<boolean, boolean, "volatile-defined">;
+    grantTtlMs: z<number, number, "defined">;
+    grantMaxUses: z<number, number, "defined">;
+    permissive: z<boolean, boolean, "defined">;
     gatePresets: z<string[], string[], "plain">;
-    permissiveStrategies: z<NoInfer<Schemastery.ObjectS<NoInfer<{
+    permissiveStrategies: z<Schemastery.ObjectS<NoInfer<{
         trustAutoAllow: z<boolean, boolean, "defined">;
         alwaysConfirm: z<boolean, boolean, "defined">;
         llmAssist: z<boolean, boolean, "defined">;
         trustEscalation: z<boolean, boolean, "defined">;
-    }>>>, NoInfer<Schemastery.ObjectT<NoInfer<{
+    }>>, Schemastery.ObjectT<NoInfer<{
         trustAutoAllow: z<boolean, boolean, "defined">;
         alwaysConfirm: z<boolean, boolean, "defined">;
         llmAssist: z<boolean, boolean, "defined">;
         trustEscalation: z<boolean, boolean, "defined">;
-    }>>>, "volatile">;
-    allowlist: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    denyKeywords: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    autoAllowTools: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    sessionSweep: z<boolean, boolean, "volatile-defined">;
+    }>>, "plain">;
+    allowlist: z<string[], string[], "plain">;
+    denyKeywords: z<string[], string[], "plain">;
+    presetRulesSeeded: z<boolean, boolean, "defined">;
+    autoAllowTools: z<string[], string[], "plain">;
+    sessionSweep: z<boolean, boolean, "defined">;
     workspaceStoreFile: z<string, string, "plain">;
-    searchUp: z<boolean, boolean, "volatile-defined">;
+    searchUp: z<boolean, boolean, "defined">;
     fallbackPath: z<string, string, "plain">;
-    badFilePolicy: z<"fail" | "warn", "fail" | "warn", "volatile-defined">;
-    maxChainLength: z<number, number, "volatile-defined">;
-    networkEnabled: z<boolean, boolean, "volatile-defined">;
-    networkMode: z<"deny-all" | "whitelist" | "allow-all", "deny-all" | "whitelist" | "allow-all", "volatile-defined">;
-    networkUnlisted: z<"ask" | "deny", "ask" | "deny", "volatile-defined">;
-    networkUnattributed: z<"allow" | "deny", "allow" | "deny", "volatile-defined">;
-    networkLoopback: z<"allow" | "policy", "allow" | "policy", "volatile-defined">;
-    networkBind: z<string, string, "volatile-defined">;
-    networkPort: z<number, number, "volatile-defined">;
-    networkNoProxy: z<"clear" | "preserve", "clear" | "preserve", "volatile-defined">;
-    networkInjectEnv: z<boolean, boolean, "volatile-defined">;
-    networkAskTimeoutMs: z<number, number, "volatile-defined">;
-    networkGrantTtlMs: z<number, number, "volatile-defined">;
-    sandboxEnabled: z<boolean, boolean, "volatile-defined">;
-    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "volatile-defined">;
-    sandboxProxy: z<string, string, "volatile-defined">;
-    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "volatile-defined">;
-    rules: z<NoInfer<RulesConfig>, NoInfer<RulesConfig>, "volatile">;
+    badFilePolicy: z<"fail" | "warn", "fail" | "warn", "defined">;
+    maxChainLength: z<number, number, "defined">;
+    networkEnabled: z<boolean, boolean, "defined">;
+    networkMode: z<"deny-all" | "whitelist" | "allow-all", "deny-all" | "whitelist" | "allow-all", "defined">;
+    networkUnlisted: z<"ask" | "deny", "ask" | "deny", "defined">;
+    networkUnattributed: z<"allow" | "deny", "allow" | "deny", "defined">;
+    networkLoopback: z<"allow" | "policy", "allow" | "policy", "defined">;
+    networkBind: z<string, string, "defined">;
+    networkPort: z<number, number, "defined">;
+    networkNoProxy: z<"clear" | "preserve", "clear" | "preserve", "defined">;
+    networkInjectEnv: z<boolean, boolean, "defined">;
+    networkAskTimeoutMs: z<number, number, "defined">;
+    networkGrantTtlMs: z<number, number, "defined">;
+    sandboxEnabled: z<boolean, boolean, "defined">;
+    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "defined">;
+    sandboxProxy: z<string, string, "defined">;
+    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "defined">;
+    rules: z<RulesConfig>;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
 }>>, Schemastery.ObjectT<NoInfer<{
     rulesFile: z<string, string, "plain">;
     dshHome: z<string, string, "plain">;
-    defaultAction: z<"allow" | "ask" | "deny", "allow" | "ask" | "deny", "volatile-defined">;
-    caseInsensitivePaths: z<boolean, boolean, "volatile-defined">;
-    classifierEnabled: z<boolean, boolean, "volatile-defined">;
-    classifierEndpoint: z<string, string, "volatile">;
-    classifierModel: z<string, string, "volatile-defined">;
-    classifierApiKey: z<string, string, "volatile">;
-    riskTimeoutMs: z<number, number, "volatile-defined">;
-    riskLearning: z<boolean, boolean, "volatile-defined">;
-    riskSediment: z<boolean, boolean, "volatile-defined">;
-    classifierSource: z<"host" | "custom", "host" | "custom", "volatile-defined">;
-    classifierProvider: z<string, string, "volatile">;
-    riskThreshold: z<number, number, "volatile-defined">;
+    defaultAction: z<"allow" | "ask" | "deny", "allow" | "ask" | "deny", "defined">;
+    caseInsensitivePaths: z<boolean, boolean, "defined">;
+    classifierEnabled: z<boolean, boolean, "defined">;
+    classifierEndpoint: z<string, string, "plain">;
+    classifierModel: z<string, string, "defined">;
+    classifierApiKey: z<string, string, "plain">;
+    riskTimeoutMs: z<number, number, "defined">;
+    riskLearning: z<boolean, boolean, "defined">;
+    riskSediment: z<boolean, boolean, "defined">;
+    classifierSource: z<"host" | "custom", "host" | "custom", "defined">;
+    classifierProvider: z<string, string, "plain">;
+    riskThreshold: z<number, number, "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
-    grantTtlMs: z<number, number, "volatile-defined">;
-    grantMaxUses: z<number, number, "volatile-defined">;
-    permissive: z<boolean, boolean, "volatile-defined">;
+    grantTtlMs: z<number, number, "defined">;
+    grantMaxUses: z<number, number, "defined">;
+    permissive: z<boolean, boolean, "defined">;
     gatePresets: z<string[], string[], "plain">;
-    permissiveStrategies: z<NoInfer<Schemastery.ObjectS<NoInfer<{
+    permissiveStrategies: z<Schemastery.ObjectS<NoInfer<{
         trustAutoAllow: z<boolean, boolean, "defined">;
         alwaysConfirm: z<boolean, boolean, "defined">;
         llmAssist: z<boolean, boolean, "defined">;
         trustEscalation: z<boolean, boolean, "defined">;
-    }>>>, NoInfer<Schemastery.ObjectT<NoInfer<{
+    }>>, Schemastery.ObjectT<NoInfer<{
         trustAutoAllow: z<boolean, boolean, "defined">;
         alwaysConfirm: z<boolean, boolean, "defined">;
         llmAssist: z<boolean, boolean, "defined">;
         trustEscalation: z<boolean, boolean, "defined">;
-    }>>>, "volatile">;
-    allowlist: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    denyKeywords: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    autoAllowTools: z<NoInfer<string[]>, NoInfer<string[]>, "volatile">;
-    sessionSweep: z<boolean, boolean, "volatile-defined">;
+    }>>, "plain">;
+    allowlist: z<string[], string[], "plain">;
+    denyKeywords: z<string[], string[], "plain">;
+    presetRulesSeeded: z<boolean, boolean, "defined">;
+    autoAllowTools: z<string[], string[], "plain">;
+    sessionSweep: z<boolean, boolean, "defined">;
     workspaceStoreFile: z<string, string, "plain">;
-    searchUp: z<boolean, boolean, "volatile-defined">;
+    searchUp: z<boolean, boolean, "defined">;
     fallbackPath: z<string, string, "plain">;
-    badFilePolicy: z<"fail" | "warn", "fail" | "warn", "volatile-defined">;
-    maxChainLength: z<number, number, "volatile-defined">;
-    networkEnabled: z<boolean, boolean, "volatile-defined">;
-    networkMode: z<"deny-all" | "whitelist" | "allow-all", "deny-all" | "whitelist" | "allow-all", "volatile-defined">;
-    networkUnlisted: z<"ask" | "deny", "ask" | "deny", "volatile-defined">;
-    networkUnattributed: z<"allow" | "deny", "allow" | "deny", "volatile-defined">;
-    networkLoopback: z<"allow" | "policy", "allow" | "policy", "volatile-defined">;
-    networkBind: z<string, string, "volatile-defined">;
-    networkPort: z<number, number, "volatile-defined">;
-    networkNoProxy: z<"clear" | "preserve", "clear" | "preserve", "volatile-defined">;
-    networkInjectEnv: z<boolean, boolean, "volatile-defined">;
-    networkAskTimeoutMs: z<number, number, "volatile-defined">;
-    networkGrantTtlMs: z<number, number, "volatile-defined">;
-    sandboxEnabled: z<boolean, boolean, "volatile-defined">;
-    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "volatile-defined">;
-    sandboxProxy: z<string, string, "volatile-defined">;
-    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "volatile-defined">;
-    rules: z<NoInfer<RulesConfig>, NoInfer<RulesConfig>, "volatile">;
+    badFilePolicy: z<"fail" | "warn", "fail" | "warn", "defined">;
+    maxChainLength: z<number, number, "defined">;
+    networkEnabled: z<boolean, boolean, "defined">;
+    networkMode: z<"deny-all" | "whitelist" | "allow-all", "deny-all" | "whitelist" | "allow-all", "defined">;
+    networkUnlisted: z<"ask" | "deny", "ask" | "deny", "defined">;
+    networkUnattributed: z<"allow" | "deny", "allow" | "deny", "defined">;
+    networkLoopback: z<"allow" | "policy", "allow" | "policy", "defined">;
+    networkBind: z<string, string, "defined">;
+    networkPort: z<number, number, "defined">;
+    networkNoProxy: z<"clear" | "preserve", "clear" | "preserve", "defined">;
+    networkInjectEnv: z<boolean, boolean, "defined">;
+    networkAskTimeoutMs: z<number, number, "defined">;
+    networkGrantTtlMs: z<number, number, "defined">;
+    sandboxEnabled: z<boolean, boolean, "defined">;
+    sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "defined">;
+    sandboxProxy: z<string, string, "defined">;
+    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "defined">;
+    rules: z<RulesConfig>;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
 }>>, "plain">;
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "permissiveStrategies", "allowlist", "denyKeywords", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "permissiveStrategies", "allowlist", "denyKeywords", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */
