@@ -7,6 +7,16 @@
 
 > 참고: 2.4.1부터 5.1.2까지는 영문 `CHANGELOG.md`에만 기록되어 있습니다 (ko판은 아직 미추적).
 
+## [5.3.1] - 2026-10-17
+
+### 추가
+
+- **호스트 지원: DSH `0.2.1-rc.1`.** 지원 호스트 열거(`package.json` engines.dsh, `dsh.plugin.json`, 모든 `@deepseek-ai/dsh*` peer, README 관리 블록)에 `0.2.1-rc.1` 추가(구간 없이 rc 단위 정확한 열거). 동작 변화 없음: 선언면 릴리스로, 0.2.1-alpha.4부터 engines.dsh만 읽는 호스트 게이트가 0.2.1-rc.1 호스트에서 이 플러그인을 허용합니다.
+
+### 변경
+
+- `publishConfig.registry`를 `https://registry.npmjs.org`에 고정(릴리스 위생: 배포 대상이 미러 registry로 표류하지 않음).
+
 ## [5.3.0] - 2026-10-17
 
 ### 추가됨

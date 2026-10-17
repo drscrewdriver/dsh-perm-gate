@@ -7,6 +7,16 @@
 
 > 注: 2.4.1 から 5.1.2 までは英語版 `CHANGELOG.md` のみに記録されています（ja 版は追随済みではない）。
 
+## [5.3.1] - 2026-10-17
+
+### 追加
+
+- **ホスト対応: DSH `0.2.1-rc.1`。** サポートホストの列挙（`package.json` engines.dsh、`dsh.plugin.json`、すべての `@deepseek-ai/dsh*` peer、README の管理ブロック）に `0.2.1-rc.1` を追加（区間表記なしの rc ごとの正確な列挙）。挙動は変更なし：宣言面のリリースであり、0.2.1-alpha.4 以降 engines.dsh のみを参照するホストゲートが 0.2.1-rc.1 ホストで本プラグインを許可します。
+
+### 変更
+
+- `publishConfig.registry` を `https://registry.npmjs.org` に固定（リリース衛生：公開先がミラー registry に漂移しない）。
+
 ## [5.3.0] - 2026-10-17
 
 ### 追加

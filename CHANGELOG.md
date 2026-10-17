@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.1] - 2026-10-17
+
+### Added
+
+- **Host support: DSH `0.2.1-rc.1`.** The supported-host enumeration (`package.json` engines.dsh,
+  `dsh.plugin.json`, every `@deepseek-ai/dsh*` peer and the README managed blocks) now lists
+  `0.2.1-rc.1` alongside the fifteen rc releases up the 0.2.0 line — exact per-rc enumeration,
+  no ranges. Behaviour is unchanged: this is a declaration-surface release so the host gate
+  (which since 0.2.1-alpha.4 reads engines.dsh alone) accepts the plugin on a 0.2.1-rc.1 host.
+
+### Changed
+
+- Pinned `publishConfig.registry` to `https://registry.npmjs.org` (release hygiene: a publish can
+  no longer drift to a mirror registry).
+
 ## [5.3.0] - 2026-10-17
 
 ### Added
