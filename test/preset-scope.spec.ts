@@ -82,13 +82,17 @@ describe('permission-preset fold', () => {
   })
 
   it('defaults the product scope to the gate\'s own tiers', () => {
-    // Both 自动审查 tiers: the file-sandboxed one and the full-access one that
-    // lifts the sandbox restriction (which otherwise breaks git / Cygwin
-    // tools). Same gate, same approval behaviour, no sandbox coupling.
-    expect(resolveConfig({}).gatePresets).toEqual(['permissive', 'permissive-full'])
+    // All five 自动审查 tiers the plugin contributes to the permission picker: the
+    // file-sandboxed one, the full-access one that lifts the sandbox restriction (which
+    // otherwise breaks git / Cygwin tools), and the three implementations that own a tier of
+    // their own — mechanical takeover, mechanical-with-ask, and the model-backed YOLO. Same
+    // gate in all five; the tiers differ in who answers, not in whether it is listening.
+    expect(resolveConfig({}).gatePresets)
+      .toEqual(['permissive', 'permissive-full', 'permissive-mech', 'permissive-snet', 'permissive-yolo'])
     expect(resolveConfig({ gatePresets: ['permissive', 'workspace-write'] }).gatePresets)
       .toEqual(['permissive', 'workspace-write'])
-    expect(resolveConfig({ gatePresets: [] }).gatePresets).toEqual(['permissive', 'permissive-full'])
+    expect(resolveConfig({ gatePresets: [] }).gatePresets)
+      .toEqual(['permissive', 'permissive-full', 'permissive-mech', 'permissive-snet', 'permissive-yolo'])
   })
 
   it('is active in the full-access 自动审查 tier', () => {

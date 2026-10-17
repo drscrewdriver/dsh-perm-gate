@@ -23,6 +23,7 @@ import { redactCommandText } from './redact.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
+import { isHumanFree } from './unattended.js'
 import { decideNetworkTarget, type NetworkTarget } from './network.js'
 import { NetworkLifecycle, type NetworkConfigSnapshot } from './network-lifecycle.js'
 import { RuleWatcher } from './watch.js'
@@ -190,7 +191,7 @@ export function makeApprovalAnswerer(
  * (fail-closed).
  */
 export function makePreExecuteListener(
-  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite' | 'isYolo' | 'resolveYolo'>>,
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite' | 'unattendedModeOf' | 'resolveYolo' | 'resolveSafetyNet'>>,
   feedback?: (exec: ToolExecutionLike, decision: PreToolDecisionLike) => void,
 ): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
   return async (exec, next) => {
@@ -212,12 +213,17 @@ export function makePreExecuteListener(
       return next()
     }
 
-    // YOLO — never a human prompt. A bare allow runs as usual; a deterministic deny
-    // blocks and feeds back; an ask is resolved by {@link resolveYolo} to either an
-    // allow (runs) or a block (+回喂 工具审核意见). A grader throw fails open to allow.
-    // Probed via `?.` so a stub/embedded runtime without the YOLO surface behaves as
-    // non-YOLO (the ordinary waterfall below).
-    if (runtime.isYolo?.() === true) {
+    // Human-free tiers — never a human prompt. A bare allow runs as usual; a
+    // deterministic deny blocks and feeds back; an ask is settled by whoever the tier put
+    // in the human's seat: YOLO hands what the mechanical floor could not name to the
+    // review model (and a grader throw fails open to allow), while the mechanical tier
+    // stops AT the floor and calls no model at all. Both block and feed the opinion back
+    // on a hit. `safety-net-ask` is NOT human-free — it is the explicit keep-the-person
+    // answer (and the one entry that beats a global yolo) — so it falls through to the
+    // ordinary waterfall below. Probed via `?.` so a stub/embedded runtime without the
+    // tier surface behaves as non-unattended.
+    const mode = runtime.unattendedModeOf?.(exec) ?? null
+    if (mode !== null && isHumanFree(mode)) {
       if (decision === undefined) return allowAndRun()
       if (decision.kind === 'deny') {
         feedback?.(exec, decision)
@@ -225,7 +231,9 @@ export function makePreExecuteListener(
       }
       let resolved: PreToolDecisionLike | undefined
       try {
-        resolved = await runtime.resolveYolo?.(exec, decision)
+        resolved = mode === 'safety-net-passthrough'
+          ? runtime.resolveSafetyNet?.(exec, decision)
+          : await runtime.resolveYolo?.(exec, decision)
       } catch {
         resolved = undefined // fail-open: could not grade → allow ("其余放行")
       }
@@ -541,9 +549,14 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         strategies: resolvePermissiveStrategies(c.permissiveStrategies),
       }
     },
-    // Read the YOLO tier switch live so the settings-card toggle takes effect on the
-    // next tool call: never human-confirm, block-on-danger, feed back to the main LLM.
+    // Read the YOLO switch live so the settings-card toggle takes effect on the next tool
+    // call. It is the switch behind the `permissive-yolo` tier only — never a flow added to
+    // sessions that did not select it.
     readYolo: () => current().yolo ?? false,
+    // The two `safenet` switches, read live: each controls whether one implementation
+    // exists, and each implementation owns one preset, so presets never cross.
+    readSafenetPass: () => current().safenetPass ?? true,
+    readSafenetAsk: () => current().safenetAsk ?? false,
     // Degraded review: when no reviewer can grade an ask (none configured, or the
     // endpoint gave up), the deterministic nets decide instead of a popup nobody
     // answers — a cc-safety-net-class gate that blocks named danger and runs the rest.

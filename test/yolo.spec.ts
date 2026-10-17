@@ -5,8 +5,11 @@ import type { PreToolDecisionLike, ToolExecutionLike } from '../src/runtime.js'
 
 const RULES = undefined // no rules file: everything defaults to ask
 
-function exec(command: string): ToolExecutionLike {
-  return { name: 'bash', arguments: { command }, cwd: '/work', sessionId: 's1' } as ToolExecutionLike
+function exec(command: string, preset?: string): ToolExecutionLike {
+  // The YOLO implementation now owns one preset (`permissive-yolo`) and nothing else, so a
+  // call that should be taken over by it has to say which tier its session is in.
+  const events = preset === undefined ? [] : [{ type: 'permission/preset', data: { preset } }]
+  return { name: 'bash', arguments: { command }, cwd: '/work', sessionId: 's1', events } as ToolExecutionLike
 }
 
 function yoloRuntime(riskHook?: (command: string) => Promise<{ kind: 'safe' } | { kind: 'risky'; category: string }>): PermGateRuntime {
@@ -64,7 +67,7 @@ describe('YOLO pre-execute listener — allow runs, block feeds back 工具审�
     const r = yoloRuntime(async () => ({ kind: 'risky', category: 'neutral' }))
     const seen: PreToolDecisionLike[] = []
     const listener = makePreExecuteListener(r, (_exec, decision) => { seen.push(decision) })
-    const out = await listener(exec('npm install left-pad'), async () => 'RAN')
+    const out = await listener(exec('npm install left-pad', 'permissive-yolo'), async () => 'RAN')
     expect(out).toBe('RAN')
     expect(seen).toHaveLength(0)
   })
@@ -75,7 +78,7 @@ describe('YOLO pre-execute listener — allow runs, block feeds back 工具审�
     const listener = makePreExecuteListener(r, (_exec, decision) => { seen.push(decision) })
     // Not a deny-keyword command, so the path exercised is resolveYolo's model-driven
     // block (which carries the 已拦截 displayReason), not the deterministic deny-keyword.
-    const out = await listener(exec('cat ~/.npmrc'), async () => 'RAN')
+    const out = await listener(exec('cat ~/.npmrc', 'permissive-yolo'), async () => 'RAN')
     expect((out as PreToolDecisionLike).kind).toBe('deny')
     expect(seen).toHaveLength(1)
     expect(seen[0].displayReason?.zh).toContain('已拦截危险命令')
@@ -88,7 +91,7 @@ describe('YOLO pre-execute listener — allow runs, block feeds back 工具审�
       riskHook: async () => { throw new Error('grader down') },
     })
     const listener = makePreExecuteListener(r, () => { /* no feedback expected */ })
-    const out = await listener(exec('npm install left-pad'), async () => 'RAN')
+    const out = await listener(exec('npm install left-pad', 'permissive-yolo'), async () => 'RAN')
     expect(out).toBe('RAN')
   })
 })

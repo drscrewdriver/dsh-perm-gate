@@ -45,6 +45,7 @@ import { extractAgentCandidates } from './agent-identity.js'
 import { resolveRuleChain } from './rule-chain.js'
 import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
 import { permissionPresetOf, presetInScope, type SessionEventLike } from './preset.js'
+import { resolveTierMode, type UnattendedMode } from './unattended.js'
 import { resolveGatePresets } from './config.js'
 
 /**
@@ -256,6 +257,13 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * an ask, decide on the deterministic nets instead of parking it on a human.
    */
   readonly readRulesFallback?: () => boolean
+  /**
+   * Optional live sources of the two `safenet` switches. Each says whether that
+   * implementation exists at all, and each owns exactly one preset (`permissive-mech` for
+   * pass, `permissive-snet` for ask), so flipping one cannot change another tier.
+   */
+  readonly readSafenetPass?: () => boolean
+  readonly readSafenetAsk?: () => boolean
   /**
    * Optional live source of the script-review switch: attach the body of every script a
    * call runs to the review, so the grader and the human judge code, not a filename.
@@ -1765,6 +1773,13 @@ export class PermGateRuntime {
       return undefined
     }
 
+    // The `permissive-snet` tier grades without a model. The mechanical screen has already
+    // run (its doubts ride along in the ask context) and the deterministic screens above
+    // still apply, but from here the ask goes to a person as-is — that tier exists for runs
+    // with no reviewer LLM, or where the tokens are not worth spending and a human answer is
+    // preferred over an auto-decision.
+    if (this.isSafetyNetAsk(exec)) return decision
+
     if (!permissive.strategies.llmAssist) return decision
 
     // One live read of the classifier setup. Without a usable receiver (a
@@ -1945,8 +1960,153 @@ export class PermGateRuntime {
    */
   async resolveYolo(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined> {
     const callId = randomId()
+    const askCtx = this.unattendedContextFor(exec, decision)
+    const judged = this.mechanicalJudge(askCtx)
+    let riskCategory: string | undefined
+    // Whether the reviewer actually spoke. YOLO advertises "the model answers in the
+    // person's place"; when there is no grader, or it gave up, the tier still refuses to ask
+    // a human and settles on the mechanical screen — but the audit and the approvals history
+    // must say so, or the two human-free tiers silently become one.
+    let reviewerAnswered = true
+    // The grader's sentence, kept for the block note: in YOLO there is no popup, so this
+    // text plus the feedback opinion is the only explanation the main LLM ever gets.
+    let modelNote: string | undefined
+    // The shared mechanical floor runs first, and its verdict stands: these are the
+    // signals a model can never clear, and asking costs a call for nothing. Only what it
+    // cannot name goes to the grader — and there only to ESCALATE to a block. safe /
+    // neutral / unresolved / no grader adds no danger signal (the yolo "keep moving"
+    // contract; an absent grader falls through to the mechanical conclusion).
+    if (judged === null) {
+      const graded = await this.modelJudge(askCtx, decision.reason)
+      reviewerAnswered = graded.answered
+      if (graded.risky) {
+        riskCategory = graded.category
+        modelNote = graded.note
+      }
+    }
+    const danger = judged !== null || riskCategory !== undefined
+
+    if (!danger) {
+      const reason = reviewerAnswered
+        ? `yolo: allow (no danger signal) — ${decision.reason}`
+        : `yolo: allow (no reviewer answered; mechanical screen found nothing) — ${decision.reason}`
+      this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
+      this.recordEvent(exec, 'auto', reason, { verdict: reviewerAnswered ? 'yolo-allow' : 'yolo-allow-no-reviewer', risk: 'safe' })
+      this.untrackAsk(exec)
+      return undefined
+    }
+
+    const why = riskCategory !== undefined
+      ? `风险模型判定 ${riskCategory}${modelNote === undefined ? '' : `：${modelNote}`}`
+      : judged!.why
+    // Which danger signal fired, as a tag the feedback layer can name to the main LLM
+    // (`[yolo-danger:…]` → 依据 in 工具审核意见) and classify on: an opaque payload must
+    // read as *manual_only*, everything else as a hard stop rather than "narrow it".
+    const dangerTag = `[yolo-danger:${riskCategory !== undefined
+      ? `model-risk.${riskCategory}`.toLowerCase().replace(/[^a-z0-9._-]/g, '-')
+      : judged!.signal}]`
+    const cmd = humanCommand(askCtx) || askCtx.tool
+    const reason = `yolo: block ${dangerTag} — ${decision.reason}${modelNote === undefined ? '' : ` · model: ${modelNote}`}`
+    this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'deny', source: 'classifier', reason, at: Date.now() }))
+    this.recordEvent(exec, 'deny', reason, { verdict: 'yolo-block', ...(riskCategory !== undefined ? { category: riskCategory } : {}) })
+    this.untrackAsk(exec)
+    return {
+      kind: 'deny',
+      reason,
+      displayReason: {
+        en: `Blocked dangerous command: ${cmd}. Reason: ${riskCategory ?? 'irreversible/opaque'}. Use a safer, reversible approach or re-request with justification.`,
+        zh: `已拦截危险命令：${cmd}。原因：${why}。请换用更安全、可逆的方式，或在说明理由后重新发起。`,
+      },
+    }
+  }
+
+  /**
+   * The review model's pass over one ask, shared by every tier that lets a model
+   * speak for the human. `answered: false` means no reviewer is configured or it was
+   * unreachable — what that *means* is the one thing the tiers disagree about, so the
+   * caller decides (YOLO falls back to the mechanical conclusion, the human tiers keep
+   * the popup, the mechanical tier never gets here).
+   */
+  private async modelJudge(askCtx: AskContext, reason: string): Promise<{
+    answered: boolean
+    risky: boolean
+    category?: string
+    note?: string
+  }> {
+    if (!this.classifierUsable()) return { answered: false, risky: false }
+    const req: RiskRequest = {
+      tool: askCtx.tool,
+      args: askCtx.args ?? {},
+      reason,
+      workspaceRoot: askCtx.workspaceRoot,
+      targetResolvable: askCtx.targetResolvable,
+      // Same bodies the human would have been shown: in a human-free tier there is no
+      // popup, but a script run is graded on its code either way.
+      ...(toGraderPayload(askCtx).script_contents === undefined ? {} : { scriptContents: toGraderPayload(askCtx).script_contents }),
+    }
+    const cfg = this.options.readClassifyConfig?.()
+    const useHost = this.liveClassifySource() === 'host' && this.options.hostLlm !== undefined
+    let risk: RiskVerdict
+    if (this.options.riskHook !== undefined) {
+      risk = await this.options.riskHook(req)
+    } else if (useHost) {
+      const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
+      risk = await classifyRiskWith(
+        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000),
+        req,
+      )
+    } else {
+      risk = await classifyRisk(cfg ?? {}, req)
+    }
+    // `neutral` is the grader declining to characterize the call, not a risk signal, and
+    // `unresolved` means it never got an answer at all. Only the first counts as "the
+    // reviewer spoke": a tier that advertises a model must not report one when it got
+    // nothing, which is why `answered` is what the caller labels the outcome with.
+    if (risk.kind === 'risky' && risk.category !== 'neutral') {
+      return { answered: true, risky: true, category: risk.category, note: graderNote(risk) }
+    }
+    return { answered: risk.kind !== 'unresolved', risky: false }
+  }
+
+  /**
+   * Which implementation, if any, owns this call's permission preset.
+   *
+   * One preset, one switch: `permissive-mech` is the mechanical takeover of asks,
+   * `permissive-snet` the model-free ask, `permissive-yolo` the model-backed human-free
+   * tier. Any other preset — including one whose switch is off — returns `null` and runs the
+   * ordinary flow, because a tier with no implementation behind it must not start behaving
+   * like some other tier.
+   */
+  unattendedModeOf(exec: ToolExecutionLike): UnattendedMode | null {
+    return resolveTierMode(this.presetOf(exec), {
+      yolo: this.isYolo(),
+      safenetPass: this.options.readSafenetPass?.() ?? (this.options.safenetPass ?? false),
+      safenetAsk: this.options.readSafenetAsk?.() ?? (this.options.safenetAsk ?? false),
+    })
+  }
+
+  /** The mechanical human-free tier for this call (`permissive-mech`, switch on). */
+  isSafetyNet(exec: ToolExecutionLike): boolean {
+    return this.unattendedModeOf(exec) === 'safety-net-passthrough'
+  }
+
+  /**
+   * The model-free ask tier for this call (`permissive-snet`, switch on): the mechanical
+   * screen still runs and its doubts ride along with the ask, but no grader is consulted
+   * and the decision stays with a person.
+   */
+  isSafetyNetAsk(exec: ToolExecutionLike): boolean {
+    return this.unattendedModeOf(exec) === 'safety-net-ask'
+  }
+
+  /**
+   * One frozen view of a call for the human-free tiers: the same context the popup
+   * would have shown (script bodies included), plus the salted digest fields the
+   * grader path expects.
+   */
+  private unattendedContextFor(exec: ToolExecutionLike, decision: PreToolDecisionLike): AskContext {
     const workspace = cwdOf(exec)
-    const askCtx = buildAskContext({
+    return buildAskContext({
       tool: exec.name,
       args: exec.arguments ?? {},
       commandText: exec.commandText,
@@ -1960,84 +2120,74 @@ export class PermGateRuntime {
       salt: sessionIdOf(exec),
       hash: (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16),
     })
-    // Deterministic danger: the irreversible/never-clear net (I-tier), an unlearnable
-    // act, or an unreadable payload. These the model can never clear, so block.
-    let danger = askCtx.reversibility === 'I' || askCtx.unlearnable || !askCtx.targetResolvable
-    let riskCategory: string | undefined
-    // The grader's sentence, kept for the block note: in YOLO there is no popup, so this
-    // text plus the feedback opinion is the only explanation the main LLM ever gets.
-    let modelNote: string | undefined
-    // Ask the grader to catch *semantic* danger the rules cannot name — but only to
-    // escalate to a block, never to allow. safe / neutral / unresolved / no grader → not
-    // a new danger signal (fail-open for the yolo "keep moving" contract).
-    if (!danger && this.classifierUsable()) {
-      const req: RiskRequest = {
-        tool: askCtx.tool,
-        args: askCtx.args ?? {},
-        reason: decision.reason,
-        workspaceRoot: askCtx.workspaceRoot,
-        targetResolvable: askCtx.targetResolvable,
-        // Same bodies the human would have been shown: in YOLO there is no popup, but a
-        // script run is graded on its code either way.
-        ...(toGraderPayload(askCtx).script_contents === undefined ? {} : { scriptContents: toGraderPayload(askCtx).script_contents }),
-      }
-      const cfg = this.options.readClassifyConfig?.()
-      const useHost = this.liveClassifySource() === 'host' && this.options.hostLlm !== undefined
-      let risk: RiskVerdict
-      if (this.options.riskHook !== undefined) {
-        risk = await this.options.riskHook(req)
-      } else if (useHost) {
-        const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
-        risk = await classifyRiskWith(
-          (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000),
-          req,
-        )
-      } else {
-        risk = await classifyRisk(cfg ?? {}, req)
-      }
-      if (risk.kind === 'risky' && risk.category !== 'neutral') {
-        danger = true
-        riskCategory = risk.category
-        modelNote = graderNote(risk)
-      }
-    }
+  }
 
-    if (!danger) {
-      const reason = `yolo: allow (no danger signal) — ${decision.reason}`
-      this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
-      this.recordEvent(exec, 'auto', reason, { verdict: 'yolo-allow', risk: 'safe' })
+  /**
+   * The mechanical floor — what the deterministic nets can NAME about an ask, or `null`
+   * when nothing is nameable. Every tier classifies with this one judge; the tiers differ
+   * only in what they then do with the answer:
+   *
+   * | tier | 机械点名了危险 | 机械没点名 |
+   * | --- | --- | --- |
+   * | 人工确认（`permissive` / `permissive-full`） | 仍然问人，把信号作为疑点列出 | 问人（`llmAssist` 开着时模型可先精化） |
+   * | `safenetAsk`（`permissive-snet`） | 问人，列疑点 | 问人，**一次模型都不叫** |
+   * | `safenetPass`（`permissive-mech`） | 直接拦 + 回喂 | 直接放行，一次模型都不叫 |
+   * | `yolo`（`permissive-yolo`） | 直接拦（模型无法洗白，也不花这次调用） | 问模型；模型不在则按机械结论处置并标注 |
+   *
+   * The human tier not auto-blocking on a hit is deliberate: the same net that reads
+   * `rm -rf` of a home directory as irreversible also reads a project's own aggressive
+   * cleanup that way, and a person can tell those apart. Nobody is watching in the two
+   * human-free tiers, so there the cost of a false positive is accepted.
+   */
+  private mechanicalJudge(askCtx: AskContext): { signal: string; why: string; english: string } | null {
+    if (!askCtx.targetResolvable) {
+      return { signal: 'opaque-payload', why: '载荷不可读（编码/工作区外脚本/未见内容）', english: 'unreadable payload' }
+    }
+    if (askCtx.unlearnable) {
+      return { signal: 'data-destruction', why: '不可逆数据销毁', english: 'irreversible data destruction' }
+    }
+    if (askCtx.reversibility === 'I') {
+      return { signal: 'irreversible-op', why: '不可逆操作', english: 'irreversible operation' }
+    }
+    return null
+  }
+
+  /**
+   * The mechanical tier (`permissive-mech`, behind the `safenetPass` switch) — a
+   * human-free ask settled by the deterministic nets ALONE, with **no model call at all**.
+   * Two equivalent ways to name it: the reviewed form of `approval: never` (that preset
+   * passes every ask with nothing judging it; this one passes only what the nets cannot
+   * condemn), and YOLO with the model taken away — which is also what YOLO itself falls
+   * back to when no reviewer answers.
+   *
+   * It shares {@link mechanicalJudge} with every other tier's first pass: an opaque
+   * payload, irreversible act, or unlearnable destruction is blocked and the reason fed
+   * back to the main LLM. Everything the nets cannot name simply runs. It never softens a
+   * deterministic deny — those arrive already denied — and it never raises a human prompt.
+   */
+  resolveSafetyNet(exec: ToolExecutionLike, decision: PreToolDecisionLike): PreToolDecisionLike | undefined {
+    const callId = randomId()
+    const askCtx = this.unattendedContextFor(exec, decision)
+    const judge = this.mechanicalJudge(askCtx)
+    if (judge === null) {
+      const reason = `safety-net-passthrough: allow (no deterministic danger) — ${decision.reason}`
+      this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'rule', reason, at: Date.now() }))
+      this.recordEvent(exec, 'auto', reason, { verdict: 'safety-net-passthrough-allow', risk: 'safe' })
       this.untrackAsk(exec)
+      this.clearCall(exec, reason, 'safety-net-passthrough-allow', 'rule')
       return undefined
     }
-
-    const why = riskCategory !== undefined
-      ? `风险模型判定 ${riskCategory}${modelNote === undefined ? '' : `：${modelNote}`}`
-      : !askCtx.targetResolvable
-        ? '载荷不可读（编码/工作区外脚本/未见内容）'
-        : askCtx.unlearnable
-          ? '不可逆数据销毁'
-          : '不可逆操作'
-    // Which danger signal fired, as a tag the feedback layer can name to the main LLM
-    // (`[yolo-danger:…]` → 依据 in 工具审核意见) and classify on: an opaque payload must
-    // read as *manual_only*, everything else as a hard stop rather than "narrow it".
-    const dangerTag = `[yolo-danger:${(riskCategory !== undefined
-      ? `model-risk.${riskCategory}`
-      : !askCtx.targetResolvable
-        ? 'opaque-payload'
-        : askCtx.unlearnable
-          ? 'data-destruction'
-          : 'irreversible-op').toLowerCase().replace(/[^a-z0-9._-]/g, '-')}]`
     const cmd = humanCommand(askCtx) || askCtx.tool
-    const reason = `yolo: block ${dangerTag} — ${decision.reason}${modelNote === undefined ? '' : ` · model: ${modelNote}`}`
-    this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'deny', source: 'classifier', reason, at: Date.now() }))
-    this.recordEvent(exec, 'deny', reason, { verdict: 'yolo-block', ...(riskCategory !== undefined ? { category: riskCategory } : {}) })
+    const reason = `safety-net-passthrough: block [safety-net-danger:${judge.signal}] — ${decision.reason}`
+    this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'deny', source: 'rule', reason, at: Date.now() }))
+    this.recordEvent(exec, 'deny', reason, { verdict: 'safety-net-passthrough-block' })
     this.untrackAsk(exec)
     return {
       kind: 'deny',
       reason,
       displayReason: {
-        en: `Blocked dangerous command: ${cmd}. Reason: ${riskCategory ?? 'irreversible/opaque'}. Use a safer, reversible approach or re-request with justification.`,
-        zh: `已拦截危险命令：${cmd}。原因：${why}。请换用更安全、可逆的方式，或在说明理由后重新发起。`,
+        en: `Unattended mechanical review blocked ${cmd} (${judge.english}). Run it yourself, or use a safer, reversible approach.`,
+        zh: `无人值守机械审查已拦截：${cmd}（${judge.why}）。请自行手动执行，或改用更安全、可逆的方式。`,
       },
     }
   }
@@ -2057,12 +2207,10 @@ export class PermGateRuntime {
   resolveRulesDegrade(exec: ToolExecutionLike, decision: PreToolDecisionLike, ctx?: AskContext): PreToolDecisionLike | undefined {
     const callId = randomId()
     const askCtx = ctx ?? this.contextFor(exec, decision.reason)
-    const opaque = !askCtx.targetResolvable
-    const danger = askCtx.reversibility === 'I' || askCtx.unlearnable || opaque
+    const judge = this.mechanicalJudge(askCtx)
     // Tag names the signal so the feedback layer can classify it: an opaque payload is
     // *manual_only* (nobody read it, a human should run it), the rest is a hard stop.
-    const signal = (opaque ? 'opaque-payload' : askCtx.unlearnable ? 'data-destruction' : 'irreversible-op').toLowerCase()
-    if (!danger) {
+    if (judge === null) {
       const reason = `rules-fallback: allow (no reviewer, no deterministic danger) — ${decision.reason}`
       this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'rule', reason, at: Date.now() }))
       this.recordEvent(exec, 'auto', reason, { verdict: 'rules-fallback-allow', risk: 'safe' })
@@ -2070,13 +2218,8 @@ export class PermGateRuntime {
       this.clearCall(exec, reason, 'rules-fallback-allow', 'rule')
       return undefined
     }
-    const why = opaque
-      ? '载荷不可读（编码/工作区外脚本/未见内容）'
-      : askCtx.unlearnable
-        ? '不可逆数据销毁'
-        : '不可逆操作'
     const cmd = humanCommand(askCtx) || askCtx.tool
-    const reason = `rules-fallback: block [rules-fallback-danger:${signal}] — ${decision.reason}`
+    const reason = `rules-fallback: block [rules-fallback-danger:${judge.signal}] — ${decision.reason}`
     this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'deny', source: 'rule', reason, at: Date.now() }))
     this.recordEvent(exec, 'deny', reason, { verdict: 'rules-fallback-block' })
     this.untrackAsk(exec)
@@ -2084,8 +2227,8 @@ export class PermGateRuntime {
       kind: 'deny',
       reason,
       displayReason: {
-        en: `No risk reviewer available, so the rule gate decided this call: blocked ${cmd} (${opaque ? 'unreadable payload' : 'irreversible'}). Run it yourself, or use a safer, reversible approach.`,
-        zh: `无可用审查模型，已按规则闸门处置：拦截 ${cmd}（${why}）。请自行手动执行，或改用更安全、可逆的方式。`,
+        en: `No risk reviewer available, so the rule gate decided this call: blocked ${cmd} (${judge.signal === 'opaque-payload' ? 'unreadable payload' : 'irreversible'}). Run it yourself, or use a safer, reversible approach.`,
+        zh: `无可用审查模型，已按规则闸门处置：拦截 ${cmd}（${judge.why}）。请自行手动执行，或改用更安全、可逆的方式。`,
       },
     }
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CONTENT_ARG_KEYS, OPERATION_ARG_KEYS, keywordScanText, mergeScanKeys, operationText } from '../src/scan-text.js'
+import { hardDenyReason } from '../src/engine.js'
 import { PermGateRuntime } from '../src/runtime.js'
 
 /**
@@ -198,5 +199,45 @@ describe('extraContentArgKeys / extraOperationArgKeys — additive key lists', (
     expect(keywordScanText('exit_plan_mode', { plan: RUN })).toBe('')
     expect(keywordScanText('bash', { command: 'echo hi' }, 'echo hi')).toBe('echo hi echo hi')
     expect(keywordScanText('pash', { steps: RUN })).toContain('rm -rf')
+  })
+
+  /**
+   * These lists come out of the host settings namespace, which has been observed to
+   * deliver an object where an array belongs (the `allowlist: {}` passthrough). Junk
+   * must degrade to "nothing declared" — a scan rule that throws takes the whole gate
+   * down with it, and a scan rule that reads a `{}` as keys would widen.
+   */
+  it.each([
+    ['an object', {}],
+    ['null', null],
+    ['a string', 'steps'],
+    ['an array with junk', ['steps', 42, null, '']],
+  ])('tolerates a malformed value (%s)', (_label, value) => {
+    const r = new PermGateRuntime({
+      rulesFile: undefined,
+      readExtraContentArgKeys: () => value as never,
+      readExtraOperationArgKeys: () => value as never,
+    })
+    const call = { name: 'pash', arguments: { steps: RUN }, cwd: '/work', sessionId: 's1' }
+    expect(() => r.decideExecution(call)).not.toThrow()
+    // Only the well-formed string survived the filter.
+    const declared = r.decideExecution(call)?.kind
+    expect(declared === 'deny' || declared === undefined).toBe(true)
+    expect(r.decideExecution({ name: 'pash', arguments: { note: RUN }, cwd: '/work', sessionId: 's1' })?.kind).toBe('deny')
+  })
+
+  it('applies from static config too, for an embedder with no settings namespace', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined, extraContentArgKeys: ['steps'] })
+    expect(r.decideExecution({ name: 'pash', arguments: { steps: RUN }, cwd: '/work', sessionId: 's1' })?.kind).not.toBe('deny')
+  })
+
+  /** The context field is public: an embedder or a dry run must be able to set it alone. */
+  it('is honoured by the engine when handed straight to hardDenyReason', () => {
+    const KEY_BODY = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpA\n'
+    const base = { tool: 'pash', args: { note: KEY_BODY }, cwd: '/work' }
+    expect(hardDenyReason(base as never)).toContain('credential')
+    expect(hardDenyReason({ ...base, scanKeys: { content: ['note'] } } as never)).toBeUndefined()
+    expect(hardDenyReason({ ...base, tool: 'exit_plan_mode', scanKeys: { operation: ['note'] } } as never))
+      .toContain('credential')
   })
 })

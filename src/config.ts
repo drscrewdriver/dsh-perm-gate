@@ -117,17 +117,34 @@ export interface PermGateConfig {
    */
   readonly permissive?: boolean
   /**
-   * YOLO mode — a tier that **never raises a human confirmation**. Every call the
-   * deterministic chain would `ask` is resolved automatically: a *dangerous* ask
-   * (irreversible / unlearnable / opaque payload, or an `llmAssist` hard-risk verdict
-   * when a receiver is configured) is **blocked** and the reason is fed back to the
-   * main LLM as a user message (`工具审核意见: "…"`); everything else is **allowed**,
-   * so ordinary work keeps flowing without a human. It is not fail-closed-to-human like
-   * the baseline: it is fail-closed-to-*block* only on a positive danger signal,
-   * fail-open otherwise. Independent of `permissive`/`llmAssist` (which it can borrow
-   * a classifier from, but does not require).
+   * YOLO — the switch behind the `permissive-yolo` tier, the model-backed human-free
+   * implementation. It never raises a human confirmation: what the mechanical screen names
+   * (irreversible, unlearnable, unreadable payload) is blocked and fed back to the main LLM
+   * as a `工具审核意见` user message, and the residual goes to the review model, which
+   * answers in the person's place — risky blocks, anything else runs.
+   *
+   * This is a per-tier switch, not a session-wide flow: it governs the `permissive-yolo`
+   * preset and nothing else, so turning it off changes no other tier's behaviour. The tier
+   * is the model-backed one by definition; with no reviewer in seat it still refuses to ask
+   * a person (that is the promise), settles on the mechanical screen alone, and records that
+   * the model never answered instead of letting the tier quietly become a different one.
    */
   readonly yolo?: boolean
+  /**
+   * `safenet-pass` — the switch behind the `permissive-mech` tier: the deterministic
+   * mechanical screen plus the preset opinions take over the ask. Named danger is blocked
+   * and fed back to the main LLM, everything the nets cannot condemn runs. No human prompt
+   * and **no model call at all** — the reviewed form of `approval: never`, and the tier for
+   * a run with no reviewer LLM or where the tokens are not worth spending.
+   */
+  readonly safenetPass?: boolean
+  /**
+   * `safenet-ask` — the switch behind the `permissive-snet` tier: the mechanical screen
+   * still filters and lists its doubts, but the ask stays with a **person** and no grader is
+   * consulted. The shape the gate takes when no reviewer LLM is connected and you would
+   * rather answer than auto-run. Uncommon by design.
+   */
+  readonly safenetAsk?: boolean
   /**
    * Degraded review — fall back to a **rule-only gate when there is no reviewer**.
    *
@@ -139,10 +156,22 @@ export interface PermGateConfig {
    * a cc-safety-net-class gate: danger the rules can name (irreversible / unlearnable /
    * opaque payload) is **blocked** and the reason is fed back to the main LLM, anything
    * else runs. It changes nothing while a reviewer *is* answering, and never softens a
-   * deterministic deny. Orthogonal to `yolo`, which forgoes the human even when a
-   * reviewer works.
+   * deterministic deny. It applies to the ordinary 自动审查 tiers (`permissive`,
+   * `permissive-full`); the three tiers that own an implementation (`yolo`, `safenetPass`,
+   * `safenetAsk`) already say who answers and are not degraded by this switch.
    */
   readonly rulesFallback?: boolean
+  /**
+   * **Retired** (2026-10-17) — the per-preset mode table (`<preset id>=<mode>`) that briefly
+   * decided who answers an ask. Each human-free implementation now owns exactly one preset
+   * and exactly one switch (`yolo` → `permissive-yolo`, `safenetPass` → `permissive-mech`,
+   * `safenetAsk` → `permissive-snet`), which is what the table could not guarantee: entries
+   * could name a preset outside the gate's scope, and a stored list could claim to steer
+   * presets it never actually reached. The key stays in the schema **only** so a
+   * profile written by those builds still parses; nothing reads it, and the settings card no
+   * longer writes it. The replacement semantics live in `src/unattended.ts`.
+   */
+  readonly unattendedTiers?: string[]
   /**
    * Script review (default **on**) — when a call runs a script file (`bash x.sh`,
    * `pwsh -File x.ps1`, `python x.py`, `./deploy.sh`), read the file and attach its
@@ -565,6 +594,18 @@ export const Config = z.object({
   permissive: vol(z.boolean().default(false)),
   yolo: vol(z.boolean().default(false)),
   rulesFallback: vol(z.boolean().default(false)),
+  /**
+   * Retired (2026-10-17): the per-preset mode table that briefly mapped
+   * `<preset id>=<mode>`. Each human-free implementation now owns exactly one preset and
+   * exactly one switch (`yolo` / `safenetPass` / `safenetAsk`), so presets never cross and a
+   * switch means what it says — whether that implementation exists. The key is kept in the
+   * schema only so an older profile that stored it still parses.
+   */
+  unattendedTiers: vol(z.array(z.string()).default([])),
+  /** Switch: the `permissive-mech` implementation exists (mechanical takeover of asks). */
+  safenetPass: vol(z.boolean().default(true)),
+  /** Switch: the `permissive-snet` implementation exists (mechanical screen, still asks). */
+  safenetAsk: vol(z.boolean().default(false)),
   scriptReview: vol(z.boolean().default(true)),
   gatePresets: z.array(z.string()),
   permissiveStrategies: vol(z.object({
@@ -622,7 +663,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'yolo', 'rulesFallback', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

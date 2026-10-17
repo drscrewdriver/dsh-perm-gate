@@ -6,12 +6,19 @@
  * from the permission picker on the next profile load. These assertions pin
  * the exact key set and the built-in knobs, so an accidental drop (or the
  * reintroduction of a retired tier) fails here instead of in the UI.
+ *
+ * They also pin the cross-check between the two sources of truth: `src/preset.ts`
+ * declares which tiers the gate acts in and which modes those tiers ship with, and
+ * this file declares that the tiers exist at all. Either half drifting alone leaves a
+ * dropdown option that silently does nothing.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_GATE_PRESETS } from '../src/preset.js'
+import { MODE_PRESETS, UNATTENDED_MODES } from '../src/unattended.js'
 
 /** One loader patch entry as far as this file cares. */
 interface PatchEntry {
@@ -65,8 +72,30 @@ describe('cordis.patch.yml permission presets', () => {
     // Under `approval: never` the DSH seam rejects every ask before any
     // answerer runs, so this gate's asks would degrade to passthrough. Any
     // tier the gate claims must therefore stay answerable.
+    //
+    // Driven off DEFAULT_GATE_PRESETS rather than a literal list: a tier added to the
+    // gate's scope without a patch entry (or vice versa) is exactly the drift that makes
+    // a dropdown option silently do nothing.
+    for (const key of DEFAULT_GATE_PRESETS) {
+      expect(presets[key], `cordis.patch.yml is missing the gate tier "${key}"`).toBeDefined()
+      expect(presets[key]?.approval, `"${key}" must keep approval: ask`).toBe('ask')
+    }
     expect(presets['permissive']?.approval).toBe('ask')
     expect(presets['permissive-full']?.approval).toBe('ask')
+  })
+
+  it('gives every unattended implementation a preset to own, and only one', () => {
+    // One switch, one implementation, one tier — the mapping is the design. A preset shared
+    // by two implementations would make the switches cross no matter what the labels say,
+    // and a mode without a declared preset is a switch that does nothing.
+    const owners = Object.values(MODE_PRESETS)
+    expect(new Set(owners).size).toBe(UNATTENDED_MODES.length)
+    for (const mode of UNATTENDED_MODES) {
+      const preset = MODE_PRESETS[mode]
+      expect(presets[preset], `mode "${mode}" owns an undeclared preset "${preset}"`).toBeDefined()
+      expect(DEFAULT_GATE_PRESETS, `"${preset}" is outside the gate's scope`).toContain(preset)
+      expect(presets[preset]?.approval).toBe('ask')
+    }
   })
 
   it('lifts the label into the product string while the key stays machine-stable', () => {
@@ -74,7 +103,7 @@ describe('cordis.patch.yml permission presets', () => {
     // simply title-case a kebab-case name, so the localized label can only come
     // from this one string; the KEY stays `permissive` because `gatePresets`
     // matches keys and the permission projection reports them.
-    for (const key of ['permissive', 'permissive-full']) {
+    for (const key of [...DEFAULT_GATE_PRESETS]) {
       const name = presets[key]?.name ?? ''
       expect(name).not.toBe('')
       expect(name).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
@@ -99,6 +128,9 @@ describe('cordis.patch.yml permission presets', () => {
       'danger-full-access',
       'permissive',
       'permissive-full',
+      'permissive-mech',
+      'permissive-snet',
+      'permissive-yolo',
       'read-only',
       'workspace-write',
     ])

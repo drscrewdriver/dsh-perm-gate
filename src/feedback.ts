@@ -45,9 +45,10 @@ export const INTENT_ADVICE: Readonly<Record<ReviewIntent, { readonly zh: string;
   },
 }
 
-/** Extract the `[deny-rule:<id>]` tag, a gate-danger tag (YOLO / degraded review), or P0. */
+/** Extract the `[deny-rule:<id>]` tag, a gate-danger tag (YOLO / degraded review /
+ * mechanical passthrough), or P0. */
 export function ruleIdOf(reason: string): string | undefined {
-  const tag = /\[(deny-rule:[a-z0-9._-]+|(?:yolo|rules-fallback)-danger:[a-z0-9._-]+)\]/.exec(reason)
+  const tag = /\[(deny-rule:[a-z0-9._-]+|(?:yolo|rules-fallback|safety-net)-danger:[a-z0-9._-]+)\]/.exec(reason)
   if (tag?.[1] !== undefined) return tag[1]
   if (/\[hard-deny\]|hard-deny/i.test(reason)) return 'hard-deny'
   return undefined
@@ -86,7 +87,7 @@ export function composeReviewOpinion(input: {
   const rule = ruleIdOf(input.reason)
   const advice = INTENT_ADVICE[intent]
   const locale = input.locale ?? 'zh'
-  const cleanReason = input.reason.replace(/\[(?:deny-rule:[a-z0-9._-]+|(?:yolo|rules-fallback)-danger:[a-z0-9._-]+|hard-deny)\]\s*/gi, '').replace(/\s*·.*$/, '').trim()
+  const cleanReason = input.reason.replace(/\[(?:deny-rule:[a-z0-9._-]+|(?:yolo|rules-fallback|safety-net)-danger:[a-z0-9._-]+|hard-deny)\]\s*/gi, '').replace(/\s*·.*$/, '').trim()
   const text = locale === 'zh'
     ? `已拦截。依据：${rule ?? '默认策略'}。原因：${cleanReason}。处置(${intent})：${advice.zh}`
     : `Blocked. Rule: ${rule ?? 'default policy'}. Reason: ${cleanReason}. Disposition(${intent}): ${advice.en}`

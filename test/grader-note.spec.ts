@@ -59,8 +59,11 @@ describe('graderNote — the model sentence, contained', () => {
 describe('the grader sentence reaches the reason it explains', () => {
   const RISKY = { kind: 'risky', category: 'deletion', reason: 'this deletes 300 tracked files' } as const
 
-  function exec(command: string): ToolExecutionLike {
-    return { name: 'bash', arguments: { command }, cwd: '/work', sessionId: 's1' } as ToolExecutionLike
+  function exec(command: string, preset?: string): ToolExecutionLike {
+    // YOLO owns exactly one preset now, so a listener-level YOLO test has to put the
+    // session in it.
+    const events = preset === undefined ? [] : [{ type: 'permission/preset', data: { preset } }]
+    return { name: 'bash', arguments: { command }, cwd: '/work', sessionId: 's1', events } as ToolExecutionLike
   }
 
   /**
@@ -91,7 +94,7 @@ describe('the grader sentence reaches the reason it explains', () => {
     })
     const seen: PreToolDecisionLike[] = []
     const listener = makePreExecuteListener(r, (_exec, decision) => { seen.push(decision) })
-    const out = await listener(exec('cat ~/.npmrc'), async () => 'RAN')
+    const out = await listener(exec('cat ~/.npmrc', 'permissive-yolo'), async () => 'RAN')
     expect((out as PreToolDecisionLike).kind).toBe('deny')
     expect(out.reason).toContain('· model: this deletes 300 tracked files')
     expect(out.displayReason?.zh).toContain('风险模型判定 deletion：this deletes 300 tracked files')

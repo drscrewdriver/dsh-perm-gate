@@ -266,6 +266,23 @@ export const VERDICT_LABELS: Readonly<Record<string, string>> = {
   // the one event that explains why a flagged call ran unreviewed.
   'preset-passthrough': '审批策略 never · 已放行',
   'stand-down': '门禁停用',
+  // The unattended tiers never raise a prompt, so the approvals history is the only
+  // place their decisions surface — an untranslated tag there reads as a leak.
+  'yolo-allow': 'YOLO 放行',
+  // The YOLO tier advertises a reviewer model. When none answered, the tier still refuses to
+  // ask a person and settles mechanically — and the history has to say that out loud, or the
+  // two human-free tiers silently become one.
+  'yolo-allow-no-reviewer': 'YOLO 放行（无审查模型·机械处置）',
+  'yolo-block': 'YOLO 拦截',
+  'rules-fallback-allow': '无模型规则闸门放行',
+  'rules-fallback-block': '无模型规则闸门拦截',
+  'safety-net-passthrough-allow': '机械审查放行（零模型）',
+  'safety-net-passthrough-block': '机械审查拦截（零模型）',
+  // Longer-standing paths that also reach the feed without a label.
+  'cleanup-safe': '清理类安全放行',
+  'escalation-auto': '沙箱升级自动放行',
+  'learned-granted': '学习授权放行',
+  'network-ask': '网络审批',
 }
 
 /** Compact wall-clock rendering of an ISO timestamp. */

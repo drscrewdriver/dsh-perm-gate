@@ -19,7 +19,8 @@ export declare const INTENT_ADVICE: Readonly<Record<ReviewIntent, {
     readonly zh: string;
     readonly en: string;
 }>>;
-/** Extract the `[deny-rule:<id>]` tag, a gate-danger tag (YOLO / degraded review), or P0. */
+/** Extract the `[deny-rule:<id>]` tag, a gate-danger tag (YOLO / degraded review /
+ * mechanical passthrough), or P0. */
 export declare function ruleIdOf(reason: string): string | undefined;
 /**
  * Classify a block reason into an intent. Ordered from the most specific signal to

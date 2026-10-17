@@ -1,13 +1,134 @@
 # Changelog
 
 All notable changes to this project will be documented in this file.
-## 统一 15-rc 枚举线：三宿主子包 peer 全量枚举（client-locale/client-ui-renderer/client-ui-settings），内容=保留场验证的 4.3.0-beta.2 同树，版本越过 compat 线 5.0.4。 — 2026-10-05
-
-undefined
-
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [5.3.0] - 2026-10-17
+
+### Added
+
+- **YOLO tier** (`yolo`, owning the `permissive-yolo` preset): never raises a human
+  confirmation. A dangerous ask — irreversible, unlearnable, an unreadable payload, or a
+  hard-risk verdict from the configured reviewer — is blocked and the reason is fed back to the
+  main agent as a `工具审核意见` user message; everything else runs. With no reviewer in seat it
+  does **not** quietly allow: the mechanical screen settles it and the event is labelled (see the
+  `yolo-allow-no-reviewer` entry below).
+- **Degraded review** (`rulesFallback`): when the reviewer is not configured or returns no
+  verdict, the deterministic nets decide instead of parking the call on a confirmation nobody
+  will answer. Unchanged while a reviewer answers; it applies to the ordinary 自动审查 tiers
+  (`permissive`, `permissive-full`) — the three tiers that own an implementation already say who
+  answers, so this switch does not degrade them.
+- **Script review** (`scriptReview`, on by default): the body of every script a call runs is read
+  (bounded, never executed) and given to the grader, the human card and the deterministic nets —
+  a delete that only shows up inside the file is graded on its code instead of its filename. A
+  fully-read script also stops being an unreadable payload; switching this off keeps file content
+  on the machine at the cost of sending such runs back to the `U` (unknown-target) tier.
+- **User-declared protection**, all additive and all hot-applied: `credentialPaths` (path globs
+  held to the same standard as `.ssh` — reading one outside the workspace, or mutating one with a
+  file tool, is refused), `denyKeywordsExtra` (appends to the blacklist; the preset list stays
+  un-replaceable), and `extraContentArgKeys` / `extraOperationArgKeys` (which argument fields are
+  prose and which are operations, on top of the built-in lists).
+- **Three unattended implementations, one switch and one permission preset each**: `safenetAsk`
+  (`permissive-snet`) screens with the deterministic nets and **still asks a person**, calling no
+  grader at all — the shape the gate takes when no reviewer LLM is connected, or when the tokens
+  are not worth spending and a human answer beats an auto-decision. `safenetPass`
+  (`permissive-mech`) lets the same screen **take over the ask**: named danger is blocked and fed
+  back to the main agent, everything it cannot condemn runs, with no human prompt and no model
+  call — the reviewed form of `approval: never`. `yolo` (`permissive-yolo`) is the model-backed
+  tier: the grader answers in the person's place and it never escalates. The mapping is the point:
+  a switch changes the behaviour of the tier named beside it and of no other, and switching an
+  implementation off returns that tier to the ordinary human flow rather than quietly turning it
+  into a different one. All five tiers ship in **the plugin's own** profile patch, so they are in
+  the permission picker on install with nothing to hand-edit; `permissive` itself is untouched.
+  (A per-preset `<preset>=<mode>` table existed for two revisions and is retired — it competed with
+  these switches, and two controls for one posture means one of them lies.)
+- **YOLO no longer claims a reviewer it did not get.** With no grader configured, or one that
+  returns `unresolved`, the tier still refuses to ask a person and settles on the mechanical
+  screen — but the event is recorded as `yolo-allow-no-reviewer` and the reason says so, because
+  an unlabelled fallback made YOLO and the mechanical tier indistinguishable in the approvals
+  history exactly when the model was missing.
+- **One mechanical floor for every tier**: the deterministic judge (irreversible / unlearnable /
+  unreadable) was hand-copied in three places — YOLO, the degraded gate and the new passthrough
+  tier. It is now a single `mechanicalJudge`, so a tier can change only *who settles the residual*,
+  never *what counts as danger*. Pinned by tests: the same call is blocked under YOLO and under
+  passthrough alike, and neither spends a model call on it.
+- The settings card's booleans are now **optimistic pill switches** (36×20 capsule, state keyed off
+  `aria-checked`, theme tokens with fallbacks so light and dark both read correctly), and each
+  unattended row prints the preset it governs. They flip on click and hand the visual back to the
+  store when the write lands, is rejected, or is never reported.
+- The approvals history labels the decision paths that previously showed raw tags: `yolo-allow` /
+  `yolo-block`, `rules-fallback-*`, `safety-net-passthrough-*`, plus four older ones that also
+  reached the feed untranslated (`cleanup-safe`, `escalation-auto`, `learned-granted`, `network-ask`).
+- A deterministic net for deletions aimed at the profile or a protected Windows root **through a
+  variable or a glob** (`$HOME`, `~/.*`, `$env:USERPROFILE\.*`, `%WINDIR%`, `$PSHOME` …): the
+  profile root is refused outright, other protected roots become a permanent confirmation that no
+  answer can be learned away. Measured: no grading prompt — not one primed with read-only-variable
+  knowledge — held this on a 9B reviewer, which is why it lives in code.
+
+### Fixed
+
+- Issue #2: a document tool's prose is no longer read as an operation. One shared rule
+  (`src/scan-text.ts`) picks readable keys by tool class — a read/internal/write tool exposes only
+  its command, url, path and query fields, while an unfamiliar tool name is still treated as an
+  executor. `exit_plan_mode` can now describe a step it intends to ask about; previously the plan
+  text hit the destructive blacklist and the model learned to reword plans to get past the gate.
+- The same report's aside: newlines and glued `;` / `|` / `&&` / `||` outside quotes are now
+  statement separators for `decomposeShellCommand`, so the second statement of a multi-line
+  command is finally seen as a program a rule can match. This was the same root as the cross-line
+  delete leak; a lone `&` is left alone so `2>&1` and background jobs keep their shape.
+- Issue #3: an escalation the default safety screen produced reports itself
+  (`write target outside the workspace (…)` / `command carries a file-write or redirect pattern`)
+  instead of impersonating "no rule matched", and the reviewer's own sentence now reaches the
+  confirmation and the block wording — flattened, bracket-stripped, redacted and capped, so a
+  model cannot forge a `[deny-rule:…]` tag into the audit trail.
+- Issue #4: the write-pattern pre-screen no longer reads `=>` or `->` as a redirect into a file.
+- Credential stores mutated through `write`/`edit` (`~/.ssh/authorized_keys`, `.git-credentials`,
+  `.npmrc`, cloud credential files …) are refused at P0. Only deleting them was covered, so an
+  auto-allowed write could install an access backdoor.
+- The public half of a keypair (`id_ed25519.pub`) is no longer caught by the whole-arguments
+  credential screen, which had made a hand-carried key restore impossible to appeal.
+- `deny-keyword` audit wording drops "preset" for entries the user appended.
+
+### Known gap
+
+- `pathArgument` reads `file_path` / `path` / `cwd` / `workdir`; plural fields (`paths`, `files`,
+  `urls`) are not held to the credential-path standard.
+- A tool that executes a document it was given (`workflow`, `skill`, `ralph`) is not read from that
+  body by the flattened screen; the work it delegates is gated as its own tool call.
+
+## [5.2.0] - 2026-10-14
+
+### Added
+
+- `src/preset-rules.ts`: 51 `[deny-rule:*]` entries ported from cc-safety-net (MIT; attribution in
+  `THIRD_PARTY_NOTICES.md`). `mergePresetIntoRaw()` appends to the tail of `deny`/`ask`, is
+  idempotent per id, and never re-adds a row the user revoked. New volatile `presetRulesSeeded`,
+  written once on activation.
+- `argv.pipeline` is evaluated per simple command as well as over the joined string — the preset's
+  hit rate depends on it — and a rule verdict is attributed by its `deny-rule:<id>`.
+
+### Fixed
+
+- The seed ran inside `apply`'s synchronous body, where the settings service is not mounted yet, so
+  it silently never happened on any host. It now runs in the inject callback, after each host
+  generation has registered the namespace (on 0.1.5 a write before `installSection` throws).
+- Rules and the idempotency flag were two separate `update` calls; on rc.1+ the second throws
+  `Plugin entry "dsh-perm-gate" is no longer configurable`, so the flag never landed and a full
+  user revocation would be re-seeded forever. Now one update, with the flag written only after the
+  rules succeeded.
+- `rawEntry()` emitted the *compiled* `ParamCondition[]` for the `params` dimension, so the seeded
+  document failed this plugin's own reader on the next boot
+  (`permissions.deny[22].params.params must be a mapping`) and perm-gate stopped activating.
+  Reverted to a mapping, restoring the `!glob` negation prefix.
+- Dropped the fallback that seeded into the plugin's own `perm-gate/rules.yml`: a hand-maintained
+  rule source must not get 51 injected entries mixed into it, and the branch only ran on legacy
+  hosts, so the two host generations behaved differently. No settings service now means no seeding,
+  reported loudly instead of degrading into a file write.
+- Added the gate that would have caught the third item:
+  `test/preset-rules-roundtrip.spec.ts` feeds the merged document back through the reader and the
+  compiler, with a negative control (reverting the fix fails 3 of 5 cases).
 
 ## [5.1.2] - 2026-10-12
 
@@ -112,6 +233,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `plugins.bundle.config` 详情卡与 `shell.overlay` 浮窗齿轮不变。
 - 席位契约测试（test/client-settings-seat.spec.ts）改钉单节形态：
   settings.section 恰一次（order 30 / PermissiveCard），三个退役席位断言缺席。
+
+## [5.1.0] - 2026-10-05
+
+### Changed
+
+- Unified the 15-rc enumeration line: the three host sub-packages (`client-locale`,
+  `client-ui-renderer`, `client-ui-settings`) enumerate their peers in full, the content equals the
+  verification-farm-confirmed `4.3.0-beta.2` tree, and the version supersedes the compat line's
+  `5.0.4`.
 
 ## [2.6.0] - 2026-09-17
 

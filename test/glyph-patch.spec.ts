@@ -28,6 +28,7 @@ import {
   sliceEntry,
   SOURCE_KEY,
   TARGET_KEY,
+  TARGET_KEYS,
 } from '../scripts/patch-permission-glyph.mjs'
 
 /** A stand-in for the real map, mirroring its shape: JSX-ish calls, nested brackets. */
@@ -113,6 +114,30 @@ describe('applyGlyphPatch', () => {
     const sourceEntry = sliceEntry(FIXTURE, SOURCE_KEY)
     const clonedEntry = sliceEntry(source, TARGET_KEY)
     expect(clonedEntry).toBe(sourceEntry.replace(`["${SOURCE_KEY}",`, `["${TARGET_KEY}",`))
+  })
+
+  it('gives every plugin-contributed tier its own clone, not just the first', () => {
+    // Four tiers of one plugin that all render as bare text but the two the host shipped
+    // a glyph for is a picker that reads as two real options and two leftovers.
+    const { source, added } = applyGlyphPatch(FIXTURE)
+    expect(added).toEqual(TARGET_KEYS)
+    for (const key of TARGET_KEYS) {
+      expect(source).toContain(`["${key}",`)
+      expect(sliceEntry(source, key)).toBe(sliceEntry(FIXTURE, SOURCE_KEY).replace(`["${SOURCE_KEY}",`, `["${key}",`))
+    }
+    // The anchor itself stays single, and the map still parses.
+    expect(source.split(`["${SOURCE_KEY}",`)).toHaveLength(2)
+    expect(isBalanced(source)).toBe(true)
+  })
+
+  it('only adds the keys that are actually missing', () => {
+    // A profile that already carries the older tier must not gain a duplicate.
+    const once = applyGlyphPatch(FIXTURE).source
+    const partial = once.replace(`["${TARGET_KEYS[2]}",`, '["placeholder",')
+    const again = applyGlyphPatch(partial)
+    expect(again.changed).toBe(true)
+    expect(again.added).toEqual([TARGET_KEYS[2]])
+    expect(again.source.split(`["${TARGET_KEYS[1]}",`)).toHaveLength(2)
   })
 
   it('leaves the bundle syntactically intact', () => {

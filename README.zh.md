@@ -232,7 +232,32 @@ outside the design set get none*。`permissive` 是内置值，所以「自动�
       alwaysConfirm: false       # 一律逐次 ask；允许控件附带重复允许/迁白名单按钮
       trustEscalation: true      # 门禁已放行的调用，其自身的沙箱提权免确认
       llmAssist: false           # 先由 LLM 分类裁决；ask/无分类器时回退到人工
+    yolo: false                  # 无人值守：永不问人，危险才拦、其余放行
+    rulesFallback: false         # 无可用审查模型 => 只按确定性规则网裁定
+    scriptReview: true           # 把调用所跑脚本的正文随审查一并附上
+    credentialPaths: []          # 长尾凭据路径，按 `.ssh` 同档保护
+    denyKeywordsExtra: []        # 追加黑名单词（不替换预置表）
+    extraContentArgKeys: []      # 哪些参数是文档而非操作
+    extraOperationArgKeys: []    # 哪些参数确实是会被执行的代码（撞名时本表胜）
+    safenetPass: true            # permissive-mech 档的实现存在（机械接管 ask）
+    safenetAsk: false            # permissive-snet 档的实现存在（机械过滤，仍然问人）
 ```
+三颗开关，每颗只管插件自己贡献给权限下拉的一个预设——所以一颗开关只改它那一档的行为，不会串到
+别的档；把实现关掉，那一档就退回普通人工流，而不是偷偷变成另一个档。
+
+| 开关 | 档 | 谁定 ask | 问人 | 叫模型 |
+| --- | --- | --- | --- | --- |
+| `permissive` | `permissive` / `permissive-full` | 机械先筛 + 模型精化，剩下交给人 | 会 | 由 `llmAssist` 决定 |
+| `safenetAsk` | `permissive-snet` | 交给人，并列出机械疑点 | **会** | **一次都不叫** |
+| `safenetPass` | `permissive-mech` | 机械独判：点名的拦+回喂，其余放行 | 不会 | **一次都不叫** |
+| `yolo` | `permissive-yolo` | 模型替人裁决：risky 拦+回喂，其余放行 | 永不 | 每个残局 |
+
+`safenetPass` 就是 `approval: never` 的「有审查版」（那一档无脑直通、没人判定），也是 yolo 拿掉
+模型后的劣化形态。`yolo` 按定义就是带模型的那一档：模型不在场时它仍然不问人、按机械处置，并把
+记录写成 `yolo-allow-no-reviewer`，好让审批历史不会被误读成"模型答过"。五档都由插件自带 patch
+发布，装好就在下拉里，不需要手改宿主配置。不在 `gatePresets` 里的预设走不到这一步：那里整个门禁
+停用，本来就没有需要回答的确认。
+
 (llmAssist 的真实接收 LLM 在设置页填 `classifierEndpoint` / `classifierModel`，OpenAI 兼容的自定义 API
 均可。设置页可选择接收来源：**自定义 API**（任何 OpenAI 兼容端点，内置小米 MiMo `https://api.xiaomimimo.com/v1` 等预设）或**宿主模型组**（复用 DSH 会话已配置的 `llm` 服务与当前模型组，可用 `classifierProvider` / `classifierModel` 覆盖）；并提供**健康测试**按钮，一键验证接收 LLM 的连通性与延迟。)
 
@@ -242,6 +267,22 @@ outside the design set get none*。`permissive` 是内置值，所以「自动�
 `llmAssist` 调用配置的真实 LLM（任意 OpenAI 兼容 API）自动裁决 `ask`，结果不确定/出错时回退人工
 接缝——始终 fail-closed。`trustEscalation`（档位开启时默认开）答复门禁已放行的调用在其工具体内
 提出的 `sandbox_permissions` 提权；见下文。`permissive` 关闭时，门禁行为与之前完全一致。
+
+### 无人值守档位，以及如何保护预置表认不出的凭据
+
+三个开关改变“谁来定”，七个键改变“能看见什么”。它们全部 volatile：设置卡改完下一个工具调用即生效，无需重载。
+
+- `yolo`（负责 `permissive-yolo` 那一档）— 永不弹人工确认。危险 ask（不可逆 / 不可沉淀 / 载荷读不懂 / 审查模型报硬风险）被拦截，理由以 `工具审核意见` 消息回喂主模型；其余照常执行。审查模型不在场时它不静默放行：由机械审查器裁定，并把事件记为 `yolo-allow-no-reviewer`——一档既然声称有模型，就不能把没答上的模型报成答过了。
+- `rulesFallback` — 降级审查。仅当**没有审查模型**（未配置，或端点未能给出裁决）时生效：改由确定性规则网裁定，不再把调用挂在没人应答的确认框上。模型正常应答时行为不变。它只作用于普通的自动审查档（`permissive` / `permissive-full`）；那三颗各自拥有一档的开关已经写明由谁回答，不会被它降级。
+- `scriptReview`（默认开）— 调用跑脚本时读取它的正文（有界、绝不执行），同时交给审查模型、人工卡片与规则网：只在 `clean-home.sh` 里看到的删除从此按代码判定。正文全读到就不再是“读不懂的载荷”，从而脱离 U 档。关掉可不让文件内容离开本机，代价是工作区外脚本回到“看不清、问人”。
+
+“什么算凭据”的长尾由你扩展，但每张表**只往内置表上追加**，不提供替换能力——漏写 `content` 或 `plan` 会静默重现本门禁已经修过的那个 bug：
+
+- `credentialPaths` — 路径 glob（双星跨目录、单星与问号限一段；无通配符时按整个路径片段匹配；`~/` 展开为你的 home；相对写法也在任意深度匹配）。列入的路径与 `.ssh` 同档：工作区外读取被拒、被 `write`/`edit` 改写被拒。该档是 P0（不可申诉、审查模型也放行不了），这正是它是配置项而非 `rules.yaml` 规则的原因：只读工具在规则链**之前**就被自动放行了，规则看不见这类调用。
+- `denyKeywordsExtra` — 向当前生效的黑名单（预置或你替换后的表）**追加**词项，为公司 CLI 的吊销子命令或自有令牌前缀加一道确定性拦截，而不必把 50 条预置抄进 profile。
+- `extraContentArgKeys` / `extraOperationArgKeys` — 哪些参数是文档、哪些是操作。前者阻止宿主工具的 `steps`/`notes` 正文被当成操作读（issue #2 就是这么发生的：一份诚实的计划写了 `rm -rf` 反而因“描述”被拒）；后者为 `workflowYaml` 这种“正文真的会被执行”的字段反向开口，且与前者撞名时本表获胜。把真正的文档字段写进来，就等于让“计划里提到 `rm -rf`”重新变成拒绝理由，所以默认关。
+
+把 `command` 或 `file_path` 声明为文档并不能削弱门禁：被执行的命令与被改写的路径由各自的判据路径负责，不走这张表（已有断言测试钉住）。
 
 ### 沙箱提权：为何 `safe` 裁决仍会弹窗
 

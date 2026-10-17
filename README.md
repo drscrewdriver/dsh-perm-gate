@@ -323,7 +323,35 @@ In `cordis.yml`:
       alwaysConfirm: false       # every crossing asks; allow-controls add repeat-allow / wl-migrate buttons
       llmAssist: false           # LLM classify first, human fallback on ask/failure
       trustEscalation: true      # a cleared call's own sandbox escalation needs no prompt
+    yolo: false                  # unattended: never ask a human, block danger, run the rest
+    rulesFallback: false         # no reviewer available => decide on the rule nets alone
+    scriptReview: true           # attach the body of a script the call runs to the review
+    credentialPaths: []          # long-tail secret paths, held to the `.ssh` standard
+    denyKeywordsExtra: []        # appended blacklist words (never replaces the preset)
+    extraContentArgKeys: []      # argument fields that are documents, not operations
+    extraOperationArgKeys: []    # argument fields that ARE executed code (wins on conflict)
+    safenetPass: true            # the permissive-mech implementation exists (mechanical takeover)
+    safenetAsk: false            # the permissive-snet implementation exists (mechanical screen, still asks)
 ```
+Three switches, each owning exactly one permission preset the plugin contributes to the picker —
+so a switch changes the behaviour of its own tier and of no other, and switching an implementation
+off returns that tier to the ordinary human flow instead of quietly turning it into a different one.
+
+| switch | tier | who settles an ask | asks a person | calls the model |
+| --- | --- | --- | --- | --- |
+| `permissive` | `permissive` / `permissive-full` | machine screen + grader refine, then a person | yes | per `llmAssist` |
+| `safenetAsk` | `permissive-snet` | a person, with the machine screen's doubts listed | **yes** | **never** |
+| `safenetPass` | `permissive-mech` | the machine screen alone: named danger blocked + fed back, rest runs | no | **never** |
+| `yolo` | `permissive-yolo` | the grader answers in the person's place; risky blocks + feeds back | never | every residual |
+
+`safenetPass` is the reviewed form of `approval: never` (that preset passes every ask with nothing
+judging it) and what YOLO degrades to with no reviewer. `yolo` is the model-backed tier by
+definition: with no reviewer in seat it still refuses to ask a person, settles on the machine
+screen, and records `yolo-allow-no-reviewer` so the history cannot read as if a model had answered.
+All five tiers ship in the plugin's own profile patch, so they are in the picker on install —
+nothing to hand-edit. Presets outside `gatePresets` never reach any of this: the whole gate
+stands down there, so there is no ask to settle.
+
 
 `trustAutoAllow` is the baseline middle tier (rule-allow auto-passes). `alwaysConfirm` surfaces
 the approval panel for every crossing; its "allow controls" add two extended buttons — 
@@ -334,6 +362,51 @@ the approval panel for every crossing; its "allow controls" add two extended but
 human seam on `ask`/error — always fail-closed. `trustEscalation` (on by default while the tier
 is on) answers a `sandbox_permissions` escalation raised from inside a call the gate already
 allowed; see below. When `permissive` is off, the gate behaves exactly as before.
+
+### Unattended tiers, and how to protect a secret the preset never heard of
+
+Three switches change **who decides**, seven keys change **what is known**. They are all
+`volatile`: an edit in the settings card applies to the next tool call, no reload.
+
+- `yolo` (the `permissive-yolo` tier) — never raises a confirmation. A dangerous ask
+  (irreversible, unlearnable, an unreadable payload, or a hard-risk verdict from the configured
+  reviewer) is blocked and the reason comes back to the agent as a `工具审核意见` message;
+  everything else runs. With no reviewer in seat the tier does not quietly allow — the mechanical
+  screen settles it and the event is recorded as `yolo-allow-no-reviewer`, because a tier that
+  advertises a model must not report one it never got.
+- `rulesFallback` — degraded review. Only when there is **no reviewer** (none configured, or the
+  endpoint gave no verdict) the deterministic nets decide instead of parking the call on a popup
+  nobody will answer. While a reviewer answers, nothing changes. It governs the ordinary 自动审查
+  tiers (`permissive`, `permissive-full`); the three tiers that own an implementation already say
+  who answers, so this switch does not degrade them.
+- `scriptReview` (on by default) — when a call runs a script, its body is read (bounded, never
+  executed) and shown to the model, the human card, **and** the deterministic nets: a delete that
+  only appears inside `clean-home.sh` is now graded on code. A fully-read script also stops being an
+  unreadable payload, so it leaves the `U` tier. Switch it off to keep file contents on the machine
+  — out-of-workspace script runs then go back to "unknowable, ask a human".
+
+The long tail of *what counts as a secret* is yours to extend, and each list only ever adds to the
+built-in one — replacing the preset lists is deliberately not offered, because forgetting `content`
+or `plan` would silently re-create a bug this gate already fixed:
+
+- `credentialPaths` — path globs (`**` crosses directories, `*`/`?` stay in one segment; a plain
+  entry matches a whole path fragment; `~/` expands to your home; a relative pattern also matches at
+  any depth). A listed path is held to the same standard as `.ssh`: reading it outside the workspace
+  is refused, mutating it through `write`/`edit` is refused. That tier is P0 — not appealable, not
+  clearable by a reviewer — which is why it is a setting and not a `rules.yaml` rule: read-only tools
+  are auto-allowed *before* the rule chain runs, so a rule cannot see them.
+- `denyKeywordsExtra` — words appended to whichever blacklist is live (preset or your own
+  `denyKeywords`), so a company CLI subcommand or token prefix gets a deterministic block without
+  you copying fifty preset entries into your profile.
+- `extraContentArgKeys` / `extraOperationArgKeys` — which argument fields are prose and which are
+  operations. The first stops a host tool's `steps`/`notes` field from being read as an act (that
+  is how issue #2 happened: an honest plan naming `rm -rf` got refused for describing it). The
+  second opens the reverse route for a `workflowYaml` whose body really executes — and it wins if
+  both name the same key. Naming a genuine document field there makes "the plan mentions `rm -rf`"
+  a refusal reason again, so it is off by default.
+
+Declaring `command` or `file_path` as prose cannot weaken the gate: the executed command and the
+mutated path are judged by their own code paths, not by this table (asserted by tests).
 
 ### Sandbox escalation: why a `safe` verdict still prompted
 

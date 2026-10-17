@@ -129,8 +129,11 @@ describe('script bodies change what the gate can see', () => {
 })
 
 describe('the runtime puts the body in front of the reviewer it does have', () => {
-  function exec(command: string, cwd: string): ToolExecutionLike {
-    return { name: 'bash', arguments: { command }, cwd, sessionId: 's1' } as ToolExecutionLike
+  function exec(command: string, cwd: string, preset?: string): ToolExecutionLike {
+    // YOLO owns exactly one preset (`permissive-yolo`), so the listener-level YOLO test has
+    // to put the session in that tier.
+    const events = preset === undefined ? [] : [{ type: 'permission/preset', data: { preset } }]
+    return { name: 'bash', arguments: { command }, cwd, sessionId: 's1', events } as ToolExecutionLike
   }
 
   it('sends script_contents to the grader', async () => {
@@ -182,7 +185,7 @@ describe('the runtime puts the body in front of the reviewer it does have', () =
     const r = new PermGateRuntime({ rulesFile: undefined, yolo: true })
     const seen: PreToolDecisionLike[] = []
     const listener = makePreExecuteListener(r, (_exec, decision) => { seen.push(decision) })
-    const out = await listener(exec(`bash ${join(dir, 'clean-home.sh')}`, dir), async () => 'RAN')
+    const out = await listener(exec(`bash ${join(dir, 'clean-home.sh')}`, dir, 'permissive-yolo'), async () => 'RAN')
     expect((out as PreToolDecisionLike).kind).toBe('deny')
     expect(seen[0]?.reason).toContain('yolo-danger')
   })
@@ -192,5 +195,27 @@ describe('the runtime puts the body in front of the reviewer it does have', () =
     expect(off.isScriptReview()).toBe(false)
     expect(new PermGateRuntime({ rulesFile: undefined }).isScriptReview()).toBe(true)
     expect(new PermGateRuntime({ rulesFile: undefined, readScriptReview: () => false }).isScriptReview()).toBe(false)
+  })
+
+  /**
+   * The price of switching it off, pinned: a script the grader cannot read is unknowable
+   * again, so a confident `safe` must not clear it. Same call with the switch on is
+   * covered by the cases above, where the body makes it ordinary graded work.
+   */
+  it('leaves an out-of-workspace script in the opaque tier when the switch is off', async () => {
+    const ws = tmp()
+    const other = tmp()
+    writeFileSync(join(other, 'tool.sh'), BENIGN_BODY)
+    const r = new PermGateRuntime({
+      rulesFile: undefined,
+      scriptReview: false,
+      permissive: true,
+      permissiveStrategies: { llmAssist: true },
+      riskHook: async () => ({ kind: 'safe' }),
+    })
+    const e = exec(`bash ${join(other, 'tool.sh')}`, ws)
+    const out = await r.refineAsk(e, r.decideExecution(e) as never)
+    expect(out?.kind).toBe('ask')
+    expect(out?.reason).toContain('payload=opaque')
   })
 })

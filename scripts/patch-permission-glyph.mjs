@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Add `permissive-full` to the DSH composer's permission-glyph map.
+ * Add the plugin's own permission tiers to the DSH composer's permission-glyph map.
  *
  * WHY THIS EXISTS
  * ---------------
@@ -52,9 +52,11 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** The map key whose entry is cloned, and the key it is cloned onto. */
+/** The map key whose entry is cloned, and every key it must be cloned onto. */
 export const SOURCE_KEY = 'permissive'
-export const TARGET_KEY = 'permissive-full'
+export const TARGET_KEYS = ['permissive-full', 'permissive-snet', 'permissive-mech', 'permissive-yolo']
+/** The first target, kept as a named export because the spec and the docs quote it. */
+export const TARGET_KEY = TARGET_KEYS[0]
 
 /** Relative path from a package root to the bundle holding the map. */
 const BUNDLE = join('@deepseek-ai', 'dsh-client-ui-conversation', 'lib', 'client.js')
@@ -117,20 +119,31 @@ export function sliceEntry(source, key) {
 }
 
 /**
- * Clone the `permissive` glyph entry onto the `permissive-full` key.
+ * Clone the `permissive` glyph entry onto every plugin-contributed tier that lacks one.
+ *
+ * The composer renders "outside the design set get no icon" for any key the closed map does
+ * not hold, so all four of this plugin's tiers would otherwise read as bare text next to the
+ * built-in shields. Each missing key gets a byte-identical clone under its own name; keys
+ * already present are left alone, so re-running is a no-op.
  *
  * @param {string} source the bundle's text
- * @returns {{ changed: boolean, source: string, entry: string | null }}
- *   `changed: false` means the target key was already present (idempotent no-op).
+ * @returns {{ changed: boolean, source: string, entry: string | null, added: string[] }}
+ *   `changed: false` means every target key was already present (idempotent no-op).
  */
 export function applyGlyphPatch(source) {
-  if (source.includes(`["${TARGET_KEY}",`)) return { changed: false, source, entry: null }
+  const missing = TARGET_KEYS.filter((key) => !source.includes(`["${key}",`))
+  if (missing.length === 0) return { changed: false, source, entry: null, added: [] }
   const sourceEntry = sliceEntry(source, SOURCE_KEY)
   if (!sourceEntry.includes('svg')) {
     throw new GlyphPatchError(`the ["${SOURCE_KEY}",] entry does not look like a glyph`)
   }
-  const clonedEntry = sourceEntry.replace(`["${SOURCE_KEY}",`, `["${TARGET_KEY}",`)
-  return { changed: true, source: source.replace(sourceEntry, `${sourceEntry},\n\t\t\t${clonedEntry}`), entry: clonedEntry }
+  const clones = missing.map((key) => sourceEntry.replace(`["${SOURCE_KEY}",`, `["${key}",`))
+  return {
+    changed: true,
+    source: source.replace(sourceEntry, [sourceEntry, ...clones].join(',\n\t\t\t')),
+    entry: clones[0] ?? null,
+    added: missing,
+  }
 }
 
 /** Resolve the bundle to patch, or throw with an explanation. */
@@ -161,15 +174,16 @@ function main(argv) {
 
   const bundle = findBundle(argv, where)
   const original = readFileSync(bundle, 'utf8')
-  const { changed, source: patched } = applyGlyphPatch(original)
+  const { changed, source: patched, added } = applyGlyphPatch(original)
+  const listed = added.length > 0 ? added.join('", ["') : TARGET_KEYS.join('", ["')
 
   if (!changed) {
-    process.stdout.write(`patch-permission-glyph: ["${TARGET_KEY}",] already present in\n  ${bundle}\n`)
+    process.stdout.write(`patch-permission-glyph: ["${TARGET_KEYS.join('", ["')}",] already present in\n  ${bundle}\n`)
     return 0
   }
   if (check) {
     process.stdout.write(
-      `patch-permission-glyph: ["${TARGET_KEY}",] is MISSING from\n  ${bundle}\n` +
+      `patch-permission-glyph: ["${listed}",] is MISSING from\n  ${bundle}\n` +
       '  (--check: nothing written; re-run without --check to apply)\n',
     )
     return 1
@@ -189,7 +203,7 @@ function main(argv) {
   }
 
   process.stdout.write(
-    `patch-permission-glyph: added ["${TARGET_KEY}",] to\n  ${bundle}\n` +
+    `patch-permission-glyph: added ["${listed}",] to\n  ${bundle}\n` +
     `  backup: ${backup}\n` +
     '  NOTE: this edits a DSH package — re-run after any DSH upgrade or reinstall.\n',
   )

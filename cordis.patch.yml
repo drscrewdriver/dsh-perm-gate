@@ -1,7 +1,7 @@
 # dsh-perm-gate profile patch.
 #
 # Two jobs:
-# 1) Add the plugin's own "自动审查" session approval tier to the DSH
+# 1) Add the plugin's own "自动审查" session approval tiers to the DSH
 #    permission picker, and restate the built-in tiers it must not drop.
 # 2) Insert the plugin itself (host half) into the profile.
 #
@@ -77,6 +77,21 @@
         approval: ask
         name: 自动审查（高权限）
         description: 只由本插件的审批门过滤 —— 文件修改与子进程网络访问不再受沙箱限制，审批仍逐次生效，但没有系统沙箱兜底。
+      permissive-snet:
+        sandbox: workspace-write
+        approval: ask
+        name: 自动审查·机械过滤
+        description: 不调用审查模型 —— 确定性机械审查器先筛并列出疑点，剩下的仍然交人工确认。适用于无审查 LLM 可用、或不习惯模型替你拿主意的场景（不常用）。
+      permissive-mech:
+        sandbox: danger-full-access
+        approval: ask
+        name: 自动审查·机械直通
+        description: 无人确认 —— 确定性机械审查器替代人工：命中不可逆 / 不可沉淀 / 读不懂的载荷即拦截，并把理由回喂主模型，其余照常执行。不调用审查模型，零 token。
+      permissive-yolo:
+        sandbox: danger-full-access
+        approval: ask
+        name: 自动审查·YOLO
+        description: 无人确认 —— 审查模型逐条替代人工裁决，报硬风险即拦截并回喂理由；模型未配置或未能给出裁决时退回机械处置。永不升级人工。
       danger-full-access:
         sandbox: danger-full-access
         approval: never

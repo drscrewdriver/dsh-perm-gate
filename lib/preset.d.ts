@@ -29,11 +29,14 @@ export declare function permissionPresetOf(events: readonly SessionEventLike[] |
 /** Whether one preset name is covered by a configured scope list. */
 export declare function presetInScope(preset: string | undefined, scope: readonly string[]): boolean;
 /**
- * Presets in which the gate is active. It owns both 自动审查 tiers — the plain
- * one (file sandbox kept) and the full-access one (sandbox restriction lifted,
- * same approval behaviour) — so a user can have the gate without inheriting a
- * sandbox that breaks `git` / Cygwin tools. `'*'` makes it global (every
- * preset, including the hard-deny layer).
+ * Presets in which the gate is active. The plugin ships five 自动审查 tiers of its own
+ * (declared in its `cordis.patch.yml`, which is how they reach the composer picker at all):
+ * the plain one (file sandbox kept), the full-access one (sandbox lifted, same approval
+ * behaviour), and the three human-free / model-free implementations — mechanical takeover of
+ * asks (`permissive-mech`), mechanical screen that still asks (`permissive-snet`), and the
+ * model-backed YOLO. Each has exactly one preset and one switch, so they never cross: a
+ * switch changes the behaviour of its own tier and of nothing else. `'*'` makes the gate
+ * global (every preset, including the hard-deny layer).
  *
  * Lives in this dependency-free module (not `config.ts`) so the browser half can
  * render the scope without pulling schemastery into the client bundle.

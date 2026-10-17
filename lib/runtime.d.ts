@@ -9,6 +9,7 @@ import { type HostLlmLike, type HostModelSelection } from './host-llm.js';
 import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import type { NetworkTarget } from './network.js';
 import { type SessionEventLike } from './preset.js';
+import { type UnattendedMode } from './unattended.js';
 /**
  * The gate's answer to the host's pre-execute waterfall.
  *
@@ -148,6 +149,13 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      * an ask, decide on the deterministic nets instead of parking it on a human.
      */
     readonly readRulesFallback?: () => boolean;
+    /**
+     * Optional live sources of the two `safenet` switches. Each says whether that
+     * implementation exists at all, and each owns exactly one preset (`permissive-mech` for
+     * pass, `permissive-snet` for ask), so flipping one cannot change another tier.
+     */
+    readonly readSafenetPass?: () => boolean;
+    readonly readSafenetAsk?: () => boolean;
     /**
      * Optional live source of the script-review switch: attach the body of every script a
      * call runs to the review, so the grader and the human judge code, not a filename.
@@ -694,6 +702,70 @@ export declare class PermGateRuntime {
      * intercepts the dangerous — "尽力自动拦截所有危险命令".
      */
     resolveYolo(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined>;
+    /**
+     * The review model's pass over one ask, shared by every tier that lets a model
+     * speak for the human. `answered: false` means no reviewer is configured or it was
+     * unreachable — what that *means* is the one thing the tiers disagree about, so the
+     * caller decides (YOLO falls back to the mechanical conclusion, the human tiers keep
+     * the popup, the mechanical tier never gets here).
+     */
+    private modelJudge;
+    /**
+     * Which implementation, if any, owns this call's permission preset.
+     *
+     * One preset, one switch: `permissive-mech` is the mechanical takeover of asks,
+     * `permissive-snet` the model-free ask, `permissive-yolo` the model-backed human-free
+     * tier. Any other preset — including one whose switch is off — returns `null` and runs the
+     * ordinary flow, because a tier with no implementation behind it must not start behaving
+     * like some other tier.
+     */
+    unattendedModeOf(exec: ToolExecutionLike): UnattendedMode | null;
+    /** The mechanical human-free tier for this call (`permissive-mech`, switch on). */
+    isSafetyNet(exec: ToolExecutionLike): boolean;
+    /**
+     * The model-free ask tier for this call (`permissive-snet`, switch on): the mechanical
+     * screen still runs and its doubts ride along with the ask, but no grader is consulted
+     * and the decision stays with a person.
+     */
+    isSafetyNetAsk(exec: ToolExecutionLike): boolean;
+    /**
+     * One frozen view of a call for the human-free tiers: the same context the popup
+     * would have shown (script bodies included), plus the salted digest fields the
+     * grader path expects.
+     */
+    private unattendedContextFor;
+    /**
+     * The mechanical floor — what the deterministic nets can NAME about an ask, or `null`
+     * when nothing is nameable. Every tier classifies with this one judge; the tiers differ
+     * only in what they then do with the answer:
+     *
+     * | tier | 机械点名了危险 | 机械没点名 |
+     * | --- | --- | --- |
+     * | 人工确认（`permissive` / `permissive-full`） | 仍然问人，把信号作为疑点列出 | 问人（`llmAssist` 开着时模型可先精化） |
+     * | `safenetAsk`（`permissive-snet`） | 问人，列疑点 | 问人，**一次模型都不叫** |
+     * | `safenetPass`（`permissive-mech`） | 直接拦 + 回喂 | 直接放行，一次模型都不叫 |
+     * | `yolo`（`permissive-yolo`） | 直接拦（模型无法洗白，也不花这次调用） | 问模型；模型不在则按机械结论处置并标注 |
+     *
+     * The human tier not auto-blocking on a hit is deliberate: the same net that reads
+     * `rm -rf` of a home directory as irreversible also reads a project's own aggressive
+     * cleanup that way, and a person can tell those apart. Nobody is watching in the two
+     * human-free tiers, so there the cost of a false positive is accepted.
+     */
+    private mechanicalJudge;
+    /**
+     * The mechanical tier (`permissive-mech`, behind the `safenetPass` switch) — a
+     * human-free ask settled by the deterministic nets ALONE, with **no model call at all**.
+     * Two equivalent ways to name it: the reviewed form of `approval: never` (that preset
+     * passes every ask with nothing judging it; this one passes only what the nets cannot
+     * condemn), and YOLO with the model taken away — which is also what YOLO itself falls
+     * back to when no reviewer answers.
+     *
+     * It shares {@link mechanicalJudge} with every other tier's first pass: an opaque
+     * payload, irreversible act, or unlearnable destruction is blocked and the reason fed
+     * back to the main LLM. Everything the nets cannot name simply runs. It never softens a
+     * deterministic deny — those arrive already denied — and it never raises a human prompt.
+     */
+    resolveSafetyNet(exec: ToolExecutionLike, decision: PreToolDecisionLike): PreToolDecisionLike | undefined;
     /**
      * Degraded resolution of an `ask` when **no reviewer answered it** — either none is
      * configured or the configured one could not reach a verdict. Instead of leaving the

@@ -15,6 +15,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsDocHandle } from './compat.ts'
+import { pendingAfterFailure, pendingAfterSync, shownValue, SWITCH_SETTLE_MS } from './switch-state.ts'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
 import { LLM_PRESETS } from '../llm-presets.ts'
 import { DEFAULT_GATE_PRESETS } from '../preset.ts'
@@ -23,8 +24,14 @@ import { SedimentSection } from './sediment.tsx'
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
   permissive?: boolean
-  /** Unattended tiers: never a human popup (see src/config.ts for the semantics). */
+  /** Permissive tier: the human handles what the grader flags. */
+  /** YOLO tier (`permissive-yolo`): the grader answers in the person's place, never asks. */
   yolo?: boolean
+  /** Safenet-pass tier (`permissive-mech`): the mechanical screen takes over asks. */
+  safenetPass?: boolean
+  /** Safenet-ask tier (`permissive-snet`): mechanical screen, still asks, no grader. */
+  safenetAsk?: boolean
+  /** Unattended tiers: never a human popup (see src/config.ts for the semantics). */
   rulesFallback?: boolean
   /** On unless explicitly unset to false — the default attaches script bodies. */
   scriptReview?: boolean
@@ -171,6 +178,144 @@ const fieldStyle: CSSProperties = { display: 'flex', flexDirection: 'column', ga
 
 const fieldLabelStyle: CSSProperties = { margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 
+/** Focus ring for the pill switch. `:focus-visible` cannot be expressed inline, so
+ * the one pseudo-class the card needs rides on a single injected rule. */
+const switchCss = '.pg-switch:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6));outline-offset:2px}.pg-seg:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6));outline-offset:1px}'
+
+/**
+ * Optimistic control state, shared by the pill switch and the tier picker: show the
+ * requested value the instant it is clicked and hold it while the write round-trips
+ * through the host settings service, then hand the visual back to the store — on the
+ * snapshot catching up, on a rejected write, and on a watchdog for a host line that
+ * neither applies nor reports the change. A control may be fast, but it may not lie.
+ */
+function useOptimistic<T>(stored: T): readonly [T, (next: T, write: () => unknown) => void] {
+  const [pending, setPending] = useState<T | null>(null)
+  useEffect(() => { setPending((current) => pendingAfterSync(current, stored)) }, [stored])
+  useEffect(() => {
+    if (pending === null) return undefined
+    const timer = setTimeout(() => { setPending(pendingAfterFailure(pending)) }, SWITCH_SETTLE_MS)
+    return () => { clearTimeout(timer) }
+  }, [pending])
+  const commit = (next: T, write: () => unknown): void => {
+    setPending(next)
+    void Promise.resolve(write()).catch(() => { setPending(null) })
+  }
+  return [shownValue(pending, stored), commit] as const
+}
+
+/**
+ * One row of the unattended block: a switch, and the preset it owns.
+ *
+ * The preset id is rendered next to the label because the mapping is the whole design —
+ * one switch, one implementation, one tier — and a person who sees 「机械直通」 in the
+ * composer needs to know which row governs it. The id is a machine key, so it stays
+ * untranslated on purpose.
+ */
+function TierRow(props: {
+  readonly id: string
+  readonly label: string
+  readonly preset: string
+  readonly checked: boolean
+  readonly disabled: boolean
+  readonly hint: string
+  readonly onCommit: (next: boolean) => unknown
+}): JSX.Element {
+  const { id, label, preset, checked, disabled, hint, onCommit } = props
+  return (
+    <>
+      <div style={rowStyle}>
+        <label htmlFor={id} style={{ fontSize: '12px' }}>
+          {label}
+          <span style={{ color: 'var(--dsw-alias-label-tertiary)', fontSize: '11px' }}> · {preset}</span>
+        </label>
+        <PillSwitch
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          onCommit={onCommit}
+        />
+      </div>
+      <p style={hintStyle}>{hint}</p>
+    </>
+  )
+}
+
+/**
+ * Pill switch — the card's boolean control, cut to the shape of the host's own
+ * `ui-primitives` Switch: 36×20 capsule, 16px thumb, and the on/off appearance
+ * keyed off `aria-checked` so assistive tech can never read a state the eye does
+ * not see.
+ *
+ * Optimistic by design: the capsule flips on click and holds that position while
+ * `scope.set` round-trips through the host settings service. A checkbox that
+ * waits for the snapshot to come back reads as a dead control on a slow write.
+ * The snapshot stays the truth — the state machine lives in `switch-state.ts`
+ * (and under test there) so the pill can never sit in a state the profile does
+ * not have.
+ *
+ * Every colour is a theme token with a fallback: `--dsw-alias-brand-primary`
+ * only exists on newer host lines, and an "on" state that resolves to nothing is
+ * an invisible control in dark mode.
+ */
+function PillSwitch(props: {
+  readonly id: string
+  readonly checked: boolean
+  /** Accessible name for rows whose text is not a `<label>` (the host Switch demands one). */
+  readonly label?: string | undefined
+  readonly disabled?: boolean | undefined
+  readonly title?: string | undefined
+  readonly onCommit: (next: boolean) => unknown
+}): JSX.Element {
+  const { id, checked, label, disabled = false, title, onCommit } = props
+  const [shown, commit] = useOptimistic<boolean>(checked)
+  return (
+    <button
+      id={id}
+      type="button"
+      role="switch"
+      aria-checked={shown}
+      aria-label={label}
+      title={title}
+      disabled={disabled}
+      className="pg-switch"
+      style={{
+        boxSizing: 'border-box',
+        position: 'relative',
+        flex: '0 0 auto',
+        width: '36px',
+        height: '20px',
+        padding: '2px',
+        border: '0',
+        borderRadius: '999px',
+        background: shown
+          ? 'var(--dsw-alias-brand-primary, var(--dsw-alias-state-business-primary, #3b82f6))'
+          : 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2, rgba(128,128,128,0.35)))',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background 120ms ease',
+      }}
+      onClick={() => {
+        const next = !shown
+        commit(next, () => onCommit(next))
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          display: 'block',
+          width: '16px',
+          height: '16px',
+          borderRadius: '50%',
+          background: 'var(--dsw-alias-label-primary-foreground, #fff)',
+          transform: shown ? 'translateX(16px)' : 'translateX(0)',
+          transition: 'transform 120ms ease',
+        }}
+      />
+    </button>
+  )
+}
+
 /**
  * A minimal add/remove editor for one string-array setting.
  *
@@ -314,6 +459,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
 
   // The backend strategy toggles only take effect while the tier is on.
   const effective = value.permissive === true
+
+  // The presets the gate acts in at all — outside them the whole gate stands down.
+  const gateScope = (value.gatePresets ?? []).length > 0 ? (value.gatePresets as string[]) : [...DEFAULT_GATE_PRESETS]
 
   const commitApiKey = (): void => {
     const next = apiKeyDraft.trim()
@@ -501,14 +649,14 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
               )
               : (
                 <>
+                  <style>{switchCss}</style>
                   <div style={rowStyle}>
                     <label htmlFor="plugin-config-perm-gate-permissive" style={labelStyle}>{t('card.permissive')}</label>
-                    <input
+                    <PillSwitch
                       id="plugin-config-perm-gate-permissive"
-                      type="checkbox"
                       checked={effective}
                       disabled={readonly}
-                      onChange={(event) => { void scope.set('permissive', event.currentTarget.checked) }}
+                      onCommit={(next) => scope.set('permissive', next)}
                     />
                   </div>
                   <p style={hintStyle}>{t('card.permissiveHint')}</p>
@@ -518,49 +666,61 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       where the tier is configured, and a silent stand-down would
                       otherwise look like a gate that approved the call. */}
                   <p style={hintStyle}>
-                    {t('card.scopeNote').replace(
-                      '%scope',
-                      ((value.gatePresets ?? []).length > 0 ? (value.gatePresets as string[]) : [...DEFAULT_GATE_PRESETS]).join(' / '),
-                    )}
+                    {t('card.scopeNote').replace('%scope', gateScope.join(' / '))}
                   </p>
 
-                  {/* The two unattended tiers plus script review. They are NOT part of
-                      `permissive`: YOLO ignores the human seam entirely, the degraded
-                      rule gate only speaks when no reviewer answered, and script review
-                      is on by default and independent of both. Listed here rather than
-                      nested under the tier switch for that reason. */}
+                  {/* Each unattended implementation owns one preset and one switch, so the
+                      rows below cannot cross: a switch changes the behaviour of the tier
+                      named beside it and of no other. Script review is independent of all
+                      of them and on by default. */}
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.unattended')}</p>
-                    <div style={rowStyle}>
-                      <label htmlFor="plugin-config-perm-gate-yolo" style={{ fontSize: '12px' }}>{t('card.yolo')}</label>
-                      <input
-                        id="plugin-config-perm-gate-yolo"
-                        type="checkbox"
-                        checked={value.yolo === true}
-                        disabled={readonly}
-                        onChange={(event) => { void scope.set('yolo', event.currentTarget.checked) }}
-                      />
-                    </div>
-                    <p style={hintStyle}>{t('card.yoloHint')}</p>
+                    <p style={hintStyle}>{t('card.unattendedHint')}</p>
+                    <TierRow
+                      id="plugin-config-perm-gate-yolo"
+                      label={t('card.yolo')}
+                      preset="permissive-yolo"
+                      checked={value.yolo === true}
+                      disabled={readonly}
+                      hint={t('card.yoloHint')}
+                      onCommit={(next) => scope.set('yolo', next)}
+                    />
+                    <TierRow
+                      id="plugin-config-perm-gate-safenet-pass"
+                      label={t('card.mode.pass')}
+                      preset="permissive-mech"
+                      checked={value.safenetPass !== false}
+                      disabled={readonly}
+                      hint={t('card.passHint')}
+                      onCommit={(next) => scope.set('safenetPass', next)}
+                    />
+                    <TierRow
+                      id="plugin-config-perm-gate-safenet-ask"
+                      label={t('card.mode.ask')}
+                      preset="permissive-snet"
+                      checked={value.safenetAsk === true}
+                      disabled={readonly}
+                      hint={t('card.askHint')}
+                      onCommit={(next) => scope.set('safenetAsk', next)}
+                    />
+                    <p style={hintStyle}>{t('card.tierScopeHint').replace('%scope', gateScope.join(' / '))}</p>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-rules-fallback" style={{ fontSize: '12px' }}>{t('card.rulesFallback')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-rules-fallback"
-                        type="checkbox"
                         checked={value.rulesFallback === true}
                         disabled={readonly}
-                        onChange={(event) => { void scope.set('rulesFallback', event.currentTarget.checked) }}
+                        onCommit={(next) => scope.set('rulesFallback', next)}
                       />
                     </div>
                     <p style={hintStyle}>{t('card.rulesFallbackHint')}</p>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-script-review" style={{ fontSize: '12px' }}>{t('card.scriptReview')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-script-review"
-                        type="checkbox"
                         checked={value.scriptReview !== false}
                         disabled={readonly}
-                        onChange={(event) => { void scope.set('scriptReview', event.currentTarget.checked) }}
+                        onCommit={(next) => scope.set('scriptReview', next)}
                       />
                     </div>
                     <p style={hintStyle}>{t('card.scriptReviewHint')}</p>
@@ -570,62 +730,38 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <p style={labelStyle}>{t('card.strategies')}</p>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-trust" style={{ fontSize: '12px' }}>{t('card.strategy.trustAutoAllow')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-trust"
-                        type="checkbox"
                         checked={strategies.trustAutoAllow ?? true}
                         disabled={readonly || !effective}
-                        onChange={(event) => {
-                          void scope.set('permissiveStrategies', {
-                            ...strategies,
-                            trustAutoAllow: event.currentTarget.checked,
-                          })
-                        }}
+                        onCommit={(next) => scope.set('permissiveStrategies', { ...strategies, trustAutoAllow: next })}
                       />
                     </div>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-confirm" style={{ fontSize: '12px' }}>{t('card.strategy.alwaysConfirm')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-confirm"
-                        type="checkbox"
                         checked={strategies.alwaysConfirm ?? false}
                         disabled={readonly || !effective}
-                        onChange={(event) => {
-                          void scope.set('permissiveStrategies', {
-                            ...strategies,
-                            alwaysConfirm: event.currentTarget.checked,
-                          })
-                        }}
+                        onCommit={(next) => scope.set('permissiveStrategies', { ...strategies, alwaysConfirm: next })}
                       />
                     </div>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-llm" style={{ fontSize: '12px' }}>{t('card.strategy.llmAssist')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-llm"
-                        type="checkbox"
                         checked={strategies.llmAssist ?? false}
                         disabled={readonly || !effective}
-                        onChange={(event) => {
-                          void scope.set('permissiveStrategies', {
-                            ...strategies,
-                            llmAssist: event.currentTarget.checked,
-                          })
-                        }}
+                        onCommit={(next) => scope.set('permissiveStrategies', { ...strategies, llmAssist: next })}
                       />
                     </div>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-escalation" style={{ fontSize: '12px' }}>{t('card.strategy.trustEscalation')}</label>
-                      <input
+                      <PillSwitch
                         id="plugin-config-perm-gate-escalation"
-                        type="checkbox"
                         checked={strategies.trustEscalation ?? true}
                         disabled={readonly || !effective}
-                        onChange={(event) => {
-                          void scope.set('permissiveStrategies', {
-                            ...strategies,
-                            trustEscalation: event.currentTarget.checked,
-                          })
-                        }}
+                        onCommit={(next) => scope.set('permissiveStrategies', { ...strategies, trustEscalation: next })}
                       />
                     </div>
                     <p style={hintStyle}>{t('card.strategy.trustEscalationHint')}</p>
@@ -831,12 +967,11 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                           </div>
                           <div style={rowStyle}>
                             <label htmlFor="plugin-config-perm-gate-risk-learning" style={{ fontSize: '12px' }}>{t('card.riskLearning')}</label>
-                            <input
+                            <PillSwitch
                               id="plugin-config-perm-gate-risk-learning"
-                              type="checkbox"
                               checked={value.riskLearning ?? false}
                               disabled={readonly || !effective}
-                              onChange={(event) => { void scope.set('riskLearning', event.currentTarget.checked) }}
+                              onCommit={(next) => scope.set('riskLearning', next)}
                             />
                           </div>
                           <p style={hintStyle}>{t('card.riskLearningHint')}</p>
@@ -865,12 +1000,11 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                               <>
                                 <div style={rowStyle}>
                                   <label htmlFor="plugin-config-perm-gate-risk-sediment" style={{ fontSize: '12px' }}>{t('card.riskSediment')}</label>
-                                  <input
+                                  <PillSwitch
                                     id="plugin-config-perm-gate-risk-sediment"
-                                    type="checkbox"
                                     checked={value.riskSediment ?? true}
                                     disabled={readonly || !effective}
-                                    onChange={(event) => { void scope.set('riskSediment', event.currentTarget.checked) }}
+                                    onCommit={(next) => scope.set('riskSediment', next)}
                                   />
                                 </div>
                                 <p style={hintStyle}>{t('card.riskSedimentHint')}</p>
@@ -1357,13 +1491,13 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <p style={labelStyle}>{t('card.networkEnabled')}</p>
                     <p style={hintStyle}>{t('card.networkEnabledHint')}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <input
-                        type="checkbox"
+                      <PillSwitch
+                        id="plugin-config-perm-gate-network-enabled"
+                        label={t('card.networkEnabled')}
                         checked={value.networkEnabled === true}
                         disabled={readonly}
-                        onChange={(event) => { void scope.set('networkEnabled', event.currentTarget.checked) }}
+                        onCommit={(next) => scope.set('networkEnabled', next)}
                       />
-                      <span style={{ fontSize: '13px' }}>{value.networkEnabled === true ? 'ON' : 'OFF'}</span>
                     </div>
                     <p style={hintStyle}>{t('card.networkRebindNote')}</p>
                   </section>
@@ -1373,13 +1507,13 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
                     <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <input
-                        type="checkbox"
+                      <PillSwitch
+                        id="plugin-config-perm-gate-network-inject-env"
+                        label={t('card.networkInjectEnv')}
                         checked={value.networkInjectEnv !== false}
                         disabled={readonly}
-                        onChange={(event) => { void scope.set('networkInjectEnv', event.currentTarget.checked) }}
+                        onCommit={(next) => scope.set('networkInjectEnv', next)}
                       />
-                      <span style={{ fontSize: '13px' }}>{value.networkInjectEnv !== false ? 'ON' : 'OFF'}</span>
                     </div>
                   </section>
 
@@ -1388,13 +1522,13 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     <p style={labelStyle}>{t('card.watch')}</p>
                     <p style={hintStyle}>{t('card.watchHint')}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                      <input
-                        type="checkbox"
+                      <PillSwitch
+                        id="plugin-config-perm-gate-watch"
+                        label={t('card.watch')}
                         checked={value.watch !== false}
                         disabled={readonly}
-                        onChange={(event) => { void scope.set('watch', event.currentTarget.checked) }}
+                        onCommit={(next) => scope.set('watch', next)}
                       />
-                      <span style={{ fontSize: '13px' }}>{value.watch !== false ? 'ON' : 'OFF'}</span>
                     </div>
                   </section>
 
