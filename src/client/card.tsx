@@ -55,6 +55,10 @@ export interface PermissiveCardValue {
   denyKeywordsExtra?: string[]
   /** User-declared credential paths, held to the same standard as `.ssh`. */
   credentialPaths?: string[]
+  /** Extra argument keys treated as document bodies (never replaces the built-in list). */
+  extraContentArgKeys?: string[]
+  /** Extra argument keys treated as operations; wins over the prose list on the same key. */
+  extraOperationArgKeys?: string[]
   /**
    * Session permission presets in which the gate acts at all (the host's
    * resolved `gatePresets`). Outside them the whole gate — P0 hard-deny
@@ -302,6 +306,8 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
     denyKeywords: listOf(raw.denyKeywords),
     denyKeywordsExtra: listOf(raw.denyKeywordsExtra),
     credentialPaths: listOf(raw.credentialPaths),
+    extraContentArgKeys: listOf(raw.extraContentArgKeys),
+    extraOperationArgKeys: listOf(raw.extraOperationArgKeys),
   } as unknown as Partial<PermissiveCardValue>
   const strategies = value.permissiveStrategies ?? {}
   const hasApiKey = typeof value.classifierApiKey === 'string' && value.classifierApiKey !== ''
@@ -1218,6 +1224,30 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       locked={readonly}
                       onAdd={(entry) => { void scope.set('denyKeywordsExtra', [...(value.denyKeywordsExtra ?? []), entry]) }}
                       onRemove={(index) => { void scope.set('denyKeywordsExtra', (value.denyKeywordsExtra ?? []).filter((_, i) => i !== index)) }}
+                    />
+                    <div style={{ height: '10px' }} />
+                    <StringListField
+                      label={t('card.extraContentArgKeys')}
+                      hint={t('card.extraContentArgKeysHint')}
+                      placeholder={t('card.extraContentArgKeysPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.extraContentArgKeys ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('extraContentArgKeys', [...(value.extraContentArgKeys ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('extraContentArgKeys', (value.extraContentArgKeys ?? []).filter((_, i) => i !== index)) }}
+                    />
+                    <div style={{ height: '10px' }} />
+                    <StringListField
+                      label={t('card.extraOperationArgKeys')}
+                      hint={t('card.extraOperationArgKeysHint')}
+                      placeholder={t('card.extraContentArgKeysPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.extraOperationArgKeys ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('extraOperationArgKeys', [...(value.extraOperationArgKeys ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('extraOperationArgKeys', (value.extraOperationArgKeys ?? []).filter((_, i) => i !== index)) }}
                     />
                   </section>
 

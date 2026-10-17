@@ -159,6 +159,27 @@ export interface PermGateConfig {
      */
     readonly credentialPaths?: string[];
     /**
+     * Argument keys to treat as **document bodies** in addition to the built-in list
+     * (`content`, `text`, `plan`…): their values never enter the flattened text the
+     * deny-keyword blacklist and the P0 credential pre-screen read.
+     *
+     * The point is the long tail of host tools whose prose keys nobody shipped a rule for
+     * (`steps`, `notes`, `rationale`) — the shape of GitHub issue #2, where an unlisted
+     * document key made a plan get refused for describing `rm -rf`. Additive only: the
+     * built-in list cannot be replaced, because an omission would re-create that bug.
+     */
+    readonly extraContentArgKeys?: string[];
+    /**
+     * Argument keys to treat as **operations** even when the tool class says otherwise: the
+     * field's text is read by the blacklist and the credential pre-screen, and this list
+     * wins over `extraContentArgKeys` when both name the same key.
+     *
+     * For a workflow/skill-style tool whose body *is* executed code. Cost, stated: naming a
+     * genuine document key here re-exposes the issue #2 failure — a plan or note that merely
+     * mentions a destructive command will be refused for mentioning it.
+     */
+    readonly extraOperationArgKeys?: string[];
+    /**
      * One-shot marker for the preset deny-table seed (`preset-rules.ts`, ported
      * from cc-safety-net): set once the `[deny-rule:*]` entries have been merged
      * into the live rules source. A full revocation (deleting every preset entry)
@@ -438,6 +459,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     denyKeywords: z<string[], string[], "plain">;
     denyKeywordsExtra: z<string[], string[], "defined">;
     credentialPaths: z<string[], string[], "defined">;
+    extraContentArgKeys: z<string[], string[], "defined">;
+    extraOperationArgKeys: z<string[], string[], "defined">;
     presetRulesSeeded: z<boolean, boolean, "defined">;
     autoAllowTools: z<string[], string[], "plain">;
     sessionSweep: z<boolean, boolean, "defined">;
@@ -503,6 +526,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     denyKeywords: z<string[], string[], "plain">;
     denyKeywordsExtra: z<string[], string[], "defined">;
     credentialPaths: z<string[], string[], "defined">;
+    extraContentArgKeys: z<string[], string[], "defined">;
+    extraOperationArgKeys: z<string[], string[], "defined">;
     presetRulesSeeded: z<boolean, boolean, "defined">;
     autoAllowTools: z<string[], string[], "plain">;
     sessionSweep: z<boolean, boolean, "defined">;
@@ -533,7 +558,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "rulesFallback", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "rulesFallback", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */

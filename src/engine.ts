@@ -85,8 +85,13 @@ function readonlyProbe(text: string): boolean {
   })
 }
 
-function containsCredentialMaterial(tool: string, args: Record<string, unknown>): boolean {
-  const text = operationText(args, tool)
+/**
+ * Credential or private-key material a call carries, read out of the *operation* text
+ * only — which is `scan-text`'s job, and why the key lists are a caller input: a document
+ * body is somebody's prose, not a theft in progress.
+ */
+function containsCredentialMaterial(ctx: ToolCallContext): boolean {
+  const text = operationText(ctx.args, ctx.tool, ctx.scanKeys)
   return CREDENTIAL_MATERIAL.test(text) && !readonlyProbe(text)
 }
 
@@ -147,7 +152,7 @@ function gitRemoteRewriteReason(segments: readonly SimpleCommand[]): string | un
  */
 export function hardDenyReason(ctx: ToolCallContext): string | undefined {
   const args = ctx.args
-  if (containsCredentialMaterial(ctx.tool, args)) return 'call contains credential or private-key material'
+  if (containsCredentialMaterial(ctx)) return 'call contains credential or private-key material'
   // **Shape, not a name whitelist** (see tool-names.ts): a call that carries a
   // command string and is not a known non-executor is a command call whatever the
   // tool is called, or an unfamiliar name would skip P0 with `diskpart /s x.txt`

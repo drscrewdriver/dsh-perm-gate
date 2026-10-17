@@ -16,7 +16,7 @@ import { resolvePermissiveStrategies, type PermGateConfig, type PermissiveStrate
 import type { ClassifierConfig } from './classifier.js'
 import { appendAllowCommand, listAllowCommands, listAllowFromRulesDoc, replaceAllowCommands } from './allowlist.js'
 import { decide, type FinalDecision, type GrantResolver } from './engine.js'
-import { keywordScanText } from './scan-text.js'
+import { keywordScanText, type ScanKeyPolicy } from './scan-text.js'
 import { EventLog, type GateEvent, saveEventSnapshots } from './events.js'
 import { decideRules, type ToolCallContext } from './evaluate.js'
 import { canonicalizeCall, GrantRegistry } from './grant.js'
@@ -306,6 +306,12 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * and mutation checks (see `config.credentialPaths`).
    */
   readonly readCredentialPaths?: () => readonly string[] | undefined
+  /**
+   * Optional live source of the argument keys treated as document bodies / as operations,
+   * on top of the built-in lists (`extraContentArgKeys`, `extraOperationArgKeys`).
+   */
+  readonly readExtraContentArgKeys?: () => readonly string[] | undefined
+  readonly readExtraOperationArgKeys?: () => readonly string[] | undefined
   /**
    * Optional live source of the session's effective approval policy (`'ask'` /
    * `'never'`), normally `approval.effectivePolicy(agent.session)`. Under
@@ -780,6 +786,7 @@ export class PermGateRuntime {
       caseInsensitive: this.options.caseInsensitivePaths ?? true,
       dshHome: this.options.dshHome,
       credentialPaths: this.liveCredentialPaths(),
+      scanKeys: this.liveScanKeys(),
       agentCandidates: extractAgentCandidates(exec),
     }
   }
@@ -1212,6 +1219,25 @@ export class PermGateRuntime {
   }
 
   /**
+   * The configured additions to the two argument-key sets, or `undefined` when nothing was
+   * configured so `scan-text` keeps its built-in pair without rebuilding anything.
+   *
+   * Read per call: both settings are volatile, and a scan rule that only applies after a
+   * reload is a scan rule nobody can reason about while debugging a false positive.
+   */
+  private liveScanKeys(): ScanKeyPolicy | undefined {
+    const readContent = this.options.readExtraContentArgKeys
+    const readOperation = this.options.readExtraOperationArgKeys
+    const content = readContent !== undefined ? readContent() : (this.options.extraContentArgKeys ?? [])
+    const operation = readOperation !== undefined ? readOperation() : (this.options.extraOperationArgKeys ?? [])
+    const clean = (list: readonly string[] | undefined): readonly string[] | undefined =>
+      Array.isArray(list) && list.length > 0 ? list : undefined
+    const c = clean(content)
+    const o = clean(operation)
+    return c === undefined && o === undefined ? undefined : { ...(c === undefined ? {} : { content: c }), ...(o === undefined ? {} : { operation: o }) }
+  }
+
+  /**
    * The preset deny-keyword layer (inherited from dsh-approval-gate): a keyword
    * hit over the call's command/argument text vetoes it with `deny` before any
    * allow path (deny wins over allow). Purely additive to P0 — it can only ever
@@ -1228,7 +1254,7 @@ export class PermGateRuntime {
   private denyKeywordHit(exec: ToolExecutionLike): string | undefined {
     const keywords = this.liveDenyKeywords()
     if (keywords.length === 0) return undefined
-    const text = keywordScanText(exec.name, exec.arguments ?? {}, exec.commandText)
+    const text = keywordScanText(exec.name, exec.arguments ?? {}, exec.commandText, this.liveScanKeys())
     if (text === '') return undefined
     const haystacks = [text]
     if (typeof exec.commandText === 'string' && exec.commandText !== '') {

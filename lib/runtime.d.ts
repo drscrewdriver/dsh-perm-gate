@@ -199,6 +199,12 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      */
     readonly readCredentialPaths?: () => readonly string[] | undefined;
     /**
+     * Optional live source of the argument keys treated as document bodies / as operations,
+     * on top of the built-in lists (`extraContentArgKeys`, `extraOperationArgKeys`).
+     */
+    readonly readExtraContentArgKeys?: () => readonly string[] | undefined;
+    readonly readExtraOperationArgKeys?: () => readonly string[] | undefined;
+    /**
      * Optional live source of the session's effective approval policy (`'ask'` /
      * `'never'`), normally `approval.effectivePolicy(agent.session)`. Under
      * `'never'` the DSH approval seam rejects every request before any answerer
@@ -517,6 +523,14 @@ export declare class PermGateRuntime {
     private liveDenyKeywords;
     /** The user-declared credential paths, as configured (may be empty). */
     private liveCredentialPaths;
+    /**
+     * The configured additions to the two argument-key sets, or `undefined` when nothing was
+     * configured so `scan-text` keeps its built-in pair without rebuilding anything.
+     *
+     * Read per call: both settings are volatile, and a scan rule that only applies after a
+     * reload is a scan rule nobody can reason about while debugging a false positive.
+     */
+    private liveScanKeys;
     /**
      * The preset deny-keyword layer (inherited from dsh-approval-gate): a keyword
      * hit over the call's command/argument text vetoes it with `deny` before any

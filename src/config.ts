@@ -209,6 +209,27 @@ export interface PermGateConfig {
    */
   readonly credentialPaths?: string[]
   /**
+   * Argument keys to treat as **document bodies** in addition to the built-in list
+   * (`content`, `text`, `plan`…): their values never enter the flattened text the
+   * deny-keyword blacklist and the P0 credential pre-screen read.
+   *
+   * The point is the long tail of host tools whose prose keys nobody shipped a rule for
+   * (`steps`, `notes`, `rationale`) — the shape of GitHub issue #2, where an unlisted
+   * document key made a plan get refused for describing `rm -rf`. Additive only: the
+   * built-in list cannot be replaced, because an omission would re-create that bug.
+   */
+  readonly extraContentArgKeys?: string[]
+  /**
+   * Argument keys to treat as **operations** even when the tool class says otherwise: the
+   * field's text is read by the blacklist and the credential pre-screen, and this list
+   * wins over `extraContentArgKeys` when both name the same key.
+   *
+   * For a workflow/skill-style tool whose body *is* executed code. Cost, stated: naming a
+   * genuine document key here re-exposes the issue #2 failure — a plan or note that merely
+   * mentions a destructive command will be refused for mentioning it.
+   */
+  readonly extraOperationArgKeys?: string[]
+  /**
    * One-shot marker for the preset deny-table seed (`preset-rules.ts`, ported
    * from cc-safety-net): set once the `[deny-rule:*]` entries have been merged
    * into the live rules source. A full revocation (deleting every preset entry)
@@ -556,6 +577,8 @@ export const Config = z.object({
   denyKeywords: vol(z.array(z.string())),
   denyKeywordsExtra: vol(z.array(z.string()).default([])),
   credentialPaths: vol(z.array(z.string()).default([])),
+  extraContentArgKeys: vol(z.array(z.string()).default([])),
+  extraOperationArgKeys: vol(z.array(z.string()).default([])),
   presetRulesSeeded: vol(z.boolean().default(false)),
   autoAllowTools: vol(z.array(z.string())),
   sessionSweep: vol(z.boolean().default(true)),
@@ -599,7 +622,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'yolo', 'rulesFallback', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'rulesFallback', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

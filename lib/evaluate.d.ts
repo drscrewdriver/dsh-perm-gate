@@ -1,5 +1,6 @@
 import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import { type SimpleCommand } from './shell.js';
+import type { ScanKeyPolicy } from './scan-text.js';
 export interface ToolCallContext {
     readonly tool: string;
     readonly args: Record<string, unknown>;
@@ -22,6 +23,12 @@ export interface ToolCallContext {
      * write call cannot route around. Absent means the built-ins alone.
      */
     readonly credentialPaths?: readonly string[];
+    /**
+     * Additions to the argument-key sets that decide which parameter text a protective
+     * screen may read (`extraContentArgKeys` / `extraOperationArgKeys`). Absent means the
+     * built-in sets, which is what an embedded caller or a dry run gets.
+     */
+    readonly scanKeys?: ScanKeyPolicy;
     /** Agent identity candidates from session context. */
     readonly agentCandidates?: readonly string[];
     /** Network request info (for network dimension matching). */

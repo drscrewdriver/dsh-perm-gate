@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CONTENT_ARG_KEYS, OPERATION_ARG_KEYS, keywordScanText, operationText } from '../src/scan-text.js'
+import { CONTENT_ARG_KEYS, OPERATION_ARG_KEYS, keywordScanText, mergeScanKeys, operationText } from '../src/scan-text.js'
 import { PermGateRuntime } from '../src/runtime.js'
 
 /**
@@ -106,5 +106,97 @@ describe('issue #2 end-to-end — a plan naming a step is not the step', () => {
       cwd: '/work',
       sessionId: 's1',
     })?.kind).toBe('deny')
+  })
+})
+
+/**
+ * The configurable half of the same rule: which keys count as prose and which as an
+ * operation, on top of the built-in lists.
+ *
+ * Additive by construction, and the precedence is the contract — a key named in both lists
+ * is an operation, because that is an explicit statement that the field's content gets
+ * executed, and a heuristic must not outvote an author.
+ */
+describe('extraContentArgKeys / extraOperationArgKeys — additive key lists', () => {
+  const RUN = 'please rm -rf the cache'
+  const exec = (name: string, args: Record<string, unknown>) => ({ name, arguments: args, cwd: '/work', sessionId: 's1' })
+  const gate = (content: string[] = [], operation: string[] = []) => new PermGateRuntime({
+    rulesFile: undefined,
+    readExtraContentArgKeys: () => content,
+    readExtraOperationArgKeys: () => operation,
+  })
+
+  it('merges without replacing, and ignores blanks', () => {
+    const keys = mergeScanKeys({ content: ['  ', 'steps'], operation: ['workflowYaml'] })
+    expect(keys.content.has('content')).toBe(true)
+    expect(keys.content.has('plan')).toBe(true)
+    expect(keys.content.has('steps')).toBe(true)
+    expect(keys.operation.has('command')).toBe(true)
+    expect(keys.operation.has('workflowYaml')).toBe(true)
+    // Nothing configured ⇒ the built-in objects themselves, no Set churn per call.
+    expect(mergeScanKeys()).toBe(mergeScanKeys())
+    expect(mergeScanKeys({ content: [], operation: undefined }).content).toBe(CONTENT_ARG_KEYS)
+    expect(mergeScanKeys({ operation: [] }).operation).toBe(OPERATION_ARG_KEYS)
+  })
+
+  it('a declared prose key stops being scanned for an executor', () => {
+    // Unknown names are executors: everything outside the prose list is read.
+    expect(gate().decideExecution(exec('pash', { steps: RUN }))?.kind).toBe('deny')
+    expect(gate(['steps']).decideExecution(exec('pash', { steps: RUN }))?.kind).not.toBe('deny')
+    // …and the same text under a key that stays an operation is still refused.
+    expect(gate(['steps']).decideExecution(exec('pash', { note: RUN }))?.kind).toBe('deny')
+  })
+
+  it('a declared operation key is scanned even for a document tool', () => {
+    const call = exec('workflow', { workflowYaml: RUN })
+    expect(gate().decideExecution(call)?.kind).not.toBe('deny')
+    expect(gate([], ['workflowYaml']).decideExecution(call)?.kind).toBe('deny')
+  })
+
+  it('resolves a key named in both lists as an operation', () => {
+    expect(operationText({ steps: RUN }, 'pash', { content: ['steps'] })).toBe('')
+    expect(operationText({ steps: RUN }, 'pash', { content: ['steps'], operation: ['steps'] })).toContain('rm -rf')
+  })
+
+  /**
+   * The invariant that makes these lists safe to expose: they steer the *flattened* text
+   * only. The executed command and the mutated path are read by their own judgements, so
+   * naming `command` or `file_path` prose cannot switch the gate off.
+   */
+  it('cannot be used to disarm the command or path judgements', () => {
+    const disarmed = gate(['command', 'file_path', 'path', 'url'])
+    expect(disarmed.decideExecution(exec('bash', { command: 'rm -rf /' }))?.kind).toBe('deny')
+    expect(disarmed.decideExecution(exec('write', { file_path: 'C:/Users/u/.ssh/authorized_keys', content: 'ssh-rsa AAAA x' })))
+      .toMatchObject({ kind: 'deny' })
+    expect(disarmed.decideExecution(exec('bash', { command: 'diskpart /s x.txt' }))?.kind).toBe('deny')
+  })
+
+  it('routes the same policy through the P0 credential pre-screen', () => {
+    const KEY_BODY = '-----BEGIN RSA PRIVATE KEY-----\nMIIEpA\n'
+    expect(gate().decideExecution(exec('pash', { note: KEY_BODY }))?.kind).toBe('deny')
+    expect(gate(['note']).decideExecution(exec('pash', { note: KEY_BODY }))?.kind).not.toBe('deny')
+  })
+
+  it('applies on the next call, without a reload', () => {
+    let prose: string[] = []
+    const r = new PermGateRuntime({ rulesFile: undefined, readExtraContentArgKeys: () => prose })
+    const call = exec('pash', { steps: RUN })
+    expect(r.decideExecution(call)?.kind).toBe('deny')
+    prose = ['steps']
+    expect(r.decideExecution(call)?.kind).not.toBe('deny')
+  })
+
+  it('walks declared operation keys through nested bags and array elements', () => {
+    expect(operationText({ params: { workflowYaml: RUN } }, 'workflow', { operation: ['workflowYaml'] }))
+      .toContain('rm -rf')
+    expect(operationText({ notes: [RUN] }, 'pash', { content: ['notes'] })).toBe('')
+    // An undeclared key under a document tool stays prose even when nested.
+    expect(operationText({ payload: { steps: RUN } }, 'workflow')).toBe('')
+  })
+
+  it('leaves the built-in behaviour untouched when nothing is configured', () => {
+    expect(keywordScanText('exit_plan_mode', { plan: RUN })).toBe('')
+    expect(keywordScanText('bash', { command: 'echo hi' }, 'echo hi')).toBe('echo hi echo hi')
+    expect(keywordScanText('pash', { steps: RUN })).toContain('rm -rf')
   })
 })

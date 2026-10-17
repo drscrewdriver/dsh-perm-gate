@@ -15,6 +15,7 @@ import { commandArgv, decomposeShellCommand, isForceDeletion, isRecursiveDeletio
 import { compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
 import { dispatchCommand } from './command-dispatcher.js'
 import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
+import type { ScanKeyPolicy } from './scan-text.js'
 import type { CompiledBranchDimension } from './rule.js'
 import {
   SHELL_TOOLS as IMPORTED_SHELL_TOOLS,
@@ -44,6 +45,12 @@ export interface ToolCallContext {
    * write call cannot route around. Absent means the built-ins alone.
    */
   readonly credentialPaths?: readonly string[]
+  /**
+   * Additions to the argument-key sets that decide which parameter text a protective
+   * screen may read (`extraContentArgKeys` / `extraOperationArgKeys`). Absent means the
+   * built-in sets, which is what an embedded caller or a dry run gets.
+   */
+  readonly scanKeys?: ScanKeyPolicy
   /** Agent identity candidates from session context. */
   readonly agentCandidates?: readonly string[]
   /** Network request info (for network dimension matching). */
