@@ -8,7 +8,8 @@
  *   P4 ask            official approval seam
  * Strictly fail-closed: P0 wins over every later stage.
  */
-import { isProtectedDestructiveTarget, isSensitivePath, isWithin } from './path.js'
+import { isProtectedCredentialPath, isProtectedDestructiveTarget, isSensitivePath, isWithin } from './path.js'
+import { compileCredentialPaths } from './credential-paths.js'
 import { commandIrreversibleReason, irreversibleReason } from './irreversible.js'
 import { executableVariants, normalizeCommandText } from './command-normalize.js'
 // 工具名名单归 `tool-names.ts` 所有（不得在此处再抄一份）。P0 **不看工具名白名单**：
@@ -31,43 +32,20 @@ const NO_EXTRA_AUTO_ALLOW: ReadonlySet<string> = new Set()
 export const AUTO_ALLOW_TOOLS: ReadonlySet<string> = new Set([...READ_TOOLS, ...INTERNAL_TOOLS])
 
 /**
- * Argument keys that carry a document body rather than the operation itself.
- * A file's text is not the operation: writing a document that *mentions* a
- * token, a private key, or `credentials.yaml` must not hard-deny the write, and
- * the deny-keyword layer already skips these keys. The path/command arguments
- * that actually describe the operation are still scanned.
+ * The document-body keys the screens skip live in `scan-text.ts`, shared with the
+ * deny-keyword layer so the two cannot drift. Re-exported here because this was their
+ * published home.
  */
-export const CONTENT_ARG_KEYS: ReadonlySet<string> = new Set([
-  'content', 'contents', 'text', 'body', 'message', 'prompt',
-  'new_string', 'old_string', 'newText', 'oldText', 'file_text', 'fileText',
-  'diff', 'patch', 'replacement', 'snippet',
-])
-
-/** The call's non-body text: the operation, not any document it carries. */
-function operationText(args: Record<string, unknown>, depth = 0): string {
-  if (depth > 6) return ''
-  const parts: string[] = []
-  for (const [key, value] of Object.entries(args)) {
-    if (typeof value === 'string') {
-      if (!CONTENT_ARG_KEYS.has(key)) parts.push(value)
-      continue
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'string') parts.push(item)
-        else if (item !== null && typeof item === 'object') parts.push(operationText(item as Record<string, unknown>, depth + 1))
-      }
-      continue
-    }
-    if (value !== null && typeof value === 'object') {
-      parts.push(operationText(value as Record<string, unknown>, depth + 1))
-    }
-  }
-  return parts.join(' ')
-}
+export { CONTENT_ARG_KEYS } from './scan-text.js'
+import { operationText } from './scan-text.js'
 
 /**
  * Credential or private-key material a call carries.
+ *
+ * Read through `scan-text.operationText`, so a document tool's prose is no longer fed
+ * to this screen at all (issue #2): refusing `exit_plan_mode` because the plan *names*
+ * a step it intends to ask about is a self-contradiction — `decide()` classifies the
+ * same call as needing no approval one layer later.
  *
  * Two clauses were removed on purpose, both because this predicate reads one flat
  * string and therefore cannot tell *using* a secret from *moving* one — and P0 is
@@ -84,8 +62,15 @@ function operationText(args: Record<string, unknown>, depth = 0): string {
  * What is left is the theft shape: a secret *artifact* plus a channel out, or any
  * non-readonly verb touching one. That pairing lives in `irreversible.ts`, so both
  * layers agree.
+ *
+ * `id_` keeps its `.pub` half out: a public key is the artifact you hand *other*
+ * people, so writing `~/.ssh/id_ed25519.pub` (registering a key, restoring a pair by
+ * hand) was refused at the one layer nobody can appeal for no protective reason. The
+ * private halves stay in, as does `config` — an ssh config's `ProxyCommand` /
+ * `LocalCommand` is code that runs on the next connection, which is an execution
+ * plant, not a preference file.
  */
-const CREDENTIAL_MATERIAL = /(?:BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b|\.ssh[\\/](?:id_|config)|credentials\.yaml)/i
+const CREDENTIAL_MATERIAL = /(?:BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|\b(?:sk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b|\.ssh[\\/]id_(?![^\\/]*\.pub(?:$|[\\/]))|\.ssh[\\/]config|credentials\.yaml)/i
 
 /** Verbs that only look. A call made of nothing else cannot have leaked anything. */
 const READ_ONLY_HEAD = /^(?:test-path|test|ls|dir|get-childitem|get-content|get-item|cat|type|more|head|tail|stat|file|select-string|where|which|exists)$/i
@@ -100,8 +85,8 @@ function readonlyProbe(text: string): boolean {
   })
 }
 
-function containsCredentialMaterial(args: Record<string, unknown>): boolean {
-  const text = operationText(args)
+function containsCredentialMaterial(tool: string, args: Record<string, unknown>): boolean {
+  const text = operationText(args, tool)
   return CREDENTIAL_MATERIAL.test(text) && !readonlyProbe(text)
 }
 
@@ -162,7 +147,7 @@ function gitRemoteRewriteReason(segments: readonly SimpleCommand[]): string | un
  */
 export function hardDenyReason(ctx: ToolCallContext): string | undefined {
   const args = ctx.args
-  if (containsCredentialMaterial(args)) return 'call contains credential or private-key material'
+  if (containsCredentialMaterial(ctx.tool, args)) return 'call contains credential or private-key material'
   // **Shape, not a name whitelist** (see tool-names.ts): a call that carries a
   // command string and is not a known non-executor is a command call whatever the
   // tool is called, or an unfamiliar name would skip P0 with `diskpart /s x.txt`
@@ -210,9 +195,33 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
   if (path !== undefined && (DESTRUCTIVE_TOOL.test(ctx.tool) || ctx.tool === 'bash' || ctx.tool === 'pwsh' || ctx.tool === 'write' || ctx.tool === 'edit')) {
     if (isProtectedDestructiveTarget(path, ctx.dshHome)) return `mutation targets protected path: ${path}`
   }
+  // Credential-store mutation via a file tool is an access backdoor: dropping an
+  // `authorized_keys` line, `git config credential.helper store`, or rewriting
+  // `.git-credentials`/`.npmrc`/cloud creds grants or leaks authority. The shell
+  // layer already denies deletion of these stores and asks on reading them, but
+  // write/edit reached past the P0 guard because it only screened system roots, so
+  // `write ~/.ssh/authorized_keys` was auto-allowed. Scoped to file-mutation tools
+  // (not bash/pwsh, whose real target is the command string, judged above), and
+  // `.env` is excluded (project-local dev config).
+  //
+  // `credentialPaths` (a setting) is consulted here and in the read branch below: the
+  // long tail of secrets — a company vault file, a deploy key nobody shipped in a
+  // preset — has to be extendable, and this is the only layer that a *read* call cannot
+  // skip past. The tier is not configurable on purpose: a declared path gets exactly
+  // what `.ssh` gets, never a downgradable `ask`.
+  const declared = compileCredentialPaths(ctx.credentialPaths, {
+    caseInsensitive: ctx.caseInsensitive ?? false,
+    // `userHome`, not `home`: the latter is the workspace root. A caller that does not
+    // supply it gets the tail-match fallback in `compileCredentialPaths`, which is
+    // stricter, never looser.
+    ...(ctx.userHome === undefined ? {} : { home: ctx.userHome }),
+  })
+  if (path !== undefined && (ctx.tool === 'write' || ctx.tool === 'edit' || DESTRUCTIVE_TOOL.test(ctx.tool)) && isProtectedCredentialPath(path, declared)) {
+    return `mutation targets a credential store: ${path}`
+  }
   if (READ_TOOLS.has(ctx.tool) && path !== undefined) {
     const normalized = path.startsWith('/') || /^[A-Za-z]:/.test(path) ? path : path
-    if (!isWithin(ctx.cwd, normalized) && isSensitivePath(normalized)) {
+    if (!isWithin(ctx.cwd, normalized) && (isSensitivePath(normalized) || declared(path))) {
       return `read of sensitive path outside workspace: ${path}`
     }
   }

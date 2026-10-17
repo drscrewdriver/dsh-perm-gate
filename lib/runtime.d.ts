@@ -4,6 +4,7 @@ import type { ClassifierConfig } from './classifier.js';
 import { EventLog } from './events.js';
 import { RiskLearning } from './learning.js';
 import { type RiskRequest, type RiskVerdict } from './risk.js';
+import { type AskContext } from './ask-context.js';
 import { type HostLlmLike, type HostModelSelection } from './host-llm.js';
 import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import type { NetworkTarget } from './network.js';
@@ -140,6 +141,19 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
     readonly riskHook?: (req: RiskRequest) => Promise<RiskVerdict>;
     /** Optional live source of the Permissive tier (e.g. a DSH settings namespace). */
     readonly readPermissive?: () => PermissiveState;
+    /** Optional live source of the YOLO tier switch (never human-confirm; block-on-danger). */
+    readonly readYolo?: () => boolean;
+    /**
+     * Optional live source of the degraded-review switch: with no reviewer able to grade
+     * an ask, decide on the deterministic nets instead of parking it on a human.
+     */
+    readonly readRulesFallback?: () => boolean;
+    /**
+     * Optional live source of the script-review switch: attach the body of every script a
+     * call runs to the review, so the grader and the human judge code, not a filename.
+     * Defaults to on (`config.scriptReview`).
+     */
+    readonly readScriptReview?: () => boolean;
     /** Optional live source of the llmAssist classifier setup. */
     readonly readClassifyConfig?: () => ClassifierConfig;
     /**
@@ -173,6 +187,17 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      * protective and never silently off); a non-empty array replaces the preset.
      */
     readonly readDenyKeywords?: () => readonly string[] | undefined;
+    /**
+     * Optional live source of the **appended** deny keywords. Unlike `readDenyKeywords`,
+     * which replaces the preset, this extends whatever list is live — the way to protect a
+     * long-tail secret without copying fifty preset entries into a profile.
+     */
+    readonly readDenyKeywordsExtra?: () => readonly string[] | undefined;
+    /**
+     * Optional live source of the user-declared credential paths, consulted by P0's read
+     * and mutation checks (see `config.credentialPaths`).
+     */
+    readonly readCredentialPaths?: () => readonly string[] | undefined;
     /**
      * Optional live source of the session's effective approval policy (`'ask'` /
      * `'never'`), normally `approval.effectivePolicy(agent.session)`. Under
@@ -409,6 +434,33 @@ export declare class PermGateRuntime {
     /** The host model-group selection, or undefined when unusable. */
     private hostModel;
     private livePermissive;
+    /** Whether YOLO mode is live (never human-confirm). */
+    isYolo(): boolean;
+    /** Whether degraded review is live (no reviewer ⇒ rule-only gate). */
+    isRulesFallback(): boolean;
+    /** Whether script-body review is live (default on). */
+    isScriptReview(): boolean;
+    /**
+     * The scripts one call will run, read for review.
+     *
+     * `bash ./clean-home.sh` names a file; the operation is inside it. So the body is
+     * fetched (bounded, never executing anything) and handed to the same three reviewers
+     * the rest of the call is: the deterministic nets judge it (an irreversible body is
+     * `I` no model may clear), the grader is shown it (`script_contents`), and the human
+     * card says it was attached. When *every* named script was read, the call is no longer
+     * an unreadable payload — that is what lifts a workspace-outside script run out of the
+     * `U` tier instead of parking it as unknowable.
+     *
+     * Best-effort by construction: any read problem yields "nothing attached", which the
+     * tier machinery already treats as opaque. It must never throw into the decision path.
+     */
+    private scriptReviewFor;
+    /**
+     * Whether a risk grader is reachable: an injected hook, the host `llm` service in
+     * host mode, or a configured custom endpoint. When false, YOLO decides purely on the
+     * deterministic danger signal (fail-open for a non-dangerous ask).
+     */
+    private classifierUsable;
     /**
      * The session's selected permission preset, folded from its event log. The
      * fold is cached on the log's length plus the identity of its last event: a
@@ -463,6 +515,8 @@ export declare class PermGateRuntime {
      * An empty override is treated as "no meaningful override" (the blacklist is
      * protective and stays on); schemastery materializes unset arrays as `[]`. */
     private liveDenyKeywords;
+    /** The user-declared credential paths, as configured (may be empty). */
+    private liveCredentialPaths;
     /**
      * The preset deny-keyword layer (inherited from dsh-approval-gate): a keyword
      * hit over the call's command/argument text vetoes it with `deny` before any
@@ -615,6 +669,30 @@ export declare class PermGateRuntime {
      * settled by {@link settleExecution} when the call actually executes.
      */
     refineAsk(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined>;
+    /**
+     * YOLO resolution of an `ask`: never raise a human. A **dangerous** ask — an
+     * irreversible / unlearnable / opaque call (deterministic), or an `llmAssist`
+     * hard-risk verdict when a grader is reachable — is **blocked** (`deny`), and the
+     * caller feeds the reason back to the main LLM as a user message. Every other ask
+     * is **allowed** (returns `undefined` → passthrough), so ordinary work keeps moving
+     * without a human. This is the mirror of `askAnswerable`'s never-passthrough (which
+     * blanket-allows under `approval: never`): YOLO allows the benign but actively
+     * intercepts the dangerous — "尽力自动拦截所有危险命令".
+     */
+    resolveYolo(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined>;
+    /**
+     * Degraded resolution of an `ask` when **no reviewer answered it** — either none is
+     * configured or the configured one could not reach a verdict. Instead of leaving the
+     * call on a human seam nobody is watching, it decides on the deterministic nets alone,
+     * the way a static policy gate does: an irreversible (`I`-tier) / unlearnable /
+     * opaque call is **blocked** (the caller feeds the reason back to the main LLM), and
+     * everything else runs. Unlike {@link resolveYolo} no model is consulted at all — this
+     * is what automatic review becomes when the model is missing, not a mode the operator
+     * picks while one is working. Never softens a deterministic deny: those arrive here
+     * already denied, and a rule-only `ask` is by construction something the rules could
+     * not condemn.
+     */
+    resolveRulesDegrade(exec: ToolExecutionLike, decision: PreToolDecisionLike, ctx?: AskContext): PreToolDecisionLike | undefined;
     /**
      * One frozen view of a call, built the same way for every ask path so the
      * popup cannot disagree with what the grader was shown.

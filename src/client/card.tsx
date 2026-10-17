@@ -23,6 +23,11 @@ import { SedimentSection } from './sediment.tsx'
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
   permissive?: boolean
+  /** Unattended tiers: never a human popup (see src/config.ts for the semantics). */
+  yolo?: boolean
+  rulesFallback?: boolean
+  /** On unless explicitly unset to false — the default attaches script bodies. */
+  scriptReview?: boolean
   permissiveStrategies?: { trustAutoAllow?: boolean; alwaysConfirm?: boolean; llmAssist?: boolean; trustEscalation?: boolean }
   /** OpenAI-compatible endpoint the llmAssist classifier calls (custom API allowed). */
   classifierEndpoint?: string
@@ -46,6 +51,10 @@ export interface PermissiveCardValue {
   allowlist?: string[]
   /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
   denyKeywords?: string[]
+  /** Keywords appended to whichever blacklist is live (never replaces it). */
+  denyKeywordsExtra?: string[]
+  /** User-declared credential paths, held to the same standard as `.ssh`. */
+  credentialPaths?: string[]
   /**
    * Session permission presets in which the gate acts at all (the host's
    * resolved `gatePresets`). Outside them the whole gate — P0 hard-deny
@@ -159,6 +168,99 @@ const fieldStyle: CSSProperties = { display: 'flex', flexDirection: 'column', ga
 const fieldLabelStyle: CSSProperties = { margin: 0, fontSize: '12px', lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' }
 
 /**
+ * A minimal add/remove editor for one string-array setting.
+ *
+ * Deliberately generic and small: the long-tail protection lists (`credentialPaths`,
+ * `denyKeywordsExtra`) are the same shape — lines a person types to protect something
+ * the preset cannot know — and they should not each grow their own copy of the row
+ * markup the deny blacklist already has.
+ */
+function StringListField(props: {
+  readonly label: string
+  readonly hint: string
+  readonly placeholder: string
+  readonly addLabel: string
+  readonly removeLabel: string
+  readonly items: readonly string[]
+  readonly locked: boolean
+  readonly onAdd: (value: string) => void
+  readonly onRemove: (index: number) => void
+}): JSX.Element {
+  const [draft, setDraft] = useState('')
+  const add = (): void => {
+    const next = draft.trim()
+    if (next === '') return
+    props.onAdd(next)
+    setDraft('')
+  }
+  return (
+    <>
+      <p style={labelStyle}>{props.label}</p>
+      <p style={hintStyle}>{props.hint}</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '6px 0' }}>
+        {props.items.map((item, index) => (
+          <div
+            key={`${index}:${item}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              border: '1px solid var(--dsw-alias-border-l2)',
+              background: 'var(--dsw-alias-bg-surface, transparent)',
+            }}
+          >
+            <code style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere', font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
+              {item}
+            </code>
+            <button
+              type="button"
+              aria-label={props.removeLabel}
+              title={props.removeLabel}
+              disabled={props.locked}
+              onClick={() => { props.onRemove(index) }}
+              style={{
+                flex: '0 0 auto',
+                width: '20px',
+                height: '20px',
+                border: 'none',
+                borderRadius: '999px',
+                background: 'transparent',
+                color: 'var(--dsw-alias-label-tertiary)',
+                cursor: props.locked ? 'default' : 'pointer',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+        <input
+          type="text"
+          value={draft}
+          disabled={props.locked}
+          placeholder={props.placeholder}
+          spellCheck={false}
+          style={{ ...controlStyle, flex: '1 1 auto', minWidth: 0 }}
+          onChange={(event) => { setDraft(event.currentTarget.value) }}
+          onKeyDown={(event) => { if (event.key === 'Enter') add() }}
+        />
+        <button
+          type="button"
+          disabled={props.locked || draft.trim() === ''}
+          onClick={add}
+          style={{ ...controlStyle, flex: '0 0 auto', cursor: props.locked || draft.trim() === '' ? 'default' : 'pointer', opacity: props.locked || draft.trim() === '' ? 0.5 : 1 }}
+        >
+          {props.addLabel}
+        </button>
+      </div>
+    </>
+  )
+}
+
+/**
  * The card body, wrapped in a disclosure shell like every peer settings card:
  * a header (name + description + chevron) toggling the body, expanded by
  * default so the section reads as an open page of drawers.
@@ -198,6 +300,8 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
     ...raw,
     allowlist: listOf(raw.allowlist),
     denyKeywords: listOf(raw.denyKeywords),
+    denyKeywordsExtra: listOf(raw.denyKeywordsExtra),
+    credentialPaths: listOf(raw.credentialPaths),
   } as unknown as Partial<PermissiveCardValue>
   const strategies = value.permissiveStrategies ?? {}
   const hasApiKey = typeof value.classifierApiKey === 'string' && value.classifierApiKey !== ''
@@ -413,6 +517,48 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       ((value.gatePresets ?? []).length > 0 ? (value.gatePresets as string[]) : [...DEFAULT_GATE_PRESETS]).join(' / '),
                     )}
                   </p>
+
+                  {/* The two unattended tiers plus script review. They are NOT part of
+                      `permissive`: YOLO ignores the human seam entirely, the degraded
+                      rule gate only speaks when no reviewer answered, and script review
+                      is on by default and independent of both. Listed here rather than
+                      nested under the tier switch for that reason. */}
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('card.unattended')}</p>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-yolo" style={{ fontSize: '12px' }}>{t('card.yolo')}</label>
+                      <input
+                        id="plugin-config-perm-gate-yolo"
+                        type="checkbox"
+                        checked={value.yolo === true}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('yolo', event.currentTarget.checked) }}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.yoloHint')}</p>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-rules-fallback" style={{ fontSize: '12px' }}>{t('card.rulesFallback')}</label>
+                      <input
+                        id="plugin-config-perm-gate-rules-fallback"
+                        type="checkbox"
+                        checked={value.rulesFallback === true}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('rulesFallback', event.currentTarget.checked) }}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.rulesFallbackHint')}</p>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-script-review" style={{ fontSize: '12px' }}>{t('card.scriptReview')}</label>
+                      <input
+                        id="plugin-config-perm-gate-script-review"
+                        type="checkbox"
+                        checked={value.scriptReview !== false}
+                        disabled={readonly}
+                        onChange={(event) => { void scope.set('scriptReview', event.currentTarget.checked) }}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.scriptReviewHint')}</p>
+                  </section>
 
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.strategies')}</p>
@@ -1043,6 +1189,36 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                           </>
                         )
                         : null}
+                  </section>
+
+                  {/* Long-tail protection the preset cannot know about: the user's own
+                      secret paths and their own blacklist words. Kept out of the deny
+                      blacklist section because the semantics differ — that list replaces
+                      the preset, these two never do. */}
+                  <section style={sectionStyle}>
+                    <StringListField
+                      label={t('card.credentialPaths')}
+                      hint={t('card.credentialPathsHint')}
+                      placeholder={t('card.credentialPathsPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.credentialPaths ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('credentialPaths', [...(value.credentialPaths ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('credentialPaths', (value.credentialPaths ?? []).filter((_, i) => i !== index)) }}
+                    />
+                    <div style={{ height: '10px' }} />
+                    <StringListField
+                      label={t('card.denyKeywordsExtra')}
+                      hint={t('card.denyKeywordsExtraHint')}
+                      placeholder={t('card.denylistPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.denyKeywordsExtra ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('denyKeywordsExtra', [...(value.denyKeywordsExtra ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('denyKeywordsExtra', (value.denyKeywordsExtra ?? []).filter((_, i) => i !== index)) }}
+                    />
                   </section>
 
                   <section style={sectionStyle}>

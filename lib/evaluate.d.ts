@@ -7,8 +7,21 @@ export interface ToolCallContext {
     readonly cwd: string;
     /** Workspace root; used by the write-path override to decide inside vs outside. */
     readonly home?: string;
+    /**
+     * The real user directory (`os.homedir()`), used to expand a `~/` in a declared
+     * credential path. Deliberately separate from `home`, which is the workspace root —
+     * conflating them would expand `~/.myco/vault.token` into the project and protect
+     * nothing at all.
+     */
+    readonly userHome?: string;
     readonly dshHome?: string;
     readonly caseInsensitive?: boolean;
+    /**
+     * User-declared credential paths (`credentialPaths` setting), raw as configured.
+     * P0 compiles them; they extend the built-in store list for the two checks a read or
+     * write call cannot route around. Absent means the built-ins alone.
+     */
+    readonly credentialPaths?: readonly string[];
     /** Agent identity candidates from session context. */
     readonly agentCandidates?: readonly string[];
     /** Network request info (for network dimension matching). */

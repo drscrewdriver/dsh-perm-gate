@@ -10,6 +10,17 @@ export type Reversibility =
  | 'R';
 /** What the call is aimed at. */
 export type TargetKind = 'read' | 'write' | 'delete' | 'remote-write' | 'exec-external' | 'unknown';
+/**
+ * One script body handed to the reviewers, as the runtime read it. Structural here so
+ * this module keeps its dependency-free contract (the fs half lives in `script-review.ts`).
+ */
+export interface ScriptContentIn {
+    readonly ref: string;
+    readonly path: string;
+    readonly body: string;
+    readonly truncated: boolean;
+    readonly unreadable?: string;
+}
 /** The session's three tier knobs, folded out of the durable session log. */
 export interface SessionKnobs {
     readonly permissionPreset?: string;
@@ -28,6 +39,18 @@ export interface AskContextSource {
     readonly files?: readonly string[];
     /** The deterministic layer's own conclusion, kept for the human, not the grader. */
     readonly ruleReason?: string;
+    /**
+     * The scripts this call runs, with the body the reviewer is given. Read by the node
+     * runtime (`script-review.ts`) — this module stays filesystem-free, so the text
+     * arrives pre-fetched. Absent means either no script is named or review is off.
+     */
+    readonly scriptContents?: readonly ScriptContentIn[];
+    /**
+     * True when *every* script the call names was read, i.e. what will execute is now
+     * visible. That is what lifts a script run out of the opaque/`U` tier: the reviewer
+     * is no longer judging a filename. One unreadable script keeps the opacity.
+     */
+    readonly scriptsCovered?: boolean;
     /** Correlation key, mixed into the event digest. */
     readonly callId?: string;
     /** Per-session salt so `inputDigest` cannot be dictionary-reversed or joined across sessions. */
@@ -64,7 +87,24 @@ export interface GraderPayload {
     readonly reason: string;
     readonly target_resolvable: boolean;
     readonly workspace_root?: string;
+    /**
+     * The bodies of the scripts this call runs, redacted like any other egress text.
+     * Without them the grader judges a filename and can say `safe` about code it never
+     * saw; with them the answer is about what will execute.
+     */
+    readonly script_contents?: readonly GraderScript[];
 }
+/** One attached script, as it leaves the host. */
+export interface GraderScript {
+    readonly ref: string;
+    readonly path: string;
+    /** Absent when `unreadable` names why there is no body. */
+    readonly body?: string;
+    readonly truncated?: boolean;
+    readonly unreadable?: string;
+}
+/** Budget for one script body on the wire: a real script, one round-trip. */
+export declare const GRADER_SCRIPT_BODY_CHARS = 20000;
 /**
  * Project for egress to the grader. Tier knobs and the rule layer's own verdict
  * are stripped by design — see the module comment.
@@ -136,6 +176,14 @@ export declare const DOUBT_COPY: {
         readonly zh: "会执行工作区之外的代码，本次调用无法静态看清它做什么";
         readonly en: "it runs code from outside the workspace, which this call cannot inspect";
     };
+    readonly 'script-attached': {
+        readonly zh: "它要跑的脚本正文已读出来、随本次审查附上（模型看到的和你看到的是同一份）";
+        readonly en: "the script it runs was read and attached to this review — the model and you see the same text";
+    };
+    readonly 'script-unreadable': {
+        readonly zh: "脚本正文没读到（缺失/过大/二进制），没有人看见真正要执行的代码";
+        readonly en: "a script body could not be read (missing, over budget, or binary) — nobody has seen the code that will run";
+    };
     readonly 'outside-paths': {
         readonly zh: "涉及工作区之外的路径";
         readonly en: "it touches paths outside the workspace";
@@ -171,7 +219,7 @@ export declare function askDoubtKinds(ctx: AskContext, extra?: {
  * The event still carries the command separately (`humanCommand`) because the
  * review list has no host-provided command block next to it.
  */
-export declare function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds?: ("write" | "delete" | "remote-write" | "exec-external" | "never-learn" | "no-rule" | "opaque" | "irreversible" | "outside-paths" | "model-flagged")[]): string;
+export declare function humanBrief(ctx: AskContext, lang: 'zh' | 'en', kinds?: ("write" | "delete" | "remote-write" | "exec-external" | "never-learn" | "no-rule" | "opaque" | "irreversible" | "script-attached" | "script-unreadable" | "outside-paths" | "model-flagged")[]): string;
 /** The redacted command alone, for the channels that have nowhere else to show it. */
 export declare function humanCommand(ctx: AskContext): string;
 /** What goes on the durable event, for later attribution. */

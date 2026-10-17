@@ -35,9 +35,16 @@ describe('preset deny-keyword layer (inherited from dsh-approval-gate)', () => {
     expect(r.decideExecution(EXEC('rm -rf /work/build'))?.kind).toBe('deny')
   })
 
+  /**
+   * The point of this case is that a call without a visible command string is not
+   * thereby unread: its arguments still describe the act. The tool used to be `edit`,
+   * which issue #2 showed is wrong — a file tool's prose key is data, and vetoing it
+   * made the model learn to reword documents to get past the gate. An unfamiliar tool
+   * name keeps the original promise: the shape decides, the name does not.
+   */
   it('also scans serialized arguments when there is no command text', () => {
     const r = new PermGateRuntime({ rulesFile: undefined })
-    const decision = r.decideExecution({ name: 'edit', arguments: { note: 'please sudo rm the cache' }, sessionId: 's1' })
+    const decision = r.decideExecution({ name: 'pash', arguments: { note: 'please sudo rm the cache' }, sessionId: 's1' })
     expect(decision?.kind).toBe('deny')
   })
 

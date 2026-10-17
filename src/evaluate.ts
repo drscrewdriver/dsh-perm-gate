@@ -29,8 +29,21 @@ export interface ToolCallContext {
   readonly cwd: string
   /** Workspace root; used by the write-path override to decide inside vs outside. */
   readonly home?: string
+  /**
+   * The real user directory (`os.homedir()`), used to expand a `~/` in a declared
+   * credential path. Deliberately separate from `home`, which is the workspace root —
+   * conflating them would expand `~/.myco/vault.token` into the project and protect
+   * nothing at all.
+   */
+  readonly userHome?: string
   readonly dshHome?: string
   readonly caseInsensitive?: boolean
+  /**
+   * User-declared credential paths (`credentialPaths` setting), raw as configured.
+   * P0 compiles them; they extend the built-in store list for the two checks a read or
+   * write call cannot route around. Absent means the built-ins alone.
+   */
+  readonly credentialPaths?: readonly string[]
   /** Agent identity candidates from session context. */
   readonly agentCandidates?: readonly string[]
   /** Network request info (for network dimension matching). */
@@ -163,8 +176,13 @@ const SHELL_WRITE_PATTERNS: readonly (string | RegExp)[] = [
   /(?:^|\s)(?:mv|cp|install|mkdir|touch|chmod|chown)\b/i,
   // Redirect into a file: `> f`, `>> f`, `>f`. The leading character class
   // excludes the stderr idioms a read-only command uses (`2>&1`, `>&2`,
-  // `2>/dev/null`, `1>&2`), and the trailing class requires an actual target.
-  /(?:^|[^0-9&])>>?\s*[^\s&|]/,
+  // `2>/dev/null`, `1>&2`) AND the two arrow forms that are pure text, not a
+  // redirect: `=>` (JS/Rust/arrow-function syntax, e.g. `node -e "(x)=>x+1"`) and
+  // `->` (prose / C member access, e.g. `Write-Host 'a -> b'`). Without `=`/`-` in
+  // the class, a read-only command merely *containing* an arrow was escalated to
+  // `ask` (GitHub issue #4). A real redirect's `>` is still preceded by a space or
+  // an ordinary word char (`echo x > f`, `ls>f`), so those keep matching.
+  /(?:^|[^0-9&=>-])>>?\s*[^\s&|]/,
   // `tee` always writes its target; `curl`/`wget` only when they write a file.
   /(?:^|\s)tee\b/i,
   /(?:^|\s)(?:curl|wget)\b.*?(?:\s-[oO]\b|>)/i,
@@ -182,6 +200,13 @@ function isWriteCommand(commandText: string): boolean {
   )
 }
 
+/** What the default screen decided, and in its own words why. */
+interface DefaultEscalation {
+  readonly action: RuleAction
+  /** Set when this layer — not a rule — is what produced the verdict. */
+  readonly why?: string
+}
+
 /**
  * Default decision for write/edit and shell tools when no rule matches.
  *
@@ -192,30 +217,39 @@ function isWriteCommand(commandText: string): boolean {
  * - `shell` / `pwsh` / `terminal`: read-only commands (git status, python -c
  *   fetch, curl without redirect, etc.) follow `defaultAction`; commands that
  *   contain a write/execution pattern escalate to `ask` for review.
+ *
+ * The escalation names its own cause (GitHub issue #3). Reporting these as
+ * `no rule matched; default action` tells a reader the ruleset was silent, when in fact
+ * a safety screen just refused to let the default through — and it makes the popup say
+ * "no rule covers this" about a call a rule *did* cover in spirit.
  */
 function pathAndCommandDefault(
   ctx: ToolCallContext,
   pathCandidates: readonly string[],
   defaultAction: RuleAction,
-): RuleAction {
-  if (defaultAction !== 'allow') return defaultAction
+): DefaultEscalation | undefined {
+  if (defaultAction !== 'allow') return undefined
 
   // write/edit: path-aware (outside workspace → ask)
   if (WRITE_TOOLS.has(ctx.tool)) {
     const home = ctx.home
     if (home !== undefined && home !== '') {
       for (const candidate of pathCandidates) {
-        if (normalizeWorkspacePath(home, candidate, ctx.caseInsensitive) === '') return 'ask'
+        if (normalizeWorkspacePath(home, candidate, ctx.caseInsensitive) === '') {
+          return { action: 'ask', why: `write target outside the workspace (${candidate})` }
+        }
       }
     }
-    return defaultAction
+    return undefined
   }
 
   // shell/pwsh/terminal: command-content-aware (write pattern → ask)
   const commandText = commandTextOf(ctx)
-  if (commandText !== undefined && isWriteCommand(commandText)) return 'ask'
+  if (commandText !== undefined && isWriteCommand(commandText)) {
+    return { action: 'ask', why: 'command carries a file-write or redirect pattern' }
+  }
 
-  return defaultAction
+  return undefined
 }
 
 /**
@@ -255,8 +289,15 @@ export function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Dec
   // shell/pwsh/terminal tools check the command for write patterns.
   // Outside safety checks → ask; inside or read-only → defaultAction.
   let action = ruleset.defaultAction
+  // Why this layer decided, when it is the one that decided (issue #3): kept separate
+  // from `no rule matched` so an audit line cannot impersonate a ruleset gap.
+  let screenWhy: string | undefined
   if (WRITE_TOOLS.has(ctx.tool) || shellText !== undefined) {
-    action = pathAndCommandDefault(ctx, pathCands, action)
+    const escalated = pathAndCommandDefault(ctx, pathCands, action)
+    if (escalated !== undefined) {
+      action = escalated.action
+      screenWhy = escalated.why
+    }
   }
   if (action === 'allow' || action === 'ask') {
     const allow = scan(ruleset.allow, 'allow')
@@ -264,7 +305,11 @@ export function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Dec
     const ask = scan(ruleset.ask, 'ask')
     if (ask !== undefined) return ask
   }
-  return { action, reason: `no rule matched; default action`, ruleIndex: undefined }
+  return {
+    action,
+    reason: screenWhy === undefined ? 'no rule matched; default action' : `${screenWhy}; escalated by the default safety screen`,
+    ruleIndex: undefined,
+  }
 }
 
 function decomposeSafe(text: string): readonly SimpleCommand[] {

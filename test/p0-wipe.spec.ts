@@ -137,3 +137,52 @@ describe('unrecoverable-but-legitimate acts ask forever instead of denying', () 
     expect(neverClearReason(command)).toBeUndefined()
   })
 })
+
+/**
+ * Protected Windows roots reached **by environment variable** are a permanent, never
+ * learnable ask (not P0): the token is a `$env:`/`%VAR%` name the literal-path deny
+ * rules cannot see, and a whole-`APPDATA`/`ProgramData` wipe is sometimes deliberate
+ * maintenance the human should still decide — but no grader `safe` may clear it. TEMP
+ * and named children stay clearable.
+ */
+describe('never-clear: forced delete of a protected env-variable root', () => {
+  it.each([
+    ['$env:APPDATA', 'Remove-Item $env:APPDATA -Recurse -Force'],
+    ['$env:LOCALAPPDATA sweep', 'Remove-Item "$env:LOCALAPPDATA\\.*" -Recurse -Force'],
+    ['$env:ProgramData', 'Remove-Item $env:ProgramData -Recurse -Force'],
+    ['$env:SystemRoot', 'Remove-Item $env:SystemRoot -Recurse -Force'],
+    ['%WINDIR% via cmd', 'rmdir /s /q %WINDIR%'],
+    ['%APPDATA% sweep via cmd', 'del /s /q %APPDATA%\\*'],
+    ['${env:OneDrive}', 'Remove-Item ${env:OneDrive} -Recurse -Force'],
+    ['$env:PUBLIC', 'Remove-Item $env:PUBLIC -Recurse -Force'],
+  ])('is never-clear but not hard-denied: %s', (_label, command) => {
+    expect(neverClearReason(command), command).toBeTruthy()
+    expect(hardDenyReason(shell(command)), command).toBeUndefined()
+  })
+
+  it.each([
+    // TEMP/TMP root deletion is legitimate cleanup.
+    'Remove-Item $env:TEMP -Recurse -Force',
+    'rmdir /s /q %TEMP%',
+    // A named child is scoped work, not a protected-root wipe.
+    'Remove-Item "$env:LOCALAPPDATA\\Foo\\bar" -Recurse -Force',
+    // Read-only verbs never trip the net.
+    'Get-ChildItem $env:APPDATA -Force',
+    'git commit -m "never rm -rf $env:APPDATA"',
+  ])('stays clearable: %s', (command) => {
+    expect(neverClearReason(command)).toBeUndefined()
+  })
+})
+
+/** The profile-root-via-`$HOME` net stays a hard deny (regression guard). */
+describe('hard-deny: profile root via home variable (unchanged tier)', () => {
+  it.each([
+    ['wrapped $home', '$home="$env:TEMP\\x"\nif (Test-Path $home) { Remove-Item $home -Recurse -Force }'],
+    ['$HOME direct', '$HOME = "$env:TEMP\\x"; Remove-Item $HOME -Recurse -Force'],
+    ['rm -r -fo $home', '$home=$env:TEMP+"\\f"; rm -r -fo $home'],
+    ['$PSHOME', 'Remove-Item $PSHOME -Recurse -Force'],
+    ['bare home', 'rm -rf ~'],
+  ])('denies %s', (_label, command) => {
+    expect(hardDenyReason(shell(command)), command).toBeTruthy()
+  })
+})

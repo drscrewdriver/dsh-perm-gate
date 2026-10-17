@@ -7,7 +7,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { Config } from './config.js';
-import { PermGateRuntime, type ToolExecutionLike } from './runtime.js';
+import { PermGateRuntime, type PreToolDecisionLike, type ToolExecutionLike } from './runtime.js';
 export declare const name = "dsh-perm-gate";
 /**
  * The `tools` service drives `tools/pre-execute`/`tools/result` (dsh-tools).
@@ -53,5 +53,5 @@ export declare function makeApprovalAnswerer(runtime: Pick<PermGateRuntime, 'set
  * `riskTimeoutMs` (default 20 s), and a grader failure keeps the original ask
  * (fail-closed).
  */
-export declare function makePreExecuteListener(runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite'>>): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown>;
+export declare function makePreExecuteListener(runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite' | 'isYolo' | 'resolveYolo'>>, feedback?: (exec: ToolExecutionLike, decision: PreToolDecisionLike) => void): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown>;
 export declare function apply(ctx: Context, config?: Record<string, unknown>): PermGateRuntime;

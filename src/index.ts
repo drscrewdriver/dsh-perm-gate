@@ -18,6 +18,8 @@ import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, register
 import { registerSettingsBridgeRoutes } from './bridge.js'
 import type { HostLlmLike } from './host-llm.js'
 import { buildReceiverInfo } from './receiver-info.js'
+import { composeReviewOpinion } from './feedback.js'
+import { redactCommandText } from './redact.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
@@ -188,20 +190,15 @@ export function makeApprovalAnswerer(
  * (fail-closed).
  */
 export function makePreExecuteListener(
-  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite'>>,
+  runtime: Pick<PermGateRuntime, 'decideExecution' | 'refineAsk' | 'beginShellExecution'> & Partial<Pick<PermGateRuntime, 'sandboxRewrite' | 'isYolo' | 'resolveYolo'>>,
+  feedback?: (exec: ToolExecutionLike, decision: PreToolDecisionLike) => void,
 ): (exec: ToolExecutionLike, next: () => Promise<unknown>) => Promise<unknown> {
   return async (exec, next) => {
     const decision = runtime.decideExecution(exec)
-    // Passthrough (allow / stand-down) and a hard-deny need no grading.
-    if (decision === undefined) {
-      // The call proceeds: register it so a network connection made by its
-      // child process can be attributed back to this session.
+    // The sanctioned "let it run" seam: register for network attribution, apply the
+    // AppContainer rewrite if enabled, then hand to the next waterfall listener.
+    const allowAndRun = async (): Promise<unknown> => {
       runtime.beginShellExecution(exec)
-      // AppContainer sandbox (goal 2): rewrite the allowed shell call into
-      // the launcher invocation, or fail closed. The host executes THIS exec
-      // object after the waterfall resolves, so the in-place arguments swap
-      // is the sanctioned seam; the base64 wrapper keeps every pipe/&&
-      // inside the container (outer shell sees a plain exe call).
       if (typeof runtime.sandboxRewrite === 'function') {
         const rewrite = await runtime.sandboxRewrite(exec)
         if (rewrite !== undefined) {
@@ -214,7 +211,40 @@ export function makePreExecuteListener(
       }
       return next()
     }
-    if (decision.kind !== 'ask') return decision // deny: it never runs
+
+    // YOLO — never a human prompt. A bare allow runs as usual; a deterministic deny
+    // blocks and feeds back; an ask is resolved by {@link resolveYolo} to either an
+    // allow (runs) or a block (+回喂 工具审核意见). A grader throw fails open to allow.
+    // Probed via `?.` so a stub/embedded runtime without the YOLO surface behaves as
+    // non-YOLO (the ordinary waterfall below).
+    if (runtime.isYolo?.() === true) {
+      if (decision === undefined) return allowAndRun()
+      if (decision.kind === 'deny') {
+        feedback?.(exec, decision)
+        return decision
+      }
+      let resolved: PreToolDecisionLike | undefined
+      try {
+        resolved = await runtime.resolveYolo?.(exec, decision)
+      } catch {
+        resolved = undefined // fail-open: could not grade → allow ("其余放行")
+      }
+      if (resolved === undefined) return allowAndRun()
+      feedback?.(exec, resolved)
+      return resolved
+    }
+
+    // Passthrough (allow / stand-down) and a hard-deny need no grading.
+    if (decision === undefined) {
+      return allowAndRun()
+    }
+    if (decision.kind !== 'ask') {
+      // A deterministic deny (P0 hard-deny / deny-keyword / rule) never reaches a
+      // human; feed the structured opinion back so the main LLM stops retrying
+      // variants — the same guidance cc-safety-net attaches to its BLOCKED message.
+      feedback?.(exec, decision)
+      return decision
+    }
     // A cancelled call is never worth a model round-trip; the registry rechecks
     // cancellation after this gate settles.
     if (exec.signal?.aborted === true) return decision
@@ -224,13 +254,13 @@ export function makePreExecuteListener(
     } catch {
       return decision // fail-closed: keep the human ask
     }
-    if (refined === undefined) {
-      runtime.beginShellExecution(exec)
-      return next()
-    }
+    if (refined === undefined) return allowAndRun()
     // Still an ask: the human decides. Register optimistically so a call they
     // approve is attributable; a rejection is dropped by the abort/settle path.
     if (refined.kind === 'ask') runtime.beginShellExecution(exec)
+    // A degraded-review block (`rulesFallback` with no reviewer) is a deny nobody
+    // ever saw a popup for — the same opinion the YOLO path owes the main LLM.
+    if (refined.kind === 'deny') feedback?.(exec, refined)
     return refined
   }
 }
@@ -511,6 +541,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         strategies: resolvePermissiveStrategies(c.permissiveStrategies),
       }
     },
+    // Read the YOLO tier switch live so the settings-card toggle takes effect on the
+    // next tool call: never human-confirm, block-on-danger, feed back to the main LLM.
+    readYolo: () => current().yolo ?? false,
+    // Degraded review: when no reviewer can grade an ask (none configured, or the
+    // endpoint gave up), the deterministic nets decide instead of a popup nobody
+    // answers — a cc-safety-net-class gate that blocks named danger and runs the rest.
+    readRulesFallback: () => current().rulesFallback ?? false,
+    // Script review (on by default): the body of every script a call runs rides the
+    // review, so neither the grader nor the human is judging a bare filename.
+    readScriptReview: () => current().scriptReview ?? true,
     // Read the llmAssist receiver (endpoint/model/secret/timeout) live from the
     // same namespace, so editing the settings card applies to the next tool call.
     readClassifyConfig: () => {
@@ -534,6 +574,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     readDenyKeywords: () => {
       const c = current()
       return Array.isArray(c.denyKeywords) ? c.denyKeywords : undefined
+    },
+    // Appended blacklist entries (long-tail secrets of the user's own) and the declared
+    // credential paths: both read live, so an edit in the settings card applies to the
+    // next tool call without a reload.
+    readDenyKeywordsExtra: () => {
+      const c = current()
+      return Array.isArray(c.denyKeywordsExtra) ? c.denyKeywordsExtra : []
+    },
+    readCredentialPaths: () => {
+      const c = current()
+      return Array.isArray(c.credentialPaths) ? c.credentialPaths : []
     },
     // Learning sedimentation: threshold-reached samples become deterministic allows.
     readRiskSediment: () => current().riskSediment ?? true,
@@ -814,7 +865,32 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // webServer unavailable: the feed remains disk-only, sediment is view-only in files
   }
 
-  const listener = makePreExecuteListener(runtime)
+  // YOLO feedback: when a call is blocked (YOLO block **or** a deterministic deny in
+  // any mode), append a user-role "工具审核意见" message to the owning session so the
+  // main LLM sees why + which rule + a disposition and self-corrects — modeled on
+  // cc-safety-net's BLOCKED message. Best-effort; a failed delivery never un-blocks.
+  const yoloSender = buildSessionSender(fallbackGet)
+  const blockedSubject = (exec: ToolExecutionLike): string => {
+    const args = exec.arguments ?? {}
+    const cmd = (typeof exec.commandText === 'string' && exec.commandText !== ''
+      ? exec.commandText
+      : (typeof args.command === 'string' ? args.command : undefined))
+    if (cmd !== undefined) return redactCommandText(cmd)
+    const p = ['file_path', 'path', 'cwd', 'workdir'].map((k) => args[k]).find((v) => typeof v === 'string')
+    return `${exec.name}${typeof p === 'string' ? ': ' + p : ''}`
+  }
+  const yoloFeedback = (exec: ToolExecutionLike, decision: PreToolDecisionLike): void => {
+    const sessionId = (typeof exec.sessionId === 'string' && exec.sessionId !== ''
+      ? exec.sessionId
+      : (exec.agent?.sessionId ?? exec.agent?.session?.id) ?? '')
+    if (sessionId === '') return
+    const { text } = composeReviewOpinion({ command: blockedSubject(exec), reason: decision.reason, locale: 'zh' })
+    void yoloSender(sessionId, `工具审核意见: "${text}"`).catch(() => {
+      // no delivery channel — the block still stands, the LLM just gets no note.
+    })
+  }
+
+  const listener = makePreExecuteListener(runtime, yoloFeedback)
   // `tools/pre-execute` / `tools/result` / `approval/request` are service events,
   // not part of cordis core's typed `Events`, so they are registered through the
   // string overload.

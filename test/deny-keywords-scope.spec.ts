@@ -58,9 +58,27 @@ describe('deny-keyword matching scope', () => {
       arguments: { file_path: 'doc.md', old_string: 'a', new_string: `${FORCE_RM} /` },
       sessionId: 's1',
     })?.kind).not.toBe('deny')
-    // A scalar argument still describes the operation and stays scanned.
+    // Issue #2 changed this half of the contract: a key that is not one the tool uses
+    // to describe an action is prose, whatever its name (`note`, `summary`, `plan`…),
+    // and an unknown prose key must not turn a file edit into a refused operation. That
+    // is why a blacklist can no longer read a *denylist* of body keys.
     expect(r.decideExecution({
       name: 'edit',
+      arguments: { note: `please ${FORCE_RM} the cache` },
+      sessionId: 's1',
+    })?.kind).not.toBe('deny')
+    // What a file tool actually points at still describes the operation, so the same
+    // words under `file_path` are still refused (an ordinary path, so this is the
+    // keyword layer deciding and not the protected-path rule).
+    expect(r.decideExecution({
+      name: 'edit',
+      arguments: { file_path: `${FORCE_RM} /work/build` },
+      sessionId: 's1',
+    })?.kind).toBe('deny')
+    // A name the gate does not know is treated as an executor: everything non-body stays
+    // scanned, so the tool-class rule cannot be dodged by renaming.
+    expect(r.decideExecution({
+      name: 'pash',
       arguments: { note: `please ${FORCE_RM} the cache` },
       sessionId: 's1',
     })?.kind).toBe('deny')

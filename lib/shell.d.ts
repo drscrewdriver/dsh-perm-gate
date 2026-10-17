@@ -40,6 +40,24 @@ export declare function commandArgv(cmd: SimpleCommand): string;
  */
 export declare function tokenizeShell(text: string): string[];
 /**
+ * Tokenize like {@link tokenizeShell}, but also emit the statement separators as
+ * their own tokens: `;`, `|`, `&&`, `||` and — the two that were missing — a **newline**
+ * and a **glued** operator with no spaces around it.
+ *
+ * This is the tokenizer {@link decomposeShellCommand} walks, and the reason it exists is
+ * a hole that two bug reports traced back to the same place. `tokenizeShell` swallows
+ * whitespace, so `ls\nrm -rf ~/.*` came out as one command whose head is `ls` and whose
+ * second statement sits in `args` — no `deny` rule matches it, and the per-segment
+ * checks never see it as a program. Same for `cd /tmp;rm -rf ~`. Meanwhile
+ * `irreversible.ts` was splitting on `[;&|\n]` all along, so the two layers disagreed
+ * about what "a command" is, and the layer that graded the string was the looser one.
+ *
+ * Quoted text is still opaque: `bash -c "a; b"` and `find -exec … ';'` do not produce
+ * separators, because the character is inside the argument's value. A lone `&` is left
+ * inside the token, not split out: `2>&1` and a backgrounded job must keep their shape.
+ */
+export declare function tokenizeShellSeparators(text: string): string[];
+/**
  * Recursively decompose a command string into simple commands, descending into
  * `-c`/`-Command` inline scripts. Throws on undecidable syntax (unclosed quote);
  * callers route that to `ask`, never `allow`.

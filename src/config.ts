@@ -116,6 +116,46 @@ export interface PermGateConfig {
    * widens decision before the human/LLM seam.
    */
   readonly permissive?: boolean
+  /**
+   * YOLO mode — a tier that **never raises a human confirmation**. Every call the
+   * deterministic chain would `ask` is resolved automatically: a *dangerous* ask
+   * (irreversible / unlearnable / opaque payload, or an `llmAssist` hard-risk verdict
+   * when a receiver is configured) is **blocked** and the reason is fed back to the
+   * main LLM as a user message (`工具审核意见: "…"`); everything else is **allowed**,
+   * so ordinary work keeps flowing without a human. It is not fail-closed-to-human like
+   * the baseline: it is fail-closed-to-*block* only on a positive danger signal,
+   * fail-open otherwise. Independent of `permissive`/`llmAssist` (which it can borrow
+   * a classifier from, but does not require).
+   */
+  readonly yolo?: boolean
+  /**
+   * Degraded review — fall back to a **rule-only gate when there is no reviewer**.
+   *
+   * With `permissiveStrategies.llmAssist` on, an `ask` is normally graded by the
+   * configured model, and every path that cannot grade it (no endpoint/model set up,
+   * host `llm` absent, transport failure → `unresolved`) is fail-closed to a *human*
+   * confirmation. In a headless or unattended run that is a stall: nobody answers.
+   * This switch degrades those two no-reviewer paths to the deterministic nets only —
+   * a cc-safety-net-class gate: danger the rules can name (irreversible / unlearnable /
+   * opaque payload) is **blocked** and the reason is fed back to the main LLM, anything
+   * else runs. It changes nothing while a reviewer *is* answering, and never softens a
+   * deterministic deny. Orthogonal to `yolo`, which forgoes the human even when a
+   * reviewer works.
+   */
+  readonly rulesFallback?: boolean
+  /**
+   * Script review (default **on**) — when a call runs a script file (`bash x.sh`,
+   * `pwsh -File x.ps1`, `python x.py`, `./deploy.sh`), read the file and attach its
+   * body to the review: the risk grader and the human both judge the code that will
+   * execute instead of a filename, and the deterministic nets grade the body too (a
+   * script that wipes `$HOME` is irreversible whatever the command line says).
+   *
+   * Bounded (a few files, a fixed per-file budget) and redacted on the way out like
+   * every other egress text. Turn it off to keep file contents off the configured
+   * endpoint: the cost is that out-of-workspace and unreadable script runs go back to
+   * being graded as unknowable (the `U` tier).
+   */
+  readonly scriptReview?: boolean
   /** Backend approval strategies; combinable. Front-end exposes only `permissive` itself. */
   readonly permissiveStrategies?: Partial<PermissiveStrategies>
   /**
@@ -145,6 +185,29 @@ export interface PermGateConfig {
    * (possibly empty) replaces it. Editable from the settings card as a list.
    */
   readonly denyKeywords?: string[]
+  /**
+   * Keywords **appended** to whichever blacklist is live (`denyKeywords` when set, the
+   * preset otherwise) instead of replacing it. This is what to use to protect a
+   * long-tail secret of your own — a company token prefix, a vault CLI subcommand —
+   * without having to copy fifty preset entries into your profile and keep them current.
+   */
+  readonly denyKeywordsExtra?: string[]
+  /**
+   * Credential paths beyond the built-in store list (`.ssh`, `.aws`, `.npmrc`,
+   * `credentials.yaml`, …), which P0 refuses to read from outside the workspace and
+   * refuses to mutate through a file tool.
+   *
+   * Entries are path globs matched on the normalized path: `**` crosses directories, `*`
+   * and `?` stay inside one; a plain entry is a path fragment (`vault/prod.env`,
+   * `.myco_token`), and a `~/` prefix expands to the real home. Relative patterns also
+   * match at any depth, so `secrets/*.env` covers `a/b/secrets/prod.env`.
+   *
+   * Why a setting and not a rule in `rules.yml`: a `read`/`grep` call is auto-allowed a
+   * stage before the rule chain runs (the only layer that sees it first is P0), and the
+   * tier of an entry must not be the author's choice — a declared secret gets what
+   * `.ssh` gets, never a confirmation a model can talk its way out of.
+   */
+  readonly credentialPaths?: string[]
   /**
    * One-shot marker for the preset deny-table seed (`preset-rules.ts`, ported
    * from cc-safety-net): set once the `[deny-rule:*]` entries have been merged
@@ -479,6 +542,9 @@ export const Config = z.object({
   grantTtlMs: vol(z.number().min(1).default(5 * 60_000)),
   grantMaxUses: vol(z.number().min(1).default(1)),
   permissive: vol(z.boolean().default(false)),
+  yolo: vol(z.boolean().default(false)),
+  rulesFallback: vol(z.boolean().default(false)),
+  scriptReview: vol(z.boolean().default(true)),
   gatePresets: z.array(z.string()),
   permissiveStrategies: vol(z.object({
     trustAutoAllow: z.boolean().default(true),
@@ -488,6 +554,8 @@ export const Config = z.object({
   })),
   allowlist: vol(z.array(z.string())),
   denyKeywords: vol(z.array(z.string())),
+  denyKeywordsExtra: vol(z.array(z.string()).default([])),
+  credentialPaths: vol(z.array(z.string()).default([])),
   presetRulesSeeded: vol(z.boolean().default(false)),
   autoAllowTools: vol(z.array(z.string())),
   sessionSweep: vol(z.boolean().default(true)),
@@ -531,7 +599,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'rulesFallback', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

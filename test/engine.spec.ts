@@ -51,6 +51,54 @@ describe('hardDenyReason (P0)', () => {
     expect(hardDenyReason(ctx({ tool: 'write', args: { file_path: '/home/u/.dsh/creds' } }))).toContain('protected path')
   })
 
+  /**
+   * The file-mutation tools used to reach past the P0 credential guard: it screened
+   * system roots only, so `write ~/.ssh/authorized_keys` — an access backdoor — was
+   * auto-allowed while the shell layer denies *deleting* the same store. Paths here
+   * avoid the `/home` prefix on purpose, since that is already a protected root and
+   * would short-circuit into the other clause. `id_ed25519` is denied too, but by the
+   * long-standing whole-args private-key pre-screen, so it is asserted loosely.
+   */
+  it('denies a file-tool mutation of a credential store', () => {
+    const deny = (file_path: string): void => {
+      expect(hardDenyReason(ctx({ tool: 'write', args: { file_path } })), file_path).toContain('credential')
+    }
+    deny('C:/Users/u/.ssh/authorized_keys')
+    deny('C:/Users/u/.ssh/id_ed25519')
+    deny('C:/Users/u/.git-credentials')
+    deny('C:/Users/u/.gitconfig')
+    deny('C:/Users/u/.npmrc')
+    deny('C:/Users/u/.aws/credentials')
+    deny('C:/Users/u/.kube/config')
+    deny('C:/Users/u/.gnupg/pubring.kbx')
+    // `edit` and a workspace-relative dotfile behave the same way.
+    expect(hardDenyReason(ctx({ tool: 'edit', args: { file_path: 'C:/Users/u/.netrc', old_string: 'a', new_string: 'b' } })))
+      .toContain('credential')
+    expect(hardDenyReason(ctx({ tool: 'write', args: { file_path: '.pypirc' } }))).toContain('credential')
+    // A backslash spelling is the same file.
+    expect(hardDenyReason(ctx({ tool: 'write', args: { file_path: 'C:\\Users\\u\\.ssh\\authorized_keys' } })))
+      .toContain('credential')
+  })
+
+  /**
+   * What a P0 deny cannot undo stays reachable: the public half of a keypair (the
+   * artifact you hand out, used to register or restore a key by hand), `known_hosts`
+   * (regenerable with `ssh-keyscan`), a project's own `.env`. `~/.ssh/config` is *not*
+   * on this list — its `ProxyCommand`/`LocalCommand` is code that runs on the next
+   * connection, so writing it stays refused.
+   */
+  it('leaves regenerable key material and project config alone', () => {
+    const allow = (file_path: string): void => {
+      expect(hardDenyReason(ctx({ tool: 'write', args: { file_path } })), file_path).toBeUndefined()
+    }
+    allow('C:/Users/u/.ssh/id_ed25519.pub')
+    allow('C:/Users/u/.ssh/id_rsa.pub')
+    allow('C:/Users/u/.ssh/known_hosts')
+    allow('E:/work/proj/.env')
+    allow('E:/work/proj/src/main.ts')
+    expect(hardDenyReason(ctx({ tool: 'write', args: { file_path: 'C:/Users/u/.ssh/config' } }))).toContain('credential')
+  })
+
   it('allows benign calls', () => {
     expect(hardDenyReason(ctx({ args: { command: 'pnpm test' } }))).toBeUndefined()
   })

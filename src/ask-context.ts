@@ -45,6 +45,18 @@ export type Reversibility =
 /** What the call is aimed at. */
 export type TargetKind = 'read' | 'write' | 'delete' | 'remote-write' | 'exec-external' | 'unknown'
 
+/**
+ * One script body handed to the reviewers, as the runtime read it. Structural here so
+ * this module keeps its dependency-free contract (the fs half lives in `script-review.ts`).
+ */
+export interface ScriptContentIn {
+  readonly ref: string
+  readonly path: string
+  readonly body: string
+  readonly truncated: boolean
+  readonly unreadable?: string
+}
+
 /** The session's three tier knobs, folded out of the durable session log. */
 export interface SessionKnobs {
   readonly permissionPreset?: string
@@ -64,6 +76,18 @@ export interface AskContextSource {
   readonly files?: readonly string[]
   /** The deterministic layer's own conclusion, kept for the human, not the grader. */
   readonly ruleReason?: string
+  /**
+   * The scripts this call runs, with the body the reviewer is given. Read by the node
+   * runtime (`script-review.ts`) — this module stays filesystem-free, so the text
+   * arrives pre-fetched. Absent means either no script is named or review is off.
+   */
+  readonly scriptContents?: readonly ScriptContentIn[]
+  /**
+   * True when *every* script the call names was read, i.e. what will execute is now
+   * visible. That is what lifts a script run out of the opaque/`U` tier: the reviewer
+   * is no longer judging a filename. One unreadable script keeps the opacity.
+   */
+  readonly scriptsCovered?: boolean
   /** Correlation key, mixed into the event digest. */
   readonly callId?: string
   /** Per-session salt so `inputDigest` cannot be dictionary-reversed or joined across sessions. */
@@ -195,6 +219,49 @@ interface Inspection {
   readonly unlearnable: boolean
 }
 
+/**
+ * The statements a script body actually contains, for the deterministic nets.
+ *
+ * Judging a whole file as one string is too coarse: `irreversible.ts` matches a delete
+ * verb, a force flag and a home-variable *anywhere* in the text, and a 300-line build
+ * script is full of all three in unrelated places (`cd "$HOME"` at the top,
+ * `rm -rf ./node_modules` at the bottom). So the body is cut into statements (newline
+ * and `;` are the shell separators) and each is judged on its own.
+ *
+ * But the incident shape is a **block**, and one line of it says nothing:
+ * `for f in ~/.*; do` / `rm -rf "$f"` / `done`, or `if (Test-Path $home) {` on its own
+ * line. So a line that *ends* in a continuation (`do`, `then`, `{`, `&&`, `;`, a
+ * trailing backslash) is joined with the lines it hands off to, up to a small depth.
+ * Joining is keyed on the continuation, not on a fixed window: an arbitrary two-line
+ * window is exactly the collision the split avoids (`cd "$HOME"` followed by
+ * `rm -rf ./build`).
+ *
+ * The cost of an over-match here is a human ask, never a silent deny: this feeds the
+ * `I` tier, which the model cannot clear.
+ */
+const LINE_CONTINUATION = /(?:&\s*&\s*$|\|\s*\|\s*$|;\s*(?:do|then|fi|else)\s*$|[{}]\s*$|;\s*$|\\\s*$|\b(?:do|then|else|begin)\s*$)/
+
+function bodyStatements(bodies: readonly string[]): readonly string[] {
+  const out: string[] = []
+  for (const body of bodies) {
+    const lines = body.split('\n')
+    for (let i = 0; i < lines.length; i += 1) {
+      let group = lines[i] ?? ''
+      // A block opener swallows the lines it governs (max 3 more), so a loop or an `if`
+      // wrapping a destructive statement is judged as the one act it is.
+      for (let j = 1; j <= 3 && i + j < lines.length && LINE_CONTINUATION.test(group); j += 1) {
+        group = `${group}\n${lines[i + j] ?? ''}`
+      }
+      for (const stmt of [group, ...group.split(/[;\n]+/)]) {
+        if (stmt.trim() !== '') out.push(stmt)
+      }
+      // The individual statements of the swallowed lines are still judged separately on
+      // their own turn, so nothing is *only* seen as part of a block.
+    }
+  }
+  return out
+}
+
 /** Classify what the call targets, and whether its payload is inspectable. */
 function inspect(source: AskContextSource): Inspection {
   const text = (source.commandText ?? '').trim()
@@ -203,10 +270,14 @@ function inspect(source: AskContextSource): Inspection {
   // hiding `Remove-Item -Recurse -Force C:\` is irreversible even though the
   // visible text is opaque, and the human must see both facts.
   const decoded = executableVariants(normalizeCommandText(text))
-  const irreversible = irreversibleReason(cmd) !== undefined
-    || decoded.some((variant) => irreversibleReason(variant) !== undefined)
-  const unlearnable = neverClearReason(cmd) !== undefined
-    || decoded.some((variant) => neverClearReason(variant) !== undefined)
+  // A script run is judged on the file too: `bash ./clean-home.sh` is a filename, the
+  // *body* is the operation. This is the clause that closes the incident the whole
+  // feature exists for — a script that wipes the profile while the command line says
+  // nothing dangerous, judged deterministically so no grader `safe` can clear it.
+  const read = (source.scriptContents ?? []).filter((c) => c.unreadable === undefined && c.body !== '')
+  const judged = [cmd, ...decoded, ...bodyStatements(read.map((c) => `${c.ref}\n${c.body}`))]
+  const irreversible = judged.some((t) => irreversibleReason(t) !== undefined)
+  const unlearnable = judged.some((t) => neverClearReason(t) !== undefined)
 
   if (cmd.trim() === '{}') {
     // A tool invoked with no arguments at all: nothing to read, nothing to trust.
@@ -226,7 +297,12 @@ function inspect(source: AskContextSource): Inspection {
   })()
   const first = text.split(/\s/)[0] ?? ''
   const runner = /\b(?:python|node|pwsh|powershell|bash|sh|zsh|npx|deno|ruby|perl)\b/i.test(cmd)
-  const execExternal = runner && (outsideWorkspace(cmd, source.workspaceRoot) || unseenScript(cmd, source.workspaceRoot))
+  // "Cannot see the script" is what the U tier existed for. Once every script the call
+  // names has been read and attached, the reviewer *can* see it — so the call stops
+  // being unknowable and becomes an ordinary graded call (whose body the nets have just
+  // judged above). One unreadable file keeps the whole call opaque.
+  const covered = source.scriptsCovered === true && read.length > 0
+  const execExternal = runner && !covered && (outsideWorkspace(cmd, source.workspaceRoot) || unseenScript(cmd, source.workspaceRoot))
   const unnamed = text !== '' && unnamedOperation(text)
   const opaque = OPAQUE.test(cmd) || execExternal
 
@@ -289,7 +365,26 @@ export interface GraderPayload {
   readonly reason: string
   readonly target_resolvable: boolean
   readonly workspace_root?: string
+  /**
+   * The bodies of the scripts this call runs, redacted like any other egress text.
+   * Without them the grader judges a filename and can say `safe` about code it never
+   * saw; with them the answer is about what will execute.
+   */
+  readonly script_contents?: readonly GraderScript[]
 }
+
+/** One attached script, as it leaves the host. */
+export interface GraderScript {
+  readonly ref: string
+  readonly path: string
+  /** Absent when `unreadable` names why there is no body. */
+  readonly body?: string
+  readonly truncated?: boolean
+  readonly unreadable?: string
+}
+
+/** Budget for one script body on the wire: a real script, one round-trip. */
+export const GRADER_SCRIPT_BODY_CHARS = 20_000
 
 /**
  * Project for egress to the grader. Tier knobs and the rule layer's own verdict
@@ -297,12 +392,20 @@ export interface GraderPayload {
  */
 export function toGraderPayload(ctx: AskContext): GraderPayload {
   const root = ctx.workspaceRoot
+  const scripts: GraderScript[] = (ctx.scriptContents ?? []).map((c) => ({
+    ref: c.ref,
+    path: c.path,
+    ...(c.unreadable === undefined
+      ? { body: redactCommandText(c.body, { maxChars: GRADER_SCRIPT_BODY_CHARS }), truncated: c.truncated }
+      : { unreadable: c.unreadable }),
+  }))
   return {
     tool: ctx.tool,
     args: redactArgs(ctx.args ?? {}),
     reason: ctx.ruleReason ?? '',
     target_resolvable: ctx.targetResolvable,
     ...(root === undefined || root === '' ? {} : { workspace_root: root }),
+    ...(scripts.length === 0 ? {} : { script_contents: scripts }),
   }
 }
 
@@ -374,6 +477,11 @@ export function humanCardLine(ctx: AskContext, maxFiles = 3): string {
   const bits = [`tier=${card.reversibility}`, `target=${card.targetKind}`]
   if (!ctx.targetResolvable) bits.push('payload=opaque')
   if (ctx.unlearnable) bits.push('never-learn')
+  const scripts = ctx.scriptContents ?? []
+  if (scripts.length > 0) {
+    const unread = scripts.filter((c) => c.unreadable !== undefined).length
+    bits.push(unread === 0 ? `scripts=${scripts.length}:body-attached` : `scripts=${scripts.length}:unread=${unread}`)
+  }
   if (card.fileCount > 0) {
     const shown = card.files.length
     bits.push(shown < card.fileCount ? `files=${shown}/${card.fileCount}` : `files=${card.fileCount}`)
@@ -421,6 +529,14 @@ export const DOUBT_COPY = {
   'exec-external': {
     zh: '会执行工作区之外的代码，本次调用无法静态看清它做什么',
     en: 'it runs code from outside the workspace, which this call cannot inspect',
+  },
+  'script-attached': {
+    zh: '它要跑的脚本正文已读出来、随本次审查附上（模型看到的和你看到的是同一份）',
+    en: 'the script it runs was read and attached to this review — the model and you see the same text',
+  },
+  'script-unreadable': {
+    zh: '脚本正文没读到（缺失/过大/二进制），没有人看见真正要执行的代码',
+    en: 'a script body could not be read (missing, over budget, or binary) — nobody has seen the code that will run',
   },
   'outside-paths': {
     zh: '涉及工作区之外的路径',
@@ -475,6 +591,14 @@ export function askDoubtKinds(ctx: AskContext, extra: { readonly modelFlagged?: 
     default: break
   }
   if (extra.modelFlagged === true) kinds.push('model-flagged')
+  // Whether the code that will run was actually looked at is a fact the human decides
+  // with, and it is not implied by any other clause: an attached body means the
+  // judgment covered it, an unreadable one means nothing ever will.
+  const scripts = ctx.scriptContents ?? []
+  if (scripts.length > 0) {
+    if (scripts.some((c) => c.unreadable !== undefined)) kinds.push('script-unreadable')
+    else kinds.push('script-attached')
+  }
   if (ctx.ruleReason !== undefined && /no rule matched|default action/i.test(ctx.ruleReason)) kinds.push('no-rule')
   const root = ctx.workspaceRoot
   if (root !== undefined && (ctx.files ?? []).some((f) => f.startsWith('..') || (f.startsWith('/') && !f.startsWith(root)))) kinds.push('outside-paths')

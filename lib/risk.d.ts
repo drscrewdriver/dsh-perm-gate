@@ -81,6 +81,18 @@ export interface RiskRequest {
     readonly workspaceRoot?: string;
     /** False for an encoded or unreadable payload: the U tier, never grade it safe. */
     readonly targetResolvable?: boolean;
+    /**
+     * The bodies of the scripts this call runs, already redacted and bounded by the
+     * caller. A command that names a file *is* that file's code: without this the grader
+     * is asked to judge a filename and can honestly answer `safe`.
+     */
+    readonly scriptContents?: readonly {
+        ref: string;
+        path: string;
+        body?: string;
+        truncated?: boolean;
+        unreadable?: string;
+    }[];
 }
 /**
  * Prompt identity, recorded with every verdict.
@@ -90,7 +102,23 @@ export interface RiskRequest {
  * is therefore a versioned, falsifiable artifact — without this line, a wording
  * change and a model swap are indistinguishable in the event log.
  */
-export declare const RISK_SYSTEM_PROMPT_VERSION = "v7-terse-budget";
+export declare const RISK_SYSTEM_PROMPT_VERSION = "v8-script-contents";
+/**
+ * The grader's own sentence, shaped for a human popup and an audit line.
+ *
+ * Issue #3 asked for the model's fields to be *used* rather than dropped: the reason a
+ * call is being confirmed, and the reason a call was blocked, both read better with the
+ * one line the grader gave. It is still untrusted text, so it is flattened to one line,
+ * bracket-free (a sentence that could write `[deny-rule:…]` would name a rule that never
+ * fired, and the feedback layer parses those tags), redacted like any other egress text,
+ * and capped. `undefined` when the model said nothing usable — the caller then keeps its
+ * own deterministic wording rather than showing an empty clause.
+ *
+ * The **category is deliberately not prefixed**: every call site already names it in its
+ * own vocabulary (`[llm-assist risky:deletion]`, `风险模型判定 deletion`), so a prefix
+ * here would print it twice.
+ */
+export declare function graderNote(risk: RiskVerdict): string | undefined;
 /** Parse one assistant message into a verdict; anything off-protocol → undefined (caller retries/fails). */
 export declare function parseRiskVerdict(content: string): RiskVerdict | undefined;
 /**
