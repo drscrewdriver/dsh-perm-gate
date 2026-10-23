@@ -1,7 +1,11 @@
 # Changelog
 
+5.3.3: host enumeration addendum for DSH 0.2.1-rc.3 (declaration-only bump; contract plane zero diff).
+
 ## 5.3.2 (2026-10-18)
 
+- 说明澄清：明确申明本插件的**执行前守卫**——在工具调用运行前拦截破坏性 Git 与文件系统命令，以及对 SSH 密钥、.env 等机密文件的访问（P0 硬拒绝 + 确定性机械审查器，无审查模型在场时仍生效）；投稿描述同步申持该能力并建议使用带模型审查的模式
+- 档位命名/描述澄清：裸名「自动审查」标明为「自动审查（dsh沙箱中）」以区别于高权限（无沙箱）档；机械过滤标明为**危险/不确定才人工确认**（仍接回沙箱组，作用域内安全操作由 trustAutoAllow 静默放行、不弹确认）、机械直通标明为**检查通过直接放行**（cordis.patch.yml 预设名/描述 + 设置卡 askHint/passHint 中英同步）
 - hosts: 追加 0.2.1-rc.2 声明面枚举（34/34 @deepseek-ai/* 宿主 peer 逐包 npm 实测 rc.2 在版；本插件不触 ctx.web provider 与 conversation.input.model.label 槽，代码零改动，纯元数据发版；农场 rc.2 格挂账待命）
 
 All notable changes to this project will be documented in this file.

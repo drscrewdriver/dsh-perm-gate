@@ -50,7 +50,7 @@ describe('cordis.patch.yml permission presets', () => {
     expect(presets['permissive']).toMatchObject({
       sandbox: 'workspace-write',
       approval: 'ask',
-      name: '自动审查',
+      name: '自动审查（dsh沙箱中）',
     })
     expect(presets['permissive']?.description).toBeTruthy()
   })
@@ -108,7 +108,7 @@ describe('cordis.patch.yml permission presets', () => {
       expect(name).not.toBe('')
       expect(name).not.toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/)
     }
-    expect(presets['permissive']?.name).toBe('自动审查')
+    expect(presets['permissive']?.name).toBe('自动审查（dsh沙箱中）')
   })
 
   it('never uses the reserved `custom` key', () => {

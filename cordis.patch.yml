@@ -70,23 +70,23 @@
       permissive:
         sandbox: workspace-write
         approval: ask
-        name: 自动审查
-        description: 独立审批档 —— 作用域内安全操作自动放行，危险/未知越界转人工确认（审批强度可在「设置 → 插件 → 自动审查」调整）。
+        name: 自动审查（dsh沙箱中）
+        description: 独立审批档 —— 执行前守卫在工具调用运行前拦截破坏性 Git 与文件系统命令，以及对 SSH 密钥、.env 等机密文件的访问；作用域内安全操作自动放行，危险/未知越界转人工确认（审批强度可在「设置 → 插件 → 自动审查」调整）。保留内置文件沙箱（dsh 沙箱中）。
       permissive-full:
         sandbox: danger-full-access
         approval: ask
         name: 自动审查（高权限）
-        description: 只由本插件的审批门过滤 —— 文件修改与子进程网络访问不再受沙箱限制，审批仍逐次生效，但没有系统沙箱兜底。
+        description: 只由本插件的审批门过滤 —— 执行前守卫仍拦截破坏性 Git 与文件系统命令、SSH 密钥/.env 等机密访问，但文件修改与子进程网络访问不再受沙箱限制，审批逐次生效，没有系统沙箱兜底。
       permissive-snet:
         sandbox: workspace-write
         approval: ask
-        name: 自动审查·机械过滤
-        description: 不调用审查模型 —— 确定性机械审查器先筛并列出疑点，剩下的仍然交人工确认。适用于无审查 LLM 可用、或不习惯模型替你拿主意的场景（不常用）。
+        name: 自动审查·机械过滤（危险/不确定才人工确认）
+        description: 不调用审查模型，仍接回沙箱组 —— 作用域内的安全操作照由 trustAutoAllow 自动静默放行（不弹确认）；只有运行前的危险（破坏性 Git 与文件系统命令、SSH 密钥/.env 等机密访问）与读不懂/未知残局才列出疑点交人工确认后才执行。即“危险与不确定才 ask，安全直通”。适用于无审查 LLM 可用、或不习惯模型替你拿主意的场景（不常用）。
       permissive-mech:
         sandbox: danger-full-access
         approval: ask
-        name: 自动审查·机械直通
-        description: 无人确认 —— 确定性机械审查器替代人工：命中不可逆 / 不可沉淀 / 读不懂的载荷即拦截，并把理由回喂主模型，其余照常执行。不调用审查模型，零 token。
+        name: 自动审查·机械直通（检查通过即直接放行）
+        description: 无人确认 —— 确定性机械审查器替代人工：运行前命中不可逆 / 不可沉淀 / 读不懂的载荷（含破坏性 Git 与文件系统命令、SSH 密钥/.env 等机密访问）即拦截并把理由回喂主模型，检查后无问题的其余照常直接放行执行（= 检查通过直接放行，不问人）。不调用审查模型，零 token。
       permissive-yolo:
         sandbox: danger-full-access
         approval: ask
