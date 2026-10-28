@@ -33,16 +33,16 @@ export const supportedHosts = Object.freeze([
   // 0.2.0 线（2 个 rc）
   '0.2.0-rc.1',
   '0.2.0-rc.2',
-  // 0.2.1 线（2 个 rc；alpha 不入列）
+  // 0.2.1 线（3 个 rc；alpha 不入列）
   '0.2.1-rc.1',
-  '0.2.1-rc.2', '0.2.1-rc.3',
+  '0.2.1-rc.2', '0.2.1-rc.3', '0.2.1-rc.4',
 ])
 
 /** peerDependencies / engines.dsh 共用的枚举串（精确枚举无暗坑，INDEX §B）。 */
 export const peerRange = supportedHosts.join(' || ')
 
 /** 本地开发与矩阵默认宿主（devDependencies 若引入宿主包一律钉这里）。 */
-export const developmentHost = '0.2.1-rc.3'
+export const developmentHost = '0.2.1-rc.4'
 
 /**
  * peer 闸门指向的宿主子包（本插件 client 半区声明消费的宿主契约面；四包经
@@ -62,4 +62,8 @@ export const hostPeerPackages = Object.freeze([
   '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-ui-renderer',
   '@deepseek-ai/dsh-client-ui-settings',
+  // 2026-10-28 rc.4 批次补入：以下两 peer 自 rc.2 批次起在 package.json 手工存在但不在
+  // 单源清单内 → 尾位漂移 rc.3（本批门禁捕得）。入列后由 sync-hosts 同串接管。
+  '@deepseek-ai/dsh-settings',
+  '@deepseek-ai/dsh-client-ui-conversation',
 ])
