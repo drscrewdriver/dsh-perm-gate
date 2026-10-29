@@ -89,6 +89,8 @@ const DENY_CASES: readonly (readonly [string, string])[] = [
   ['find . -delete', 'find.delete'],
   ['find .git -delete', 'find.delete-git-metadata'],
   ['find . -exec rm -rf {} +', 'find.exec-rm-recursive-force'],
+  ['rsync -a --delete ./src/ ./dst/', 'rsync.delete'],
+  ['rsync --delete-after ./src/ ./dst/', 'rsync.delete'],
   ['dd if=/dev/zero of=/dev/sda', 'dd.device-write'],
   ['mkfs.ext4 /dev/sda1', 'mkfs.device'],
   ['wipefs -a /dev/sda1', 'disk.erase'],
@@ -139,6 +141,35 @@ describe('self-protection entry', () => {
   })
 })
 
+// cred.* rows: the READ-tool side of the family ladder (the shell side stays on
+// secret.* rows). One hit per family proves the row compiles and tags; the
+// whitelist block below proves it does not eat ordinary reads.
+const CRED_ASK_CASES: readonly (readonly [string, string])[] = [
+  ['/home/u/.ssh/id_ed25519', 'cred.ssh'],
+  ['/home/u/.aws/credentials', 'cred.cloud'],
+  ['/home/u/.npmrc', 'cred.package'],
+  ['/home/u/.git-credentials', 'cred.gitcreds'],
+  ['E:/proj/config/.env.production', 'cred.env'],
+  ['/home/u/.claude/settings.json', 'cred.cli'],
+  ['/home/u/.pgpass', 'cred.db'],
+]
+
+describe('cred family rows — file-tool reads are named per family', () => {
+  it.each(CRED_ASK_CASES)('read %s asks with tag %s', (file_path, id) => {
+    const v = decideRules(RULESET, { tool: 'read', args: { file_path }, cwd: 'E:/proj' })
+    expect(v.action).toBe('ask')
+    expect(presetRuleId(v.reason)).toBe(id)
+  })
+
+  it('rows are tool-restricted: an unrelated tool name is not swept by cred globs', () => {
+    // tools:[read...] rows must not match a non-read tool carrying the same arg shape
+    // (the un-restricted secret.* row may still name it — that is pre-existing behavior,
+    // the assertion is only that no *cred* row reaches a non-read tool).
+    const v = decideRules(RULESET, toolCall('web_fetch_impl', { url: 'https://x/.npmrc' }))
+    expect(presetRuleId(v.reason) ?? '').not.toMatch(/^cred\./)
+  })
+})
+
 // Disturbance mirror: routine commands must not carry ANY preset tag.
 const WHITELIST: readonly string[] = [
   'git status',
@@ -154,11 +185,22 @@ const WHITELIST: readonly string[] = [
   'ls dist',
   'rm -rf ./build',
   'find . -name "*.log"',
+  'rsync -av ./src/ ./dst/',
   'dd if=a.img of=b.img',
   'grep -R pattern src',
   'git worktree list',
   'git worktree remove ../clean-tree',
 ]
+
+// File-tool reads of ordinary project files must not carry a cred tag either —
+// the ladder is scoped to credential shapes, not to "every read".
+const CRED_WHITELIST: readonly string[] = ['E:/proj/src/app.ts', 'E:/proj/package.json', 'E:/proj/README.md', 'E:/proj/data/env-report.csv']
+describe('cred family rows — ordinary project reads untouched', () => {
+  it.each(CRED_WHITELIST)('read %s carries no cred tag', (file_path) => {
+    const v = decideRules(RULESET, { tool: 'read', args: { file_path }, cwd: 'E:/proj' })
+    expect(presetRuleId(v.reason) ?? '').not.toMatch(/^cred\./)
+  })
+})
 
 describe('whitelist — routine commands untouched by the preset table', () => {
   it.each(WHITELIST)('%s carries no preset tag', (command) => {

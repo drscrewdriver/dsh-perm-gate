@@ -11,9 +11,10 @@ import { join } from 'node:path'
 import { SandboxController, type SandboxSettings } from './appcontainer/index.js'
 import { Config, ensureDataDir, readRulesFromSettings, readVolatileValue, resolveVolatileConfig, resolveConfig, resolveDshHome, resolveDataDir, resolveGatePresets, resolvePermissiveStrategies, resolveRulesFile } from './config.js'
 import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type SettingsRulesScope } from './allowlist.js'
-import { mergePresetIntoRaw } from './preset-rules.js'
+import { mergePresetIntoRaw, PRESET_TABLE_VERSION } from './preset-rules.js'
+import { CRED_FAMILY_IDS } from './cred-families.js'
 import { runDryRun } from './dry-run.js'
-import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, type SessionSender, type WebServerLike } from './events.js'
+import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, registerCredRoute, type SessionSender, type WebServerLike } from './events.js'
 // T12 设置数据桥（describe/mutate；client BridgeDocHandle 消费）
 import { registerSettingsBridgeRoutes } from './bridge.js'
 import type { HostLlmLike } from './host-llm.js'
@@ -316,9 +317,11 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // 写失败不阻断启动也不置幂等位 ⇒ 下次激活重试。
   const seedPresetDenyTable = (svc: SettingsServiceLike): void => {
     void (async () => {
-      if (current().presetRulesSeeded === true) return
+      // 水位线代替布尔位：首装（未播）全量注入；升版后只补新增 id（merge 按 tag 幂等，
+      // 用户撤销过的条目永不复活），补完把 shipped 版本写回。
+      if (current().presetRulesSeeded === true && Number(current().presetRulesVersion ?? 0) >= PRESET_TABLE_VERSION) return
       const merged = mergePresetIntoRaw(readVolatileValue(config.rules))
-      await svc.update(ENTRY_ID, { rules: merged.doc, presetRulesSeeded: true })
+      await svc.update(ENTRY_ID, { rules: merged.doc, presetRulesSeeded: true, presetRulesVersion: PRESET_TABLE_VERSION })
       console.log(`[dsh-perm-gate] preset deny table seeded via settings (+${merged.added} rules)`)
     })().catch((e: unknown) => {
       console.warn('[dsh-perm-gate] preset deny table 播种失败（不阻断启动，下次激活重试）:', e)
@@ -557,6 +560,17 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // exists, and each implementation owns one preset, so presets never cross.
     readSafenetPass: () => current().safenetPass ?? true,
     readSafenetAsk: () => current().safenetAsk ?? false,
+    // Protected-branch push floor opt-out, read live so the settings-card toggle takes effect
+    // on the next tool call. Default false keeps the floor; true steps aside to the seeded
+    // git.push-force ask (and exempts the flat push keywords). See runtime.ts liveAllowProtectedBranchPush.
+    readAllowProtectedBranchPush: () => current().allowProtectedBranchPush ?? false,
+    // Credential-family ladder, readwrite rung: the exempted family ids, filtered to the
+    // roster (a typo in the stored list must not read as "exempt everything guessed").
+    readCredWriteExemptFamilies: () => {
+      const c = current()
+      const raw = Array.isArray(c.credWriteExemptFamilies) ? c.credWriteExemptFamilies : []
+      return raw.filter((f): f is string => typeof f === 'string' && (CRED_FAMILY_IDS as readonly string[]).includes(f))
+    },
     // Degraded review: when no reviewer can grade an ask (none configured, or the
     // endpoint gave up), the deterministic nets decide instead of a popup nobody
     // answers — a cc-safety-net-class gate that blocks named danger and runs the rest.
@@ -852,6 +866,25 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
         },
       })
       if (offRules !== undefined) ctx.effect(() => () => { offRules() }, 'dsh-perm-gate: rules route')
+      // cred-family ladder: GET renders the per-family rungs, POST applies one rung
+      // (rules row + credWriteExemptFamilies travel together — one update, no half-state).
+      const offCred = registerCredRoute(webServer, {
+        read: () => {
+          const c = current() as unknown as { credWriteExemptFamilies?: unknown }
+          return {
+            doc: readRulesDocument() ?? readVolatileValue(config.rules),
+            exempt: Array.isArray(c.credWriteExemptFamilies)
+              ? c.credWriteExemptFamilies.filter((f): f is string => typeof f === 'string')
+              : [],
+          }
+        },
+        persist: async (doc, exempt) => {
+          const svc = settingsRef.svc
+          if (svc === undefined) throw new Error('settings service unavailable')
+          await svc.update(ENTRY_ID, { rules: doc, credWriteExemptFamilies: [...exempt] })
+        },
+      })
+      if (offCred !== undefined) ctx.effect(() => () => { offCred() }, 'dsh-perm-gate: cred route')
       // Receiver projection for the settings card (provider/model catalog is
       // potentially slow to enumerate — cached briefly).
       let receiverCache: { at: number; info: unknown } | null = null

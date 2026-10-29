@@ -146,6 +146,33 @@ export interface PermGateConfig {
    */
   readonly safenetAsk?: boolean
   /**
+   * Protected-branch push floor — **off by default means the floor stands**.
+   * The P0 layer hard-denies `git push --force` / `--force-with-lease` / `--delete` aimed at
+   * the protected branch list (main/master/production/release/stable). This switch is the
+   * deliberate opt-out for developers who own their remotes: when true, the floor steps
+   * aside and the call falls to the seeded `git.push-force` rule, which still **asks a
+   * person** every time unless the user revokes that entry or allowlists the form in their
+   * own rules. It cannot widen anything else: reads, wipes and credential floors are untouched.
+   */
+  readonly allowProtectedBranchPush?: boolean
+  /**
+   * Credential-family ladder — the **readwrite** rung per family. A listed family's
+   * built-in credential paths are exempted from exactly one P0 clause (credential-store
+   * **writes** — `npm login` legitimately rewrites `~/.npmrc`). Everything else is
+   * untouched: read floors, root/drive screens, dshHome protection, neverClear and the
+   * push floor stay armed at every rung; unlisted families are fully protected.
+   * Values are family ids (`ssh|cloud|package|gitcreds|env|cli|db`); anything outside
+   * the roster is dropped at read time, never guessed at.
+   */
+  readonly credWriteExemptFamilies?: string[]
+  /**
+   * Seed watermark for the preset deny table. Activation re-runs the (per-id idempotent)
+   * merge whenever this lags the shipped table version, so entries added by a plugin
+   * update (the `cred.*` family rows) land on existing installs — and entries the user
+   * revoked stay revoked, because the merge only ever appends missing ids.
+   */
+  readonly presetRulesVersion?: number
+  /**
    * Degraded review — fall back to a **rule-only gate when there is no reviewer**.
    *
    * With `permissiveStrategies.llmAssist` on, an `ask` is normally graded by the
@@ -606,6 +633,12 @@ export const Config = z.object({
   safenetPass: vol(z.boolean().default(true)),
   /** Switch: the `permissive-snet` implementation exists (mechanical screen, still asks). */
   safenetAsk: vol(z.boolean().default(false)),
+  /** Opt-out of the P0 protected-branch push floor; default false keeps the floor. */
+  allowProtectedBranchPush: vol(z.boolean().default(false)),
+  /** readwrite rung per credential family; unknown ids dropped at consumption. */
+  credWriteExemptFamilies: vol(z.array(z.string()).default([])),
+  /** Preset-table seed watermark; activation backfills when it lags the shipped version. */
+  presetRulesVersion: vol(z.number().min(0).default(0)),
   scriptReview: vol(z.boolean().default(true)),
   gatePresets: z.array(z.string()),
   permissiveStrategies: vol(z.object({
@@ -663,7 +696,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'yolo', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

@@ -22,7 +22,7 @@ const idOf = (e: unknown): string => {
 }
 
 describe('preset seed round-trip: 写出的文档必须能被自己的读侧读回', () => {
-  it('播种 51 条全部落进 deny/ask', () => {
+  it('播种全部预设条目落进 deny/ask（rsync.delete 追加后为 52）', () => {
     const src = parsePresetDoc()
     expect(merged.added).toBe(src.deny.length + src.ask.length)
     expect((sections.deny ?? []).length).toBe(src.deny.length)

@@ -7,6 +7,12 @@
 
 > 참고: 2.4.1부터 5.1.2까지는 영문 `CHANGELOG.md`에만 기록되어 있습니다 (ko판은 아직 미추적).
 
+## [5.4.0] - 2026-10-30
+
+- 자격증명 계열 사다리: 내장 7계열(ssh / cloud / package / gitcreds / env / cli / db), 각 유형 4칸 deny / ask(기본) / readonly / readwrite. 칸 상태는 규칙 문서 자체에 저장 — 계열별 `[deny-rule:cred.<family>]` 행 + 짝을 이루는 `credWriteExemptFamilies` 목록. 설정 카드는 `GET/POST /api/dsh-perm-gate/cred`로 두 저장소를 단일 update에 함께 쓰며 지역 사본을 두지 않는다. readwrite는 인라인 확인을 요구하고 P0 판정 중 정확히 하나(credential-store 쓰기)만 물러남; 루트·보호 경로·.dsh·유출은 어떤 칸에서도 움직이지 않는다.
+- 엔진: `decide()`가 READ 도구에서 규칙 계층 선행 조회(이름을 지정한 항목만 ask/deny로 라우팅; 미적중은 기존 무음 자동 통과로 확인 예산 불변). INTERNAL 조율 도구는 선행 조회하지 않는다. 순수 모듈 `src/cred-families.ts`(계열 glob + `familyOfPath`) 추가.
+- 시딩: 프리셋 표 52→59행; 수위 키 `presetRulesVersion`으로 업그레이드 후 신규 행만 보충(id 단위 멱등, 취소한 행은 부활하지 않음). 보호 브랜치 force push 바닥 해제 스위치 `allowProtectedBranchPush`(기본 꺼짐=바닥 유지)와 프리셋 행 `[deny-rule:rsync.delete]` 추가.
+
 ## [5.3.1] - 2026-10-17
 
 ### 추가

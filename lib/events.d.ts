@@ -318,3 +318,22 @@ export declare function registerRulesRoute(server: unknown, provider: RulesRoute
  * learning or drops one sedimented sample. Returns whether registered.
  */
 export declare function registerLearningRoute(server: unknown, provider: LearningRouteProvider): (() => void) | undefined;
+export declare const CRED_ROUTE = "/api/dsh-perm-gate/cred";
+export interface CredRouteProvider {
+    /** Current raw rules document + the stored write-exemption list (no mutation). */
+    read(): {
+        doc: unknown;
+        exempt: readonly string[];
+    };
+    /** Persist the pair in ONE settings update (doc + exempt travel together). */
+    persist(doc: Record<string, unknown>, exempt: readonly string[]): Promise<void>;
+}
+/**
+ * `GET  /api/dsh-perm-gate/cred` → `{ ok, rungs: {family: deny|ask|readonly|readwrite}, exempt }`
+ * `POST /api/dsh-perm-gate/cred` → `{ family, rung }` applies one rung: rewrites the
+ * family's `cred.<id>` row in the rules document and the paired `credWriteExemptFamilies`
+ * list, persisted in a single settings update. The two stores are written only through
+ * here, so the ladder state cannot half-apply. Registration is optional like every
+ * other route (no webServer ⇒ the settings face degrades to read-only, never errors).
+ */
+export declare function registerCredRoute(server: unknown, provider: CredRouteProvider): (() => void) | undefined;

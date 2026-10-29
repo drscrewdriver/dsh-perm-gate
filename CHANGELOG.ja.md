@@ -7,6 +7,12 @@
 
 > 注: 2.4.1 から 5.1.2 までは英語版 `CHANGELOG.md` のみに記録されています（ja 版は追随済みではない）。
 
+## [5.4.0] - 2026-10-30
+
+- 認証情報ファミリーの階段：組み込み7ファミリー（ssh / cloud / package / gitcreds / env / cli / db）、各種類4段 deny / ask（既定）/ readonly / readwrite。段の状態はルール文書自体に保持（`[deny-rule:cred.<family>]` 行 + 対になる `credWriteExemptFamilies` リスト）。設定カードは `GET/POST /api/dsh-perm-gate/cred` 経由で両ストアを単一 update で対書き込みし、ローカルミラーを持たない。readwrite はインライン確認を要求し、P0 の一条（credential-store 書き込み）のみ退く；ルートディスク・保護パス・.dsh・外部送信はどの段でも動かさない。
+- エンジン：`decide()` は READ ツールに対し規則層へ先行照会（名指し命中のみ ask/deny へ；不命中は従来の無音自動通過で確認画面の予算不変）。INTERNAL 調整ツールは先行照会しない。純モジュール `src/cred-families.ts`（族 glob + `familyOfPath`）追加。
+- シード注入：プリセット表 52→59 行；水位キー `presetRulesVersion` でアップグレード後は新規行のみ補完（id 単位幂等、取り消した行は復活しない）。保護ブランチ force push 解除スイッチ `allowProtectedBranchPush`（既定オフ＝床維持）とプリセット行 `[deny-rule:rsync.delete]` を追加。
+
 ## [5.3.1] - 2026-10-17
 
 ### 追加

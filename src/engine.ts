@@ -16,6 +16,7 @@ import { executableVariants, normalizeCommandText } from './command-normalize.js
 // 它看 `executableCommandOf`——已知非执行器（read/write/内部工具）的 `command` 参数是数据，
 // 其余任何带命令串的调用都按命令对待，所以工具叫什么（包括模型打错的 `pash`）都不是绕过面。
 import { INTERNAL_TOOLS, READ_TOOLS, executableCommandOf } from './tool-names.js'
+import { familyOfPath } from './cred-families.js'
 import { type Decision, type ToolCallContext } from './evaluate.js'
 import { decomposeShellCommand, type SimpleCommand } from './shell.js'
 import { dispatchCommand } from './command-dispatcher.js'
@@ -188,7 +189,11 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
       if (wipe !== undefined) return wipe
     }
     if (decodedReason !== undefined) return decodedReason
-    const rewrite = gitRemoteRewriteReason(commands)
+    // The one floor a human may step aside: `allowProtectedBranchPush` (volatile setting,
+    // default false = floor stands). It is an explicit operator opt-out, never a model or
+    // grant path — and stepping aside still lands on the seeded `git.push-force` ask, so
+    // the call is named for a person unless the user separately revokes/allowlists it.
+    const rewrite = ctx.allowProtectedBranchPush === true ? undefined : gitRemoteRewriteReason(commands)
     if (rewrite !== undefined) return rewrite
   }
   const path = pathArgument(args)
@@ -222,7 +227,16 @@ export function hardDenyReason(ctx: ToolCallContext): string | undefined {
     ...(ctx.userHome === undefined ? {} : { home: ctx.userHome }),
   })
   if (path !== undefined && (ctx.tool === 'write' || ctx.tool === 'edit' || DESTRUCTIVE_TOOL.test(ctx.tool)) && isProtectedCredentialPath(path, declared)) {
-    return `mutation targets a credential store: ${path}`
+    // The one credential-floor a human may step aside per family: `credWriteExempt`
+    // (the readwrite rung of the credential-family ladder, fed by the volatile
+    // `credWriteExemptFamilies` setting). Family-level and binary — and it steps aside
+    // for **this clause only**: the protected-destructive-target screen above, the
+    // neverClear family and the push floor stay armed whatever a family is set to,
+    // which is why `readwrite` never means "write anything freely".
+    const exemptFamily = familyOfPath(path)
+    if (exemptFamily === undefined || !(ctx.credWriteExempt ?? []).includes(exemptFamily)) {
+      return `mutation targets a credential store: ${path}`
+    }
   }
   if (READ_TOOLS.has(ctx.tool) && path !== undefined) {
     const normalized = path.startsWith('/') || /^[A-Za-z]:/.test(path) ? path : path
@@ -255,7 +269,24 @@ export function decide(
   // they cannot modify the workspace or execute a command, so asking a human
   // about each one is pure noise. P0 hard-deny already protects sensitive-path
   // reads and credential material, and the deny-keyword layer runs even earlier.
-  if (READ_TOOLS.has(ctx.tool) || INTERNAL_TOOLS.has(ctx.tool) || autoAllowExtra.has(ctx.tool)) {
+  //
+  // READ tools first **consult the rule layer** (the credential-family ladder's
+  // read rung): a seeded `cred.*` entry (or any user rule naming a path) can route a
+  // read to ask/deny. Only a **named hit** counts — the ruleset's own default action
+  // (ruleIndex undefined) is not an opinion about this call, and treating it as one
+  // would turn every read into an ask under `defaultAction: ask` (measured: it did).
+  // A miss still auto-allows silently, so the popup budget is unchanged. INTERNAL
+  // tools are deliberately NOT pre-queried: session/memory tools reading their own
+  // stores is how the host works; a path rule blocking them would be host self-harm.
+  if (READ_TOOLS.has(ctx.tool) || autoAllowExtra.has(ctx.tool)) {
+    const pre = ruleset.decide(ctx)
+    if (pre.ruleIndex !== undefined) {
+      if (pre.action === 'deny') return { ...pre, stage: 'rule' }
+      if (pre.action === 'ask') return { ...pre, stage: 'default' }
+    }
+    return { action: 'allow', reason: 'read-only internal tool', stage: 'grant', ruleIndex: undefined }
+  }
+  if (INTERNAL_TOOLS.has(ctx.tool)) {
     return { action: 'allow', reason: 'read-only internal tool', stage: 'grant', ruleIndex: undefined }
   }
   if (grants(ctx.tool, ctx.args) === 'allow') {

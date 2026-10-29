@@ -157,6 +157,21 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
     readonly readSafenetPass?: () => boolean;
     readonly readSafenetAsk?: () => boolean;
     /**
+     * Live read of the `allowProtectedBranchPush` opt-out (volatile setting, default false
+     * keeps the P0 protected-branch floor). When true the floor steps aside AND the three
+     * flat push keywords in the deny-keyword blacklist are exempted — the keyword layer runs
+     * before every ask, so leaving them armed would make the switch a silent no-op. Nothing
+     * else widens: wipes, redirects, credentials and the rest of the floor stay armed, and
+     * the seeded `git.push-force` rule still asks a person.
+     */
+    readonly readAllowProtectedBranchPush?: () => boolean;
+    /**
+     * Live read of `credWriteExemptFamilies` — the readwrite rung of the credential-family
+     * ladder. Consulted ONLY by the engine's credential-store write clause; already filtered
+     * to the family roster by the wiring.
+     */
+    readonly readCredWriteExemptFamilies?: () => readonly string[];
+    /**
      * Optional live source of the script-review switch: attach the body of every script a
      * call runs to the review, so the grader and the human judge code, not a filename.
      * Defaults to on (`config.scriptReview`).
@@ -529,6 +544,13 @@ export declare class PermGateRuntime {
      * An empty override is treated as "no meaningful override" (the blacklist is
      * protective and stays on); schemastery materializes unset arrays as `[]`. */
     private liveDenyKeywords;
+    /**
+     * The push-floor opt-out, read live so the settings toggle lands on the next call.
+     * `PUSH_FLOOR_KEYWORDS` are the flat blacklist entries that encode the same intent as
+     * the P0 protected-branch floor; the opt-out exempts exactly these, nothing more.
+     */
+    private liveAllowProtectedBranchPush;
+    private effectiveDenyKeywords;
     /** The user-declared credential paths, as configured (may be empty). */
     private liveCredentialPaths;
     /**

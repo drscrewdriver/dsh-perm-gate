@@ -1,5 +1,13 @@
 # Changelog
 
+## 5.4.0 (2026-10-30)
+
+- 凭据类型阶梯：七个内置族（ssh / cloud / package / gitcreds / env / cli / db），每类四档 deny / ask（默认）/ readonly / readwrite。档位状态就住在规则文档本身——每类一条 `[deny-rule:cred.<family>]` 行（分区 + enabled）加成对的 volatile `credWriteExemptFamilies` 清单；设置卡经 `GET/POST /api/dsh-perm-gate/cred` 一条 update 成对读写，无本地镜像、无半态。readwrite 需卡内二次确认，且只退让 P0 的一条判据（凭据 store 写）；根盘、受保护路径、.dsh、外发在任何档位不让；自定义 credentialPaths 永不参与写豁免。
+- 引擎：`decide()` 对 READ 工具先问规则层（被具名 ask/deny 命中的文件读才会被路由；未命中保持原静默自动放行，弹窗预算不变）；INTERNAL 协调工具永不预询。新增纯模块 `src/cred-families.ts`（族 glob + `familyOfPath`）。
+- 播种：预设表 52→59 行；新 volatile 水位键 `presetRulesVersion`——升级后只补新增行（按 id 幂等，用户撤销的行永不复活）。
+- 保护分支强推地板开关 `allowProtectedBranchPush`（volatile，默认关=地板立；开则地板让位、落入预设 git.push-force 的逐次 ask，并同步豁免黑名单三条扁平 push 词）。
+- 预设表新增 `[deny-rule:rsync.delete]`（rsync --delete 默认 deny，附 dry-run 建议）。
+
 5.3.3: host enumeration addendum for DSH 0.2.1-rc.3 (declaration-only bump; contract plane zero diff).
 
 ## 5.3.2 (2026-10-18)

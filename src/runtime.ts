@@ -49,6 +49,13 @@ import { resolveTierMode, type UnattendedMode } from './unattended.js'
 import { resolveGatePresets } from './config.js'
 
 /**
+ * The flat blacklist entries that encode the same intent as the P0 protected-branch push
+ * floor. `allowProtectedBranchPush` exempts exactly these (and the floor itself) — every
+ * other keyword and floor branch stays armed.
+ */
+const PUSH_FLOOR_KEYWORDS: ReadonlySet<string> = new Set(['push --force', 'force-push', 'force push'])
+
+/**
  * The gate's answer to the host's pre-execute waterfall.
  *
  * `displayReason` is part of the host's own ask contract: the registry forwards it
@@ -264,6 +271,21 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    */
   readonly readSafenetPass?: () => boolean
   readonly readSafenetAsk?: () => boolean
+  /**
+   * Live read of the `allowProtectedBranchPush` opt-out (volatile setting, default false
+   * keeps the P0 protected-branch floor). When true the floor steps aside AND the three
+   * flat push keywords in the deny-keyword blacklist are exempted — the keyword layer runs
+   * before every ask, so leaving them armed would make the switch a silent no-op. Nothing
+   * else widens: wipes, redirects, credentials and the rest of the floor stay armed, and
+   * the seeded `git.push-force` rule still asks a person.
+   */
+  readonly readAllowProtectedBranchPush?: () => boolean
+  /**
+   * Live read of `credWriteExemptFamilies` — the readwrite rung of the credential-family
+   * ladder. Consulted ONLY by the engine's credential-store write clause; already filtered
+   * to the family roster by the wiring.
+   */
+  readonly readCredWriteExemptFamilies?: () => readonly string[]
   /**
    * Optional live source of the script-review switch: attach the body of every script a
    * call runs to the review, so the grader and the human judge code, not a filename.
@@ -794,6 +816,8 @@ export class PermGateRuntime {
       caseInsensitive: this.options.caseInsensitivePaths ?? true,
       dshHome: this.options.dshHome,
       credentialPaths: this.liveCredentialPaths(),
+      allowProtectedBranchPush: this.liveAllowProtectedBranchPush(),
+      credWriteExempt: this.options.readCredWriteExemptFamilies?.() ?? [],
       scanKeys: this.liveScanKeys(),
       agentCandidates: extractAgentCandidates(exec),
     }
@@ -1219,6 +1243,21 @@ export class PermGateRuntime {
     return appended.length === 0 ? base : [...new Set([...base, ...appended])]
   }
 
+  /**
+   * The push-floor opt-out, read live so the settings toggle lands on the next call.
+   * `PUSH_FLOOR_KEYWORDS` are the flat blacklist entries that encode the same intent as
+   * the P0 protected-branch floor; the opt-out exempts exactly these, nothing more.
+   */
+  private liveAllowProtectedBranchPush(): boolean {
+    return this.options.readAllowProtectedBranchPush?.() ?? this.options.allowProtectedBranchPush ?? false
+  }
+
+  private effectiveDenyKeywords(): readonly string[] {
+    const keywords = this.liveDenyKeywords()
+    if (!this.liveAllowProtectedBranchPush()) return keywords
+    return keywords.filter((k) => !PUSH_FLOOR_KEYWORDS.has(String(k).trim()))
+  }
+
   /** The user-declared credential paths, as configured (may be empty). */
   private liveCredentialPaths(): readonly string[] {
     const read = this.options.readCredentialPaths
@@ -1260,7 +1299,7 @@ export class PermGateRuntime {
    * call, the reason, or the event: the reason names the keyword, never the blob.
    */
   private denyKeywordHit(exec: ToolExecutionLike): string | undefined {
-    const keywords = this.liveDenyKeywords()
+    const keywords = this.effectiveDenyKeywords()
     if (keywords.length === 0) return undefined
     const text = keywordScanText(exec.name, exec.arguments ?? {}, exec.commandText, this.liveScanKeys())
     if (text === '') return undefined

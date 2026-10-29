@@ -14,6 +14,7 @@ import { dispatchCommand } from '../src/command-dispatcher'
 import { hardDenyReason } from '../src/engine'
 import { SHELL_TOOLS } from '../src/evaluate'
 import type { ToolCallContext } from '../src/evaluate'
+import { PermGateRuntime } from '../src/runtime'
 
 const shellCtx = (tool: string, command: string): ToolCallContext => ({
   tool,
@@ -147,5 +148,51 @@ describe('P0 — git push 远端历史改写', () => {
       dshHome: 'C:/Users/joshua/.dsh',
     }
     expect(hardDenyReason(ctx)).toBeUndefined()
+  })
+})
+
+describe('P0 — allowProtectedBranchPush 开关（默认关＝地板立）', () => {
+  const optedOut = (command: string): ToolCallContext => ({
+    ...shellCtx('shell', command),
+    allowProtectedBranchPush: true,
+  })
+
+  it('开关打开后，针对保护分支的强推/删除不再命中 P0 地板', () => {
+    for (const cmd of [
+      'git push --force origin main',
+      'git push --force-with-lease origin main',
+      'git push --delete origin main',
+    ]) {
+      expect(hardDenyReason(shellCtx('shell', cmd)), `${cmd} 默认应被地板拦`).toBeDefined()
+      expect(hardDenyReason(optedOut(cmd)), `${cmd} 开关开应让位`).toBeUndefined()
+    }
+  })
+
+  it('开关只豁免 push 地板，不放宽任何其他 P0', () => {
+    // 受保护路径重定向仍拦（凭据/地板面不受该开关影响）
+    expect(hardDenyReason(optedOut('echo x > /etc/passwd'))).toBeDefined()
+    // 根盘清扫仍拦
+    expect(hardDenyReason(optedOut('rm -rf /'))).toBeDefined()
+  })
+
+  it('让位地板后，调用落到预设 git.push-force（仍点名交人）', async () => {
+    const { compileDocument } = await import('../src/rule')
+    const { decideRules } = await import('../src/evaluate')
+    const { parsePresetDoc, presetRuleId } = await import('../src/preset-rules')
+    const ruleset = compileDocument(parsePresetDoc(), { maxGlobStars: 2, caseInsensitivePaths: true })
+    const cmd = 'git push --force origin main'
+    const v = decideRules(ruleset, { tool: 'shell', args: { command: cmd }, commandText: cmd, cwd: 'E:/test/x' })
+    expect(v.action).toBe('ask')
+    expect(presetRuleId(v.reason)).toBe('git.push-force')
+  })
+
+  it('开关不是静默空操作：关键词层也不再说 deny（落到 ask）', () => {
+    // deny-keyword 层跑在任何 ask 之前；若开关不豁免 push 关键词，打开后仍会 deny。
+    const cmd = 'git push --force origin main'
+    const exec = { name: 'shell', arguments: { command: cmd }, commandText: cmd, cwd: 'E:/test/x', sessionId: 's' }
+    const floorOn = new PermGateRuntime({}).decideExecution(exec)
+    expect(floorOn?.kind, '默认地板立：应 deny').toBe('deny')
+    const opted = new PermGateRuntime({ readAllowProtectedBranchPush: () => true }).decideExecution(exec)
+    expect(opted?.kind, '开关开：不再 deny-keyword 硬拒，落到 ask 交人').toBe('ask')
   })
 })

@@ -64,6 +64,8 @@
 
 - **命令白/黑名单** — 基于 **argv 分解**匹配（非裸字符串），递归下钻 `sh -c`/`bash -c`、识别管道、重定向目标、递归/强制（`rm -rf`）。
 - **deny 优先** — 命中黑名单即拒绝，胜过任何 allow。
+- **凭据类型阶梯** — 七类凭据（`ssh`、`cloud`、`package`、`gitcreds`、`env`、`cli`、`db`）各自可选 `deny` / `ask`（默认）/ `readonly` / `readwrite` 四档；档位状态存于规则文档的 `[deny-rule:cred.<family>]` 行（分区 + `enabled`）与成对的 `credWriteExemptFamilies` 清单，设置卡一次 update 成对写回，无镜像、无半态。`readwrite` 是唯一会退让部分 P0 的档位（仅凭据 store 的**写**判据，npm login 类工作流）且需卡内二次确认；根盘、受保护路径、`.dsh`、外发在任何档位恒拦。
+- **保护分支强推开关** — `allowProtectedBranchPush`（默认关）保留 P0 对保护分支 `git push --force/--force-with-lease/--delete` 的地板；开启后地板让位、落入预设 `git.push-force` 的逐次人工确认，并同步豁免黑名单三条扁平 push 词。
 - **会话放行** — 精确的 `(工具, 规范化 fingerprint)` grant，带 `TTL` + `maxUses`；换目标绝不复用。子代理继承但不可自授。
 - **纯函数规则引擎** — glob/regex 编译 + ReDoS 上限、坏规则 loud fail、按源内容哈希缓存。
 - **审计** — 每次决策写为 `{ignorable:true}` 事件并带 `callId`；模型可见理由与记录一致。
@@ -353,6 +355,34 @@ LLM 评定为 `safe` 且门禁自动放行的调用因此仍会弹出确认。
 安装指南里描述的那次宿主补丁。没有该补丁时，第二个档位在所有界面上都是纯文字；它的标签与门禁
 不受影响。
 
+
+## 凭据类型阶梯（`deny / ask / readonly / readwrite`）
+
+凭据面过去是一条判据。现在是七族 × 四档——“读 `.env` 先问我”和“让 agent 再跑一次 `npm login`”
+本来就是两种需求。
+
+| 档位 | 文件工具直读 / 浏览 | 写与删 |
+| --- | --- | --- |
+| `deny` | 规则层硬拦 | P0 硬拦 |
+| `ask`（默认） | 逐次转人裁 | P0 硬拦 |
+| `readonly` | 静默放行 | P0 硬拦 |
+| `readwrite` | 静默放行 | 凭据 store **写**判据退让（npm login 类） |
+
+- **状态就住在插件自己的两个存储里**：规则文档中该族的 `[deny-rule:cred.<family>]` 行
+（分区 + `enabled`）与成对的 `credWriteExemptFamilies` 清单。设置卡经
+`GET/POST /api/dsh-perm-gate/cred` **一次 update** 成对写回。
+- **读面**由“文件工具先问规则层”驱动：`decide()` 先问 ruleset，且只采纳**具名命中**；
+未命中保持静默自动放行，弹窗预算不变。会话/协调类内部工具永不预询。
+- **`readwrite` 只退让一条判据**——凭据 store 写屏。根盘/系统盘清扫、受保护破坏目标、
+`.dsh`、外发与读地板在任何档位恒拦；应用前卡片要求二次确认。自定义 `credentialPaths`
+无族归属、永不参与写豁免。
+- 七行随预设表**版本 1** 发布：升级经 `presetRulesVersion` 水位只补缺失行，你撤销过的行永不复活。
+
+```
+SSH (~/.ssh)              deny  ask  [readonly] readwrite
+Cloud (.aws/.gcloud/…)    deny  ask   readonly  readwrite
+…
+```
 
 ## CLI（独立 dry-run）
 

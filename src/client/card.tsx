@@ -31,6 +31,8 @@ export interface PermissiveCardValue {
   safenetPass?: boolean
   /** Safenet-ask tier (`permissive-snet`): mechanical screen, still asks, no grader. */
   safenetAsk?: boolean
+  /** Protected-branch push floor opt-out. Default false keeps the P0 floor. */
+  allowProtectedBranchPush?: boolean
   /** Unattended tiers: never a human popup (see src/config.ts for the semantics). */
   rulesFallback?: boolean
   /** On unless explicitly unset to false — the default attaches script bodies. */
@@ -324,6 +326,125 @@ function PillSwitch(props: {
  * the preset cannot know — and they should not each grow their own copy of the row
  * markup the deny blacklist already has.
  */
+/**
+ * cred family ladder — server-backed rows (`GET/POST /api/dsh-perm-gate/cred`).
+ * The rung state lives in TWO stores the plugin owns — the family's row inside the
+ * rules document (section + enabled) and the paired `credWriteExemptFamilies` list —
+ * so the card must not keep a local mirror; it reads and writes through the route,
+ * which applies both stores in one settings update. `readwrite` asks for an inline
+ * confirmation: it is the only rung that steps a piece of P0 aside.
+ */
+const CRED_FAMILIES_UI: readonly (readonly [string, string])[] = [
+  ['ssh', 'SSH (~/.ssh)'],
+  ['cloud', 'Cloud (.aws/.gcloud/.azure)'],
+  ['package', 'Registry (.npmrc/.pypirc/.netrc)'],
+  ['gitcreds', 'Git store (.git-credentials)'],
+  ['env', 'Project (.env)'],
+  ['cli', 'Coding CLI (~/.claude/.codex/gh)'],
+  ['db', 'Database (.pgpass/.my.cnf)'],
+]
+const CRED_RUNGS_UI: readonly string[] = ['deny', 'ask', 'readonly', 'readwrite']
+// Literal key map: the locale dictionary is a literal union — a computed
+// `card.credRung.${rung}` template widens to string and fails the seat typing.
+const CRED_RUNG_LABEL_KEY = {
+  deny: 'card.credRung.deny',
+  ask: 'card.credRung.ask',
+  readonly: 'card.credRung.readonly',
+  readwrite: 'card.credRung.readwrite',
+} as const
+
+function CredLadderSection(props: { t: PermissiveCardProps['t']; readonly: boolean }) {
+  const { t, readonly } = props
+  const [rungs, setRungs] = useState<Record<string, string> | null>(null)
+  const [confirm, setConfirm] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  // Row-scoped error: a failure at the bottom of the section is invisible to the
+  // person who just clicked a row — the feedback must sit on the row that failed.
+  const [rowError, setRowError] = useState<{ family: string; msg: string } | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/dsh-perm-gate/cred', { headers: { 'cache-control': 'no-cache' } })
+      .then((r) => r.json())
+      .then((b: { rungs?: Record<string, string> }) => { if (alive && b?.rungs !== undefined) setRungs(b.rungs) })
+      .catch(() => { /* route unavailable: the section keeps showing the loading line */ })
+    return () => { alive = false }
+  }, [])
+  const apply = (family: string, rung: string): void => {
+    setBusy(family)
+    setRowError(null)
+    // A hanging POST used to leave the row in silent `busy` forever (desktop webServer
+    // body-stream mismatch) — 10s ceiling turns it into a visible, named failure.
+    const abort = new AbortController()
+    const timer = setTimeout(() => { abort.abort() }, 10_000)
+    fetch('/api/dsh-perm-gate/cred', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ family, rung }),
+      signal: abort.signal,
+    })
+      .then((r) => r.json())
+      .then((b: { ok?: boolean; rungs?: Record<string, string>; error?: string }) => {
+        if (b?.ok === true && b.rungs !== undefined) setRungs(b.rungs)
+        else setRowError({ family, msg: String(b?.error ?? 'failed') })
+      })
+      .catch((e: unknown) => {
+        const msg = String((e as Error)?.name ?? e) === 'AbortError' ? 'timeout (10s)' : String(e)
+        setRowError({ family, msg })
+      })
+      .finally(() => { clearTimeout(timer); setBusy(null); setConfirm(null) })
+  }
+  return (
+    <section style={sectionStyle}>
+      <p style={labelStyle}>{t('card.credFamily')}</p>
+      <p style={hintStyle}>{t('card.credFamilyHint')}</p>
+      {rungs === null ? (
+        <p style={hintStyle}>{t('card.credFamilyLoading')}</p>
+      ) : (
+        CRED_FAMILIES_UI.map(([family, display]) => (
+          <div key={family} style={{ ...rowStyle, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', color: 'var(--dsw-alias-label-primary)' }}>{display}</span>
+            <span style={{ display: 'inline-flex', gap: '4px' }}>
+              {CRED_RUNGS_UI.map((rung) => (
+                <button
+                  key={rung}
+                  type="button"
+                  disabled={readonly || busy === family}
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    cursor: 'pointer',
+                    borderRadius: '10px',
+                    border: rungs[family] === rung ? '1px solid var(--dsw-alias-primary, #4a90d9)' : '1px solid transparent',
+                    background: rungs[family] === rung ? 'rgba(74, 144, 217, 0.15)' : 'transparent',
+                  }}
+                  onClick={() => {
+                    if (rung === 'readwrite' && confirm !== family) { setConfirm(family); return }
+                    setConfirm(null)
+                    apply(family, rung)
+                  }}
+                >
+                  {t(CRED_RUNG_LABEL_KEY[rung as keyof typeof CRED_RUNG_LABEL_KEY])}
+                </button>
+              ))}
+            </span>
+            {confirm === family && (
+              <span style={{ width: '100%', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }}>
+                {t('card.credReadwriteConfirm')}
+                <button type="button" disabled={busy === family} style={{ fontSize: '11px', marginLeft: '6px' }} onClick={() => apply(family, 'readwrite')}>{t('card.credConfirmYes')}</button>
+                <button type="button" style={{ fontSize: '11px', marginLeft: '4px' }} onClick={() => setConfirm(null)}>{t('card.credConfirmNo')}</button>
+              </span>
+            )}
+            {rowError !== null && rowError.family === family && (
+              <span style={{ width: '100%', fontSize: '11px', color: 'var(--dsw-alias-danger, #c0392b)' }}>{family}: {rowError.msg}</span>
+            )}
+          </div>
+        ))
+      )}
+      <p style={hintStyle}>{t('card.credFamilyFootnote')}</p>
+    </section>
+  )
+}
+
 function StringListField(props: {
   readonly label: string
   readonly hint: string
@@ -714,6 +835,16 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       />
                     </div>
                     <p style={hintStyle}>{t('card.rulesFallbackHint')}</p>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-allow-protected-push" style={{ fontSize: '12px' }}>{t('card.allowProtectedBranchPush')}</label>
+                      <PillSwitch
+                        id="plugin-config-perm-gate-allow-protected-push"
+                        checked={value.allowProtectedBranchPush === true}
+                        disabled={readonly}
+                        onCommit={(next) => scope.set('allowProtectedBranchPush', next)}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.allowProtectedBranchPushHint')}</p>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-script-review" style={{ fontSize: '12px' }}>{t('card.scriptReview')}</label>
                       <PillSwitch
@@ -1384,6 +1515,11 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       onRemove={(index) => { void scope.set('extraOperationArgKeys', (value.extraOperationArgKeys ?? []).filter((_, i) => i !== index)) }}
                     />
                   </section>
+
+                  {/* Credential-family ladder: rows live in the rules document (section +
+                      enabled) and in credWriteExemptFamilies — read and written through
+                      the cred route, never mirrored here. */}
+                  <CredLadderSection t={t} readonly={readonly} />
 
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.denylist')}</p>

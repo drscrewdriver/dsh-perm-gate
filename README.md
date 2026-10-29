@@ -76,6 +76,17 @@ cross-plugin version coupling.
   with recursive descent into `sh -c`/`bash -c`, pipeline detection, redirect-target
   checking, and recursive/force (`rm -rf`) recognition.
 - **Deny priority** — a matching deny rule wins over any allow rule.
+- **Credential family ladder** — seven credential families (`ssh`, `cloud`, `package`, `gitcreds`,
+  `env`, `cli`, `db`), each selectable at `deny` / `ask` (default) / `readonly` / `readwrite`.
+  The rung lives in the rules document (`[deny-rule:cred.<family>]` row, section + `enabled`)
+  plus the paired `credWriteExemptFamilies` list, written in one settings update — no mirror,
+  no half-state. `readwrite` is the only rung that steps a piece of P0 aside (the credential-store
+  *write* screen, npm-login style) and asks for an inline confirmation; roots, protected paths,
+  `.dsh` and egress stay armed at every rung.
+- **Protected-branch push switch** — `allowProtectedBranchPush` (off by default) keeps the P0
+  floor on `git push --force/--force-with-lease/--delete` to protected branches; turning it on
+  steps that floor aside into the seeded `git.push-force` ask (a person confirms each push) and
+  exempts the three flat push keywords from the blacklist.
 - **Session grants** — precise `(tool, canonical fingerprint)` grants with `TTL` + `maxUses`;
   re-running with a different target never reuses authority. Sub-agents inherit but cannot mint.
 - **Pure-function rule engine** — glob/regex compilation with a ReDoS bound, loud fail on
@@ -534,6 +545,37 @@ unrelated rule. A `0 rules loaded` note means the `rulesFile` path resolved to n
 
 The panel talks to `POST /api/dsh-perm-gate/dry-run`, which is **read-only by construction** — it
 has no write form at all, so testing a rule can never change it.
+
+## Credential family ladder (`deny / ask / readonly / readwrite`)
+
+The credential floor used to be one judgement. It is now seven families × four rungs, because
+"ask me before reading a `.env`" and "let the agent run `npm login` again" are different needs.
+
+| Rung | file-tool reads / browsing | writes & deletes |
+| --- | --- | --- |
+| `deny` | blocked by the rule layer | blocked by P0 |
+| `ask` (default) | a person confirms each one | blocked by P0 |
+| `readonly` | pass silently | blocked by P0 |
+| `readwrite` | pass silently | the credential-store **write** clause steps aside (npm-login style) |
+
+- **State lives in two stores the plugin owns**: the family's `[deny-rule:cred.<family>]` row in
+the rules document (section + `enabled`) and the paired `credWriteExemptFamilies` list. The
+settings card writes both in ONE update through `GET/POST /api/dsh-perm-gate/cred`.
+- **Read side** is enforced by a rule-layer pre-query for file-read tools: `decide()` asks the
+ruleset first and only a *named* row hit routes the read; a miss keeps the silent auto-allow,
+so the popup budget is unchanged. Session/coordination tools are never pre-queried.
+- **`readwrite` steps exactly one clause aside** — the credential-store write screen. Root/drive
+wipes, protected destructive targets, `.dsh`, egress and the read floor stay armed at every
+rung, and the card asks for an inline confirmation before applying it. Custom `credentialPaths`
+have no family and are never write-exempt.
+- The seven rows ship as preset table **version 1**: upgrades backfill missing rows through the
+`presetRulesVersion` watermark and never re-add a row you revoked.
+
+```
+SSH (~/.ssh)              deny  ask  [readonly] readwrite
+Cloud (.aws/.gcloud/…)    deny  ask   readonly  readwrite
+…
+```
 
 ## CLI
 

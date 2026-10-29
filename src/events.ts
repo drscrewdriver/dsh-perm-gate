@@ -15,6 +15,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { RulesView } from './rules-view.js'
+import { credRungsOf, setCredFamilyAction, type CredRung } from './preset-rules.js'
+import { CRED_FAMILY_IDS, type CredFamily } from './cred-families.js'
 
 /** One gate decision event. `kind` drives the client notice strip styling. */
 export interface GateEvent {
@@ -496,13 +498,46 @@ function json(res: RouteRes, code: number, body: unknown): void {
 
 function readBody(req: RouteReq, limit = 1024 * 1024): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
+    // Some embedded servers (the desktop webServer among them) hand the handler a
+    // pre-parsed body object instead of a readable stream — take it when present.
+    const pre = (req as { body?: unknown; payload?: unknown }).body ?? (req as { payload?: unknown }).payload
+    if (typeof pre === 'object' && pre !== null) {
+      resolve(pre as Record<string, unknown>)
+      return
+    }
+    // A stream-less, body-less req must fail loud, not hang: with `req.on?.()` only,
+    // a missing `on` attached no listener and the promise never settled — the POST
+    // response never came, and the settings face sat on a silent spinner (the exact
+    // "only readwrite reacts" symptom reported on the desktop tier).
+    if (typeof req.on !== 'function') {
+      reject(new Error('request body stream unavailable'))
+      return
+    }
     let body = ''
-    req.on?.('data', (chunk) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error('body read timeout'))
+    }, 8000)
+    req.on('data', (chunk) => {
       body += String(chunk)
-      if (body.length > limit) reject(new Error('payload too large'))
+      if (body.length > limit && !settled) {
+        settled = true
+        clearTimeout(timer)
+        reject(new Error('payload too large'))
+      }
     })
-    req.on?.('error', (err) => reject(err instanceof Error ? err : new Error(String(err))))
-    req.on?.('end', () => {
+    req.on('error', (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err instanceof Error ? err : new Error(String(err)))
+    })
+    req.on('end', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       try {
         resolve(body === '' ? {} : (JSON.parse(body) as Record<string, unknown>))
       } catch (e) {
@@ -1103,6 +1138,72 @@ export function registerLearningRoute(server: unknown, provider: LearningRoutePr
           provider.reset(parsed.key, typeof parsed.fp === 'string' && parsed.fp !== '' ? parsed.fp : undefined)
           json(res, 200, { ok: true })
         } catch (e) {
+          json(res, 400, { ok: false, error: String((e as Error)?.message ?? e) })
+        }
+      })()
+    },
+  })
+}
+
+// ─── cred-family ladder (GET state / POST rung) ────────────────────────────
+
+export const CRED_ROUTE = '/api/dsh-perm-gate/cred'
+
+export interface CredRouteProvider {
+  /** Current raw rules document + the stored write-exemption list (no mutation). */
+  read(): { doc: unknown; exempt: readonly string[] }
+  /** Persist the pair in ONE settings update (doc + exempt travel together). */
+  persist(doc: Record<string, unknown>, exempt: readonly string[]): Promise<void>
+}
+
+/**
+ * `GET  /api/dsh-perm-gate/cred` → `{ ok, rungs: {family: deny|ask|readonly|readwrite}, exempt }`
+ * `POST /api/dsh-perm-gate/cred` → `{ family, rung }` applies one rung: rewrites the
+ * family's `cred.<id>` row in the rules document and the paired `credWriteExemptFamilies`
+ * list, persisted in a single settings update. The two stores are written only through
+ * here, so the ladder state cannot half-apply. Registration is optional like every
+ * other route (no webServer ⇒ the settings face degrades to read-only, never errors).
+ */
+export function registerCredRoute(server: unknown, provider: CredRouteProvider): (() => void) | undefined {
+  const ws = routeServer(server)
+  if (ws === undefined) return undefined
+  return ws.register({
+    kind: 'exact',
+    path: CRED_ROUTE,
+    handler: (rawReq, rawRes) => {
+      void (async () => {
+        const req = rawReq as RouteReq
+        const res = rawRes as RouteRes
+        try {
+          if (req.method === 'GET' || req.method === 'HEAD') {
+            const cur = provider.read()
+            json(res, 200, { ok: true, rungs: credRungsOf(cur.doc, cur.exempt), exempt: cur.exempt })
+            return
+          }
+          if (req.method !== 'POST') {
+            json(res, 405, { ok: false, error: 'method not allowed' })
+            return
+          }
+          const body = await readBody(req)
+          const family = String(body.family ?? '')
+          const rung = String(body.rung ?? '')
+          if (!(CRED_FAMILY_IDS as readonly string[]).includes(family)) {
+            json(res, 400, { ok: false, error: `unknown credential family: ${family}` })
+            return
+          }
+          const rungs: readonly CredRung[] = ['deny', 'ask', 'readonly', 'readwrite']
+          if (!rungs.includes(rung as CredRung)) {
+            json(res, 400, { ok: false, error: `unknown rung: ${rung}` })
+            return
+          }
+          const cur = provider.read()
+          const next = setCredFamilyAction(cur.doc, cur.exempt, family as CredFamily, rung as CredRung)
+          console.log(`[dsh-perm-gate] cred POST apply family=${family} rung=${rung}`)
+          await provider.persist(next.doc, next.exempt)
+          console.log(`[dsh-perm-gate] cred POST applied (exempt: ${next.exempt.join(',') || '-'})`)
+          json(res, 200, { ok: true, rungs: credRungsOf(next.doc, next.exempt), exempt: next.exempt })
+        } catch (e) {
+          console.warn('[dsh-perm-gate] cred POST failed:', String((e as Error)?.message ?? e))
           json(res, 400, { ok: false, error: String((e as Error)?.message ?? e) })
         }
       })()

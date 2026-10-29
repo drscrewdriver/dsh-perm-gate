@@ -53,6 +53,14 @@ export interface ToolCallContext {
   readonly scanKeys?: ScanKeyPolicy
   /** Agent identity candidates from session context. */
   readonly agentCandidates?: readonly string[]
+  /** Opt-out of the P0 protected-branch push floor (setting `allowProtectedBranchPush`). */
+  readonly allowProtectedBranchPush?: boolean
+  /**
+   * Credential families whose P0 credential-store **write** floor is exempted
+   * (setting `credWriteExemptFamilies`, the readwrite rung of the family ladder).
+   * Consulted by exactly one hardDeny clause; read floors never look at this.
+   */
+  readonly credWriteExempt?: readonly string[]
   /** Network request info (for network dimension matching). */
   readonly network?: {
     readonly domain?: string
