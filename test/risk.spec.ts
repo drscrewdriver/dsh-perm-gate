@@ -38,8 +38,13 @@ describe('parseRiskVerdict', () => {
     expect(parseRiskVerdict(' totally not json ')).toBeUndefined()
   })
 
-  it('falls back to a bare safe keyword', () => {
-    expect(parseRiskVerdict('SAFE')).toEqual({ kind: 'safe' })
+  it('does not accept a bare keyword as a verdict (issue #7)', () => {
+    // Prose such as "not safe", a truncated JSON fragment, or a lone SAFE used to
+    // be read as an all-clear. Anything off-protocol stays unresolved so the
+    // caller keeps the human ask.
+    expect(parseRiskVerdict('SAFE')).toBeUndefined()
+    expect(parseRiskVerdict('not safe')).toBeUndefined()
+    expect(parseRiskVerdict('{"risk":"sa')).toBeUndefined()
   })
 })
 

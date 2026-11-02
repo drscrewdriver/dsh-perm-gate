@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { resolveConfig } from '../src/config.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmChunk, type HostLlmLike } from '../src/host-llm.js'
 import { LLM_PRESETS } from '../src/llm-presets.js'
 import { buildReceiverInfo, resolveHostSelection } from '../src/receiver-info.js'
@@ -17,14 +18,58 @@ function fakeLlm(chunks: HostLlmChunk[], calls: unknown[] = []): HostLlmLike {
 }
 
 describe('host llm transport (completeViaHost)', () => {
-  it('accumulates text deltas into the assistant answer', async () => {
+  it('accumulates final text deltas into the assistant answer', async () => {
     const llm = fakeLlm([
       { type: 'text-delta', text: '{"risk":' },
-      { type: 'reasoning-delta', text: '"safe"}' },
+      { type: 'text-delta', text: '"safe"}' },
       { type: 'finish', reason: { kind: 'stop' } },
     ])
     const r = await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000)
     expect(r).toEqual({ ok: true, content: '{"risk":"safe"}' })
+  })
+
+  it('reasoning deltas are never the answer (issue #7)', async () => {
+    const llm = fakeLlm([
+      { type: 'reasoning-delta', text: '{"risk":"safe"}' },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+    const r = await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000)
+    // Reasoning is private working: with no final text there is no verdict at all,
+    // so the caller keeps the ask instead of reading the thinking aloud as SAFE.
+    expect(r.ok).toBe(false)
+  })
+
+  it('a max-tokens finish is a truncation, not a verdict (issue #7)', async () => {
+    const llm = fakeLlm([
+      { type: 'reasoning-delta', text: 'This may be safe; more checks needed.' },
+      { type: 'finish', reason: { kind: 'max-tokens' } },
+    ])
+    const r = await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000)
+    expect(r.ok).toBe(false)
+    expect(r.ok === false && r.error).toContain('truncated')
+  })
+
+  it('a truncated answer is a failure even when some text arrived', async () => {
+    const llm = fakeLlm([
+      { type: 'text-delta', text: '{"risk":"sa' },
+      { type: 'finish', reason: { kind: 'length' } },
+    ])
+    const r = await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000)
+    expect(r.ok).toBe(false)
+  })
+
+  it('omits reasoningEffort unless one is configured (issue #8)', async () => {
+    const calls: unknown[] = []
+    const llm = fakeLlm([
+      { type: 'text-delta', text: 'OK' },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ], calls)
+    await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000)
+    // A hardcoded 'off' is rejected by host validation for models that do not
+    // advertise it; absent means "let the host model config decide".
+    expect('reasoningEffort' in (calls[0] as object)).toBe(false)
+    await completeViaHost(llm, DEFAULT_HOST_MODEL, 'sys', 'user', 1000, { effort: 'low' })
+    expect((calls[1] as { reasoningEffort?: string }).reasoningEffort).toBe('low')
   })
 
   it('surfaces a failed finish as ok:false (fail-closed)', async () => {
@@ -116,6 +161,22 @@ describe('host receiver in refineAsk + healthCheck', () => {
     const result = await r.healthCheck()
     expect(result.ok).toBe(false)
     expect(result.detail).toContain('not configured')
+  })
+})
+
+describe('host-mode model inheritance (issue #8)', () => {
+  it('an unset model is not defaulted, so the host selection is inherited', () => {
+    const cfg = resolveConfig({})
+    // The old schema default (`deepseek-chat`) came back on every clear and was
+    // then treated as an explicit override while the provider followed the host.
+    expect(cfg.classifierModel).toBeUndefined()
+    expect(cfg.classifierEffort).toBe('')
+  })
+
+  it('an explicit model and effort survive resolution', () => {
+    const cfg = resolveConfig({ classifierModel: 'mimo-v2.5', classifierEffort: 'low' })
+    expect(cfg.classifierModel).toBe('mimo-v2.5')
+    expect(cfg.classifierEffort).toBe('low')
   })
 })
 

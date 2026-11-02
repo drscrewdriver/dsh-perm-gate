@@ -45,3 +45,28 @@ describe('decideExecution', () => {
     expect(r.reload()).toBe(true)
   })
 })
+
+describe('root defaultAction fails closed (issue #6)', () => {
+  it('a live ref that reached the options becomes ask, never a silent allow', () => {
+    // The host hands `.volatile()` fields to apply() as refs; spreading that
+    // config used to make the ruleset default this very object, which matched
+    // neither the deny nor the ask branch and let every unmatched call through.
+    const ref = { get: () => 'ask' }
+    const r = new PermGateRuntime({ rulesFile: undefined, defaultAction: ref as never })
+    expect(r.defaultAction).toBe('ask')
+  })
+
+  it('an out-of-protocol literal also becomes ask', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined, defaultAction: 'yolo' as never })
+    expect(r.defaultAction).toBe('ask')
+  })
+
+  it('readDefaultAction is read live, so a reload picks up a changed default', () => {
+    let action: unknown = 'deny'
+    const r = new PermGateRuntime({ rulesFile: undefined, readDefaultAction: () => action })
+    expect(r.defaultAction).toBe('deny')
+    action = 'allow'
+    expect(r.reload()).toBe(true)
+    expect(r.defaultAction).toBe('allow')
+  })
+})

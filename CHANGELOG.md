@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 5.4.3 (2026-11-03)
+
+- **#6 fail-open 修复**：宿主把 volatile 字段以**引用**交给 `apply`，此前 `...config` 把引用原样展开进运行时选项；引用对象既不等于 `deny` 也不等于 `ask`，运行时两条分支都落空，未命中任何规则的调用直接放过——即使配的是 ask / 默认审查。现在构造前先 `resolveVolatileConfig` 解引用，`coerceRuleAction` 把非三值一律 fail-closed 成 `ask`（规则文档路径同样过一遍），`defaultAction` / `caseInsensitivePaths` 改由 live 钩子读取并纳入热更新 key，改设置后 `reload()` 生效（此前只有首轮播种，改值不生效）。
+- **#7 假 SAFE 修复**：host 审查只采纳 `text-delta`，`reasoning-delta`（模型内心独白）不再拼进待解析文本；`max-tokens` / `length` / `content-filter` 等截断收尾判为失败而不是短答案；`parseRiskVerdict` 删掉裸 `safe` 关键字兜底——“not safe”、半截 JSON、纯文本 `SAFE` 一律 unresolved，留在人工确认上。
+- **#8 host-review 集成修复**：(1) `reasoningEffort` 不再硬编码 `'off'`，改由新 volatile 配置 `classifierEffort` 控制（设置卡新增「推理强度」，留空＝不发送、交给宿主模型配置），被宿主拒绝时可选 low/off；(2) `POST /api/dsh-perm-gate/health` 曾用 `{ ...result, ok: true }` 把检查自己给出的 `ok:false` 覆盖成健康，现改为以检查结果为准；(3) host 模式清空 Model 真正回落到会话模型组——`classifierModel` 不再带 schema 默认值，空值不再被当成显式覆盖（custom 端点模式仍在请求时兜底 `deepseek-chat`）。
+
+## 5.4.2 (2026-11-02)
+
 - **拦截意见不再冒充用户消息**：被拦后给主模型的 `工具审核意见` 曾以 `mode:'queue'` 投到 next-turn——那是用户的输入队列，意见投进去会在 input-traffic 等待区里像用户自己排的一条，并与待发消息抢队列，且要等整个回合结束才送达（模型多反刍一轮）。现在交由 `buildBlockNoteSender` 投递：首选 `agent.inject()`（next-step 带内、不唤醒 driver，贴着被拒的 tool 结果在下一个 pre-step 送达）并标上自有 `source.kind='perm-gate'`，因为宿主的语义里只有 `source.kind==='user'`（带 `rpcId`）才是“人说的话”，其余一律按注入上下文渲染；没有活 agent 时才回退到 steer 车道（`session.prompt mode:'steer'`），绝不静默降级成 `followup`。yolo / 机械直通 / 降级审查 / 确定性 deny 四条拦截路径统一如此；评审页「撤销此改动」仍走 next-turn（那是人想发的一句话）。
 - 配套：`dsh-input-traffic` 同步把「插话中」限定为真人插话（`source.kind === 'user'`），宿主自有通知（如 `user-approval` 的审批策略变更）与第三方意见不再占位等待区；没带 `source` 的旧行仍照常显示，不会误伤真队列。
 

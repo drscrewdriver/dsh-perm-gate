@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { EventLog, registerEventsRoute, registerStreamRoute } from '../src/events.js'
+import { EventLog, registerEventsRoute, registerHealthRoute, registerStreamRoute } from '../src/events.js'
 
 const dirs: string[] = []
 function tmpFile(name: string): string {
@@ -209,5 +209,47 @@ describe('registerStreamRoute', () => {
     expect(registerStreamRoute(undefined, new EventLog(undefined))).toBeUndefined()
     expect(registerStreamRoute({}, new EventLog(undefined))).toBeUndefined()
     expect(registerStreamRoute({ register: 'not-a-function' }, new EventLog(undefined))).toBeUndefined()
+  })
+})
+
+describe('registerHealthRoute', () => {
+  function makeServer() {
+    let handler: ((req: unknown, res: unknown) => unknown) | undefined
+    return {
+      register(route: { handler: (req: unknown, res: unknown) => unknown }): () => void {
+        handler = route.handler
+        return () => {}
+      },
+      call(method: string): { code: number; body: unknown } {
+        const out = { code: 0, body: undefined as unknown }
+        handler?.({ method, url: '/api/dsh-perm-gate/health' }, {
+          writeHead(code: number, headers?: Record<string, string>) { out.code = code; void headers },
+          end(body?: string) { out.body = body === undefined ? undefined : JSON.parse(body) },
+        })
+        return out
+      },
+    }
+  }
+
+  it('a resolved failed check stays not-ok (issue #8)', async () => {
+    const server = makeServer()
+    registerHealthRoute(server, {
+      check: async () => ({ ok: false, ms: 3, detail: 'Synthetic validation failure' }),
+    })
+    const res = server.call('POST')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(res.code).toBe(200)
+    // A dead review connection must not be reported as healthy: the old handler
+    // spread the result and then overwrote `ok` with a literal true.
+    expect((res.body as { ok: boolean }).ok).toBe(false)
+    expect((res.body as { detail?: string }).detail).toBe('Synthetic validation failure')
+  })
+
+  it('a healthy check stays ok', async () => {
+    const server = makeServer()
+    registerHealthRoute(server, { check: async () => ({ ok: true, ms: 12, detail: 'pong' }) })
+    const res = server.call('POST')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((res.body as { ok: boolean }).ok).toBe(true)
   })
 })

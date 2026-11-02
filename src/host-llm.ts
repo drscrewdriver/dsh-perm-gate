@@ -43,9 +43,35 @@ export interface HostModelSelection {
 export const DEFAULT_HOST_MODEL: HostModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
 
 /**
+ * Finish kinds that mean "what you got is not the whole answer". Graded as a
+ * failure: a truncated or filtered stream is not a verdict (issue #7).
+ */
+const TRUNCATED_FINISH_KINDS: ReadonlySet<string> = new Set([
+  'max-tokens', 'max_tokens', 'length', 'truncated', 'content-filter', 'content_filter',
+])
+
+/** Optional knobs for one host completion. */
+export interface HostCallOptions {
+  /**
+   * Reasoning effort to request. Empty/undefined **omits** the field entirely so
+   * the host's own model configuration decides — a hardcoded value is rejected by
+   * host validation when the selected model does not advertise it (issue #8).
+   */
+  readonly effort?: string
+  readonly maxTokens?: number
+}
+
+/**
  * One completion through the host `llm` service with an abort timeout.
+ *
+ * Only **final text** is the answer: `reasoning-delta` chunks are the model's
+ * private working, never a verdict, and a stream that ends on `max-tokens` (or
+ * any other truncating finish) is a failure rather than a short answer. Both
+ * used to be accepted, which let a reasoning-only or cut-off stream reach the
+ * verdict parser and be read as `safe` (issue #7).
+ *
  * Resolves `{ ok: true, content }` with the accumulated assistant text, or
- * `{ ok: false, error }` on stream failure, abort, or an empty answer.
+ * `{ ok: false, error }` on stream failure, abort, truncation, or an empty answer.
  */
 export async function completeViaHost(
   hostLlm: HostLlmLike,
@@ -53,28 +79,38 @@ export async function completeViaHost(
   system: string,
   user: string,
   timeoutMs: number,
+  opts: HostCallOptions = {},
 ): Promise<{ ok: true; content: string } | { ok: false; error?: string }> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     let text = ''
+    let finishKind: string | undefined
+    const effort = typeof opts.effort === 'string' && opts.effort !== '' ? opts.effort : undefined
     const stream = hostLlm.stream({
       provider: selection.provider,
       model: selection.model,
       messages: [{ role: 'user', content: [{ type: 'text', text: user }] }],
       system,
       temperature: 0,
-      reasoningEffort: 'off',
-      maxTokens: 256,
+      ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+      maxTokens: opts.maxTokens ?? 256,
       signal: controller.signal,
     })
     for await (const chunk of stream) {
-      if ((chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && typeof chunk.text === 'string') {
+      if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
         text += chunk.text
-      } else if (chunk.type === 'finish' && chunk.reason !== undefined && (chunk.reason.kind === 'error' || chunk.reason.kind === 'aborted')) {
-        const failure = chunk.reason.failure?.message
-        return { ok: false, error: failure ?? chunk.reason.kind }
+      } else if (chunk.type === 'finish') {
+        const kind = chunk.reason?.kind
+        if (kind === 'error' || kind === 'aborted') {
+          const failure = chunk.reason?.failure?.message
+          return { ok: false, error: failure ?? kind }
+        }
+        finishKind = kind
       }
+    }
+    if (finishKind !== undefined && TRUNCATED_FINISH_KINDS.has(finishKind)) {
+      return { ok: false, error: `truncated answer (finish: ${finishKind})` }
     }
     if (text.trim() === '') return { ok: false, error: 'empty answer' }
     return { ok: true, content: text }

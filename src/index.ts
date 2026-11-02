@@ -583,7 +583,15 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   } | undefined
 
   const runtime = new PermGateRuntime({
-    ...config,
+    // The host hands `.volatile()` fields to apply() as **live refs**. Resolve
+    // them once before spreading, or a ref object becomes a static option — the
+    // ruleset default among them, where no deny/ask branch matches it and every
+    // unmatched call was allowed unreviewed (issue #6). Anything that must stay
+    // live is read through its own `read*` hook below.
+    ...resolveVolatileConfig(config),
+    // Read live *and* validated: `coerceRuleAction` refuses a non-literal value
+    // instead of letting it fall through the runtime's action branches.
+    readDefaultAction: () => current().defaultAction,
     hostLlm,
     // Raise a network approval through the DSH approval seam. The service
     // applies the session policy, routes the prompt to the agent, and appends
@@ -653,12 +661,25 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
     // same namespace, so editing the settings card applies to the next tool call.
     readClassifyConfig: () => {
       const c = current()
+      const source = c.classifierSource === 'host' ? 'host' : 'custom'
       return {
         endpoint: c.classifierEndpoint,
-        model: c.classifierModel,
+        // Host mode: an unset model means "inherit the host selection" — the old
+        // schema default (`deepseek-chat`) came back on every clear and was then
+        // treated as an explicit override, so provider and model diverged (issue
+        // #8). Custom-endpoint mode keeps the historical default.
+        model: typeof c.classifierModel === 'string' && c.classifierModel !== ''
+          ? c.classifierModel
+          : source === 'custom' ? 'deepseek-chat' : undefined,
         apiKey: c.classifierApiKey,
         timeoutMs: c.riskTimeoutMs ?? 20_000,
       }
+    },
+    // Host reviews: an empty effort sends no `reasoningEffort` at all, so the host
+    // model configuration decides instead of a value it may reject (issue #8).
+    readClassifyEffort: () => {
+      const effort = current().classifierEffort
+      return typeof effort === 'string' && effort !== '' ? effort : undefined
     },
     // Read the verdict-learning switch and threshold live.
     readRiskLearning: () => {
@@ -830,6 +851,9 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // The host no longer seeds settings (there is no write path): an empty
   // `allowlist` keeps the rules-file default via `runtime.allowlist()`.
   let lastRulesDocKey: string | undefined
+  // Root compile-time inputs (default action, path case-fold). Seeded on the first
+  // pass so a startup value is not mistaken for an edit.
+  let lastStaticKey: string | undefined
   function applyVolatileUpdate(): void {
     const next = asSurface(current())
     if (next !== undefined) {
@@ -855,6 +879,16 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       const changed = lastRulesDocKey !== undefined
       lastRulesDocKey = rulesKey
       if (changed) runtime.reload()
+    }
+    // The root `defaultAction` (and the path case-fold) are compile-time inputs of
+    // the ruleset. Without this the settings switch persisted but never reached the
+    // live ruleset — "default value changes also miss invalidation" (issue #6).
+    const staticKey = `${String(current().defaultAction)}\u0000${String(current().caseInsensitivePaths)}`
+    if (lastStaticKey === undefined) {
+      lastStaticKey = staticKey
+    } else if (lastStaticKey !== staticKey) {
+      lastStaticKey = staticKey
+      runtime.reload()
     }
   }
   ;(ctx as unknown as EventContextLike).on('loader/volatile-update', () => {

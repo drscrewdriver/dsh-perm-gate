@@ -46,6 +46,8 @@ export interface PermissiveCardValue {
   classifierProvider?: string
   /** Model id used by the llmAssist classifier. */
   classifierModel?: string
+  /** Reasoning effort for the host receiver; empty follows the host model config. */
+  classifierEffort?: string
   /** Secret bearer token / API key for the classifier endpoint (masked in the UI). */
   classifierApiKey?: string
   /** Timeout for one llmAssist risk call (ms). */
@@ -1026,6 +1028,22 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                 .flatMap((p) => p.models)
                                 .map((m) => <option key={`${m.id}`} value={m.id}>{m.name}</option>)}
                             </datalist>
+                          </label>
+                          <label style={fieldStyle}>
+                            <span style={fieldLabelStyle}>{t('card.llmEffort')}</span>
+                            <select
+                              value={value.classifierEffort ?? ''}
+                              disabled={readonly || receiverSource !== 'host'}
+                              style={controlStyle}
+                              title={t('card.llmEffortHint')}
+                              onChange={(event) => { void scope.set('classifierEffort', event.currentTarget.value) }}
+                            >
+                              <option value="">{t('card.llmEffortHost')}</option>
+                              <option value="off">off</option>
+                              <option value="low">low</option>
+                              <option value="medium">medium</option>
+                              <option value="high">high</option>
+                            </select>
                           </label>
                           <label style={fieldStyle}>
                             <span style={fieldLabelStyle}>{t('card.llmKey')}</span>

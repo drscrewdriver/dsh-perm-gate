@@ -122,6 +122,20 @@ export interface CompileOptions {
 }
 
 const VALID_ACTIONS: readonly RuleAction[] = ['allow', 'ask', 'deny']
+
+/**
+ * Coerce a configuration-supplied value into a decision action, fail-closed.
+ *
+ * The host hands `.volatile()` fields to `apply` as **live refs**, and the runtime
+ * options are built by spreading that config. A ref that reaches the ruleset
+ * un-unwrapped is not one of the three literals, so every deny/ask branch in the
+ * runtime misses it and the call falls through to allow — an ask the user
+ * configured, silently skipped. Anything unrecognised therefore becomes `ask`:
+ * the conservative action, never a bypass (issue #6).
+ */
+export function coerceRuleAction(value: unknown, fallback: RuleAction = 'ask'): RuleAction {
+  return (VALID_ACTIONS as readonly unknown[]).includes(value) ? value as RuleAction : fallback
+}
 const PATH_CANDIDATE_KEYS: readonly string[] = [
   'path', 'paths', 'file', 'files', 'file_path', 'dir', 'directory', 'directories',
   'cwd', 'workspace', 'root', 'target', 'targets', 'output',

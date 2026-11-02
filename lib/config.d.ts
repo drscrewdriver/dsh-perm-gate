@@ -22,6 +22,8 @@ export declare function dataDirReady(dataDir: string): boolean;
  * applies `defaultAction`), so the fallback never fails the plugin load.
  */
 export declare function resolveRulesFile(configured: string | undefined, dataDir: string): string;
+/** Reasoning effort the host reviewer may request; empty = let the host decide. */
+export type ClassifierEffort = '' | 'off' | 'low' | 'medium' | 'high';
 export interface PermGateConfig {
     /** Absolute or `./`-relative path to the YAML permissions document. */
     readonly rulesFile?: string;
@@ -34,7 +36,19 @@ export interface PermGateConfig {
     /** Enable the optional LLM semantic classifier (P3). Default false. */
     readonly classifierEnabled?: boolean;
     readonly classifierEndpoint?: string;
+    /**
+     * Model id for the llmAssist receiver. Unset in host mode means **inherit the
+     * host model-group selection** — an inherited default here (the old
+     * `deepseek-chat`) pinned the reviewer to an unrelated model while the provider
+     * followed the host (issue #8). Custom-endpoint mode still falls back to
+     * `deepseek-chat` at request time.
+     */
     readonly classifierModel?: string;
+    /**
+     * Reasoning effort for host reviews (`off` | `low` | `medium` | `high`).
+     * Empty omits the field so the host model configuration decides (issue #8).
+     */
+    readonly classifierEffort?: ClassifierEffort;
     readonly classifierApiKey?: string;
     /** Abort the llmAssist risk call after this many milliseconds. Default 20000. */
     readonly riskTimeoutMs?: number;
@@ -483,7 +497,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     caseInsensitivePaths: z<boolean, boolean, "defined">;
     classifierEnabled: z<boolean, boolean, "defined">;
     classifierEndpoint: z<string, string, "plain">;
-    classifierModel: z<string, string, "defined">;
+    classifierModel: z<string, string, "plain">;
+    classifierEffort: z<"" | "off" | "low" | "medium" | "high", "" | "off" | "low" | "medium" | "high", "defined">;
     classifierApiKey: z<string, string, "plain">;
     riskTimeoutMs: z<number, number, "defined">;
     riskLearning: z<boolean, boolean, "defined">;
@@ -557,7 +572,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     sandboxEnabled: z<boolean, boolean, "defined">;
     sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "defined">;
     sandboxProxy: z<string, string, "defined">;
-    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "defined">;
+    sandboxLoopback: z<"off" | "exempt", "off" | "exempt", "defined">;
     rules: z<RulesConfig>;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
@@ -568,7 +583,8 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     caseInsensitivePaths: z<boolean, boolean, "defined">;
     classifierEnabled: z<boolean, boolean, "defined">;
     classifierEndpoint: z<string, string, "plain">;
-    classifierModel: z<string, string, "defined">;
+    classifierModel: z<string, string, "plain">;
+    classifierEffort: z<"" | "off" | "low" | "medium" | "high", "" | "off" | "low" | "medium" | "high", "defined">;
     classifierApiKey: z<string, string, "plain">;
     riskTimeoutMs: z<number, number, "defined">;
     riskLearning: z<boolean, boolean, "defined">;
@@ -642,7 +658,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     sandboxEnabled: z<boolean, boolean, "defined">;
     sandboxMode: z<"read-only" | "workspace-write", "read-only" | "workspace-write", "defined">;
     sandboxProxy: z<string, string, "defined">;
-    sandboxLoopback: z<"exempt" | "off", "exempt" | "off", "defined">;
+    sandboxLoopback: z<"off" | "exempt", "off" | "exempt", "defined">;
     rules: z<RulesConfig>;
     watch: z<boolean, boolean, "defined">;
     watchDebounceMs: z<number, number, "defined">;
@@ -650,12 +666,12 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */
 export declare function resolveVolatileConfig(config: object): Record<string, unknown>;
-export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>> & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'> & {
+export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>> & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierEffort' | 'classifierApiKey' | 'learningFile' | 'eventsFile'> & {
     readonly permissiveStrategies: PermissiveStrategies;
     readonly gatePresets: readonly string[];
 };

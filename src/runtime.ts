@@ -30,6 +30,7 @@ import { executableVariants, normalizeCommandText } from './command-normalize.js
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
 import { chatCompletion } from './classifier.js'
 import {
+  coerceRuleAction,
   compileDocument,
   compileRulesObject,
   documentHash,
@@ -246,6 +247,13 @@ interface PendingAsk {
 }
 
 export interface PermGateRuntimeOptions extends PermGateConfig {
+  /**
+   * Live read of the root `defaultAction`. The host hands `.volatile()` fields to
+   * `apply` as refs, so the value spread into these options may be a ref object —
+   * read through this hook at (re)compile time instead, and let
+   * `coerceRuleAction` refuse anything that is not a literal action (issue #6).
+   */
+  readonly readDefaultAction?: () => unknown
   /** Workspace root for chain resolution. Defaults to process.cwd(). */
   readonly cwd?: string
   readonly onRulesChanged?: (ruleset: CompiledRuleset) => void
@@ -292,8 +300,13 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * Defaults to on (`config.scriptReview`).
    */
   readonly readScriptReview?: () => boolean
-  /** Optional live source of the llmAssist classifier setup. */
+  /** Optional live source of the llmAssist receiver setup (endpoint/model/secret/timeout). */
   readonly readClassifyConfig?: () => ClassifierConfig
+  /**
+   * Optional live source of the host-review reasoning effort. Undefined/empty
+   * omits the field entirely — see {@link hostEffort} (issue #8).
+   */
+  readonly readClassifyEffort?: () => string | undefined
   /**
    * Optional live receiver source: `'custom'` (an OpenAI-compatible endpoint,
    * default) or `'host'` (the DSH host `llm` service — the model-group setup
@@ -677,9 +690,17 @@ export class PermGateRuntime {
 
   private compileInline(options: PermGateRuntimeOptions): CompiledRuleset {
     const empty: CompiledRuleset = {
-      defaultAction: options.defaultAction ?? 'ask',
+      defaultAction: this.effectiveDefaultAction(options),
       deny: [], allow: [], ask: [],
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
+    }
+
+    // Every other path yields a ruleset whose default came from a document; a
+    // document is validated, but the action is still coerced so one bad source
+    // can never hand the runtime an action it has no branch for.
+    const settle = (rs: CompiledRuleset): CompiledRuleset => {
+      const action = coerceRuleAction(rs.defaultAction)
+      return action === rs.defaultAction ? rs : { ...rs, defaultAction: action }
     }
 
     // Settings-first (dual-source): a configured `dsh-perm-gate-rules`
@@ -691,13 +712,13 @@ export class PermGateRuntime {
     if (settingsDoc !== undefined) {
       const hash = documentHash(JSON.stringify(settingsDoc))
       const hit = this.cache.get(hash)
-      if (hit !== undefined) return hit
+      if (hit !== undefined) return settle(hit)
       const compiled = compileRulesObject(settingsDoc, {
         maxGlobStars: 2,
         caseInsensitivePaths: options.caseInsensitivePaths ?? true,
       })
       this.cache.set(hash, compiled)
-      return compiled
+      return settle(compiled)
     }
 
     // Chain mode: when searchUp is enabled, use the multi-file chain resolver.
@@ -705,7 +726,7 @@ export class PermGateRuntime {
       const cwd = options.cwd ?? process.cwd()
       const rulesFile = options.rulesFile !== undefined ? options.rulesFile : 'rules.yml'
       try {
-        return resolveRuleChain(cwd, {
+        return settle(resolveRuleChain(cwd, {
           rulesFile,
           searchUp: true,
           fallbackPath: options.fallbackPath,
@@ -714,7 +735,7 @@ export class PermGateRuntime {
         }, {
           maxGlobStars: 2,
           caseInsensitivePaths: options.caseInsensitivePaths ?? true,
-        })
+        }))
       } catch {
         return empty
       }
@@ -725,14 +746,28 @@ export class PermGateRuntime {
     if (text === '') return empty
     const hash = documentHash(text)
     const hit = this.cache.get(hash)
-    if (hit !== undefined) return hit
+    if (hit !== undefined) return settle(hit)
     const doc = parsePermissionsDocument(text)
     const compiled = compileDocument(doc, {
       maxGlobStars: 2,
       caseInsensitivePaths: options.caseInsensitivePaths ?? true,
     })
     this.cache.set(hash, compiled)
-    return compiled
+    return settle(compiled)
+  }
+
+  /**
+   * The root default action, read live (the config field is volatile) and
+   * validated. An unrecognised value — most often a `.volatile()` ref that
+   * reached the options un-unwrapped — fails **closed** to `ask`: previously it
+   * became the ruleset default verbatim, both the deny and ask branches missed
+   * it, and every unmatched call was allowed without review (issue #6).
+   */
+  private effectiveDefaultAction(options: PermGateRuntimeOptions): RuleAction {
+    const raw = options.readDefaultAction !== undefined
+      ? options.readDefaultAction()
+      : options.defaultAction
+    return coerceRuleAction(raw)
   }
 
   /** Reload rules from disk (HMR); on failure keeps the previous rules. */
@@ -1070,6 +1105,16 @@ export class PermGateRuntime {
   private hostModel(): HostModelSelection | undefined {
     const sel = this.options.readHostModel?.()
     return sel !== undefined && sel.provider !== '' && sel.model !== '' ? sel : undefined
+  }
+
+  /**
+   * Reasoning effort for host reviews. `undefined` **omits** the field so the host
+   * model configuration decides; the old hardcoded `'off'` was rejected by host
+   * validation for models whose advertised efforts exclude it (issue #8).
+   */
+  private hostEffort(): string | undefined {
+    const effort = this.options.readClassifyEffort?.()
+    return typeof effort === 'string' && effort !== '' ? effort : undefined
   }
 
   private livePermissive(): PermissiveState {
@@ -1876,7 +1921,7 @@ export class PermGateRuntime {
     } else if (useHost) {
       const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
       risk = await classifyRiskWith(
-        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000),
+        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000, { effort: this.hostEffort() }),
         req,
       )
     } else {
@@ -2091,7 +2136,7 @@ export class PermGateRuntime {
     } else if (useHost) {
       const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
       risk = await classifyRiskWith(
-        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000),
+        (system, user) => completeViaHost(this.options.hostLlm as HostLlmLike, selection, system, user, cfg?.timeoutMs ?? 20_000, { effort: this.hostEffort() }),
         req,
       )
     } else {
@@ -2483,7 +2528,7 @@ export class PermGateRuntime {
       if (this.liveClassifySource() === 'host') {
         if (this.options.hostLlm === undefined) return done(false, 'host llm service unavailable')
         const selection = this.hostModel() ?? DEFAULT_HOST_MODEL
-        const r = await completeViaHost(this.options.hostLlm, selection, 'Reply with exactly: OK', 'ping', cfg?.timeoutMs ?? 20_000)
+        const r = await completeViaHost(this.options.hostLlm, selection, 'Reply with exactly: OK', 'ping', cfg?.timeoutMs ?? 20_000, { effort: this.hostEffort() })
         return r.ok ? done(true, `${selection.provider}/${selection.model} → ${r.content.trim().slice(0, 60) || 'ok'}`) : done(false, r.error ?? 'host llm call failed')
       }
       if (cfg?.endpoint === undefined || cfg.endpoint === '' || cfg?.model === undefined || cfg.model === '') {

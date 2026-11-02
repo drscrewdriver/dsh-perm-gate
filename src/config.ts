@@ -72,6 +72,9 @@ export function resolveRulesFile(configured: string | undefined, dataDir: string
   return typeof configured === 'string' && configured !== '' ? configured : join(dataDir, 'rules.yml')
 }
 
+/** Reasoning effort the host reviewer may request; empty = let the host decide. */
+export type ClassifierEffort = '' | 'off' | 'low' | 'medium' | 'high'
+
 export interface PermGateConfig {
   /** Absolute or `./`-relative path to the YAML permissions document. */
   readonly rulesFile?: string
@@ -84,7 +87,19 @@ export interface PermGateConfig {
   /** Enable the optional LLM semantic classifier (P3). Default false. */
   readonly classifierEnabled?: boolean
   readonly classifierEndpoint?: string
+  /**
+   * Model id for the llmAssist receiver. Unset in host mode means **inherit the
+   * host model-group selection** — an inherited default here (the old
+   * `deepseek-chat`) pinned the reviewer to an unrelated model while the provider
+   * followed the host (issue #8). Custom-endpoint mode still falls back to
+   * `deepseek-chat` at request time.
+   */
   readonly classifierModel?: string
+  /**
+   * Reasoning effort for host reviews (`off` | `low` | `medium` | `high`).
+   * Empty omits the field so the host model configuration decides (issue #8).
+   */
+  readonly classifierEffort?: ClassifierEffort
   readonly classifierApiKey?: string
   /** Abort the llmAssist risk call after this many milliseconds. Default 20000. */
   readonly riskTimeoutMs?: number
@@ -606,7 +621,8 @@ export const Config = z.object({
   caseInsensitivePaths: vol(z.boolean().default(true)),
   classifierEnabled: vol(z.boolean().default(false)),
   classifierEndpoint: vol(z.string()),
-  classifierModel: vol(z.string().default('deepseek-chat')),
+  classifierModel: vol(z.string()),
+  classifierEffort: vol(z.union(['', 'off', 'low', 'medium', 'high'] as const).default('')),
   classifierApiKey: vol(z.string()),
   riskTimeoutMs: vol(z.number().min(1000).default(20_000)),
   riskLearning: vol(z.boolean().default(true)),
@@ -694,7 +710,7 @@ export type VolatileRef<T> = Volatile<T>
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
 export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
-  'classifierModel', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
+  'classifierModel', 'classifierEffort', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
   'permissive', 'yolo', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
@@ -725,7 +741,7 @@ export function resolveVolatileConfig(config: object): Record<string, unknown> {
 }
 
 export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
-  & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
+  & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierEffort' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
   & { readonly permissiveStrategies: PermissiveStrategies; readonly gatePresets: readonly string[] }
 
 export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConfig {
@@ -742,7 +758,9 @@ export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConf
     caseInsensitivePaths: parsed.caseInsensitivePaths ?? true,
     classifierEnabled: parsed.classifierEnabled ?? false,
     classifierEndpoint: parsed.classifierEndpoint,
-    classifierModel: parsed.classifierModel ?? 'deepseek-chat',
+    // Not defaulted on purpose: unset means "inherit the host model" (issue #8).
+    classifierModel: parsed.classifierModel,
+    classifierEffort: parsed.classifierEffort ?? '',
     classifierApiKey: parsed.classifierApiKey,
     riskTimeoutMs: parsed.riskTimeoutMs ?? 20_000,
     riskLearning: parsed.riskLearning ?? false,

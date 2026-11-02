@@ -131,6 +131,13 @@ interface PendingAsk {
     readonly doubtKinds?: readonly string[];
 }
 export interface PermGateRuntimeOptions extends PermGateConfig {
+    /**
+     * Live read of the root `defaultAction`. The host hands `.volatile()` fields to
+     * `apply` as refs, so the value spread into these options may be a ref object —
+     * read through this hook at (re)compile time instead, and let
+     * `coerceRuleAction` refuse anything that is not a literal action (issue #6).
+     */
+    readonly readDefaultAction?: () => unknown;
     /** Workspace root for chain resolution. Defaults to process.cwd(). */
     readonly cwd?: string;
     readonly onRulesChanged?: (ruleset: CompiledRuleset) => void;
@@ -177,8 +184,13 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      * Defaults to on (`config.scriptReview`).
      */
     readonly readScriptReview?: () => boolean;
-    /** Optional live source of the llmAssist classifier setup. */
+    /** Optional live source of the llmAssist receiver setup (endpoint/model/secret/timeout). */
     readonly readClassifyConfig?: () => ClassifierConfig;
+    /**
+     * Optional live source of the host-review reasoning effort. Undefined/empty
+     * omits the field entirely — see {@link hostEffort} (issue #8).
+     */
+    readonly readClassifyEffort?: () => string | undefined;
     /**
      * Optional live receiver source: `'custom'` (an OpenAI-compatible endpoint,
      * default) or `'host'` (the DSH host `llm` service — the model-group setup
@@ -389,6 +401,14 @@ export declare class PermGateRuntime {
     private readonly cleared;
     constructor(options?: PermGateRuntimeOptions);
     private compileInline;
+    /**
+     * The root default action, read live (the config field is volatile) and
+     * validated. An unrecognised value — most often a `.volatile()` ref that
+     * reached the options un-unwrapped — fails **closed** to `ask`: previously it
+     * became the ruleset default verbatim, both the deny and ask branches missed
+     * it, and every unmatched call was allowed without review (issue #6).
+     */
+    private effectiveDefaultAction;
     /** Reload rules from disk (HMR); on failure keeps the previous rules. */
     reload(): boolean;
     get auditEntries(): readonly AuditEntry[];
@@ -462,6 +482,12 @@ export declare class PermGateRuntime {
     private liveClassifySource;
     /** The host model-group selection, or undefined when unusable. */
     private hostModel;
+    /**
+     * Reasoning effort for host reviews. `undefined` **omits** the field so the host
+     * model configuration decides; the old hardcoded `'off'` was rejected by host
+     * validation for models whose advertised efforts exclude it (issue #8).
+     */
+    private hostEffort;
     private livePermissive;
     /** Whether YOLO mode is live (never human-confirm). */
     isYolo(): boolean;

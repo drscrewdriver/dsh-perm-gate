@@ -47,12 +47,29 @@ export interface HostModelSelection {
 }
 /** Fallback matching dsh-approval-gate's resolveModel default. */
 export declare const DEFAULT_HOST_MODEL: HostModelSelection;
+/** Optional knobs for one host completion. */
+export interface HostCallOptions {
+    /**
+     * Reasoning effort to request. Empty/undefined **omits** the field entirely so
+     * the host's own model configuration decides — a hardcoded value is rejected by
+     * host validation when the selected model does not advertise it (issue #8).
+     */
+    readonly effort?: string;
+    readonly maxTokens?: number;
+}
 /**
  * One completion through the host `llm` service with an abort timeout.
+ *
+ * Only **final text** is the answer: `reasoning-delta` chunks are the model's
+ * private working, never a verdict, and a stream that ends on `max-tokens` (or
+ * any other truncating finish) is a failure rather than a short answer. Both
+ * used to be accepted, which let a reasoning-only or cut-off stream reach the
+ * verdict parser and be read as `safe` (issue #7).
+ *
  * Resolves `{ ok: true, content }` with the accumulated assistant text, or
- * `{ ok: false, error }` on stream failure, abort, or an empty answer.
+ * `{ ok: false, error }` on stream failure, abort, truncation, or an empty answer.
  */
-export declare function completeViaHost(hostLlm: HostLlmLike, selection: HostModelSelection, system: string, user: string, timeoutMs: number): Promise<{
+export declare function completeViaHost(hostLlm: HostLlmLike, selection: HostModelSelection, system: string, user: string, timeoutMs: number, opts?: HostCallOptions): Promise<{
     ok: true;
     content: string;
 } | {

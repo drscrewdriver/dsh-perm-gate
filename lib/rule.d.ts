@@ -86,6 +86,17 @@ export interface CompileOptions {
     readonly maxGlobStars?: number;
     readonly caseInsensitivePaths?: boolean;
 }
+/**
+ * Coerce a configuration-supplied value into a decision action, fail-closed.
+ *
+ * The host hands `.volatile()` fields to `apply` as **live refs**, and the runtime
+ * options are built by spreading that config. A ref that reaches the ruleset
+ * un-unwrapped is not one of the three literals, so every deny/ask branch in the
+ * runtime misses it and the call falls through to allow — an ask the user
+ * configured, silently skipped. Anything unrecognised therefore becomes `ask`:
+ * the conservative action, never a bypass (issue #6).
+ */
+export declare function coerceRuleAction(value: unknown, fallback?: RuleAction): RuleAction;
 export declare class RuleError extends Error {
     constructor(message: string);
 }

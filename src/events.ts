@@ -945,7 +945,13 @@ export function registerHealthRoute(server: unknown, provider: { check(): Promis
         return
       }
       provider.check().then(
-        (result) => json(res, 200, { ...result, ok: true }),
+        // The check's own `ok` decides the answer. Spelling `ok: true` after the
+        // spread overwrote a resolved `{ ok: false }` and reported a dead review
+        // connection as healthy (issue #8).
+        (result) => json(res, 200, {
+          ...(result as object),
+          ok: (result as { ok?: unknown } | null | undefined)?.ok === true,
+        }),
         (e: unknown) => json(res, 500, { ok: false, error: String((e as Error)?.message ?? e) }),
       )
     },

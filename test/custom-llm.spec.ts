@@ -126,12 +126,13 @@ describe('custom LLM review path (real HTTP, no injected hook)', () => {
     expect(r.pendingAskCount()).toBe(1)
   })
 
-  it('parses a plain-text "safe" from non-conforming custom models', async () => {
+  it('keeps the ask for a non-conforming plain-text answer (issue #7)', async () => {
     const { server, base } = await startLlmApi(() => ({ status: 200, raw: 'SAFE - this is a read-only plan' }))
     try {
       const r = runtimeWith(base)
       const ask = r.decideExecution(EXEC)
-      expect(await r.refineAsk(EXEC, ask as never)).toBeUndefined()
+      // A bare keyword is not a protocol verdict: no auto-allow, the human decides.
+      expect((await r.refineAsk(EXEC, ask as never))?.kind).toBe('ask')
     } finally {
       server.close()
     }
