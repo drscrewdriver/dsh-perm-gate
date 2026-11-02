@@ -381,7 +381,9 @@ Three switches change **who decides**, seven keys change **what is known**. They
 
 - `yolo` (the `permissive-yolo` tier) — never raises a confirmation. A dangerous ask
   (irreversible, unlearnable, an unreadable payload, or a hard-risk verdict from the configured
-  reviewer) is blocked and the reason comes back to the agent as a `工具审核意见` message;
+  reviewer) is blocked and the reason comes back to the agent as a `工具审核意见` message on
+  the **steering lane** (`next-step`: beside the refused tool result, at the same turn's
+  next step) rather than the user's input queue;
   everything else runs. With no reviewer in seat the tier does not quietly allow — the mechanical
   screen settles it and the event is recorded as `yolo-allow-no-reviewer`, because a tier that
   advertises a model must not report one it never got.

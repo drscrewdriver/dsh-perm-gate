@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **拦截意见不再冒充用户消息**：被拦后给主模型的 `工具审核意见` 曾以 `mode:'queue'` 投到 next-turn——那是用户的输入队列，意见投进去会在 input-traffic 等待区里像用户自己排的一条，并与待发消息抢队列，且要等整个回合结束才送达（模型多反刍一轮）。现在交由 `buildBlockNoteSender` 投递：首选 `agent.inject()`（next-step 带内、不唤醒 driver，贴着被拒的 tool 结果在下一个 pre-step 送达）并标上自有 `source.kind='perm-gate'`，因为宿主的语义里只有 `source.kind==='user'`（带 `rpcId`）才是“人说的话”，其余一律按注入上下文渲染；没有活 agent 时才回退到 steer 车道（`session.prompt mode:'steer'`），绝不静默降级成 `followup`。yolo / 机械直通 / 降级审查 / 确定性 deny 四条拦截路径统一如此；评审页「撤销此改动」仍走 next-turn（那是人想发的一句话）。
+- 配套：`dsh-input-traffic` 同步把「插话中」限定为真人插话（`source.kind === 'user'`），宿主自有通知（如 `user-approval` 的审批策略变更）与第三方意见不再占位等待区；没带 `source` 的旧行仍照常显示，不会误伤真队列。
+
 ## 5.4.0 (2026-10-30)
 
 - 凭据类型阶梯：七个内置族（ssh / cloud / package / gitcreds / env / cli / db），每类四档 deny / ask（默认）/ readonly / readwrite。档位状态就住在规则文档本身——每类一条 `[deny-rule:cred.<family>]` 行（分区 + enabled）加成对的 volatile `credWriteExemptFamilies` 清单；设置卡经 `GET/POST /api/dsh-perm-gate/cred` 一条 update 成对读写，无本地镜像、无半态。readwrite 需卡内二次确认，且只退让 P0 的一条判据（凭据 store 写）；根盘、受保护路径、.dsh、外发在任何档位不让；自定义 credentialPaths 永不参与写豁免。
