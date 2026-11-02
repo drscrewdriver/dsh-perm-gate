@@ -42,6 +42,18 @@ export type Reversibility =
   /** reversible or read-only (list, diff, build, local commit, workspace edit) */
   | 'R'
 
+/**
+ * Why a payload could not be inspected.
+ *
+ * `consequence` — what will run is invisible (encoded blob, unreadable script body,
+ * prose with no parseable program): no tier may treat this as "probably fine".
+ * `location` — the act itself is visible and ordinary, only its target could not be
+ * pinned down (a bare no-argument call, a script outside the workspace whose body was
+ * not read). The distinction exists so a tier can relax the second without ever
+ * relaxing the first.
+ */
+export type OpaqueKind = 'location' | 'consequence'
+
 /** What the call is aimed at. */
 export type TargetKind = 'read' | 'write' | 'delete' | 'remote-write' | 'exec-external' | 'unknown'
 
@@ -111,6 +123,14 @@ export interface AskContext extends AskContextSource {
   readonly unlearnable: boolean
   /** Read-only commands that need no human attention at all. */
   readonly readOnly: boolean
+  /** Set only when `targetResolvable` is false: see {@link OpaqueKind}. */
+  readonly opaqueKind?: OpaqueKind
+  /**
+   * Whether every target this call names resolves inside `workspaceRoot`.
+   * `false`/absent means "cannot prove it stays inside", so a tier that relaxes
+   * location-opacity must not use it.
+   */
+  readonly workspaceBound?: boolean
 }
 
 /** Verbs that only look. */
@@ -145,6 +165,17 @@ const RECOVERABLE_EXTERNAL = /\b(git\s+push|gh\s+pr\s+create|gh\s+api\b|--method
 
 /** Encoded or otherwise uninspectable payload. */
 const OPAQUE = /(?:-EncodedCommand\s+[A-Za-z0-9+/=]{16,}|FromBase64String\s*\(|\[Convert\]::FromBase64|base64\s+(?:-d|--decode)|eval\s*\(\s*atob)/i
+
+/**
+ * "The code exists, and nobody could see it."
+ *
+ * `missing` and `not-a-file` are deliberately **not** in this set: nothing will execute,
+ * so holding the call would only teach people to ignore the gate (measured: `python
+ * scripts/build.py` for a file that is simply not there came out `U`). A file that is
+ * there but unreadable — too large, binary, permission-denied — is invisible code, and
+ * an invisible body keeps the call opaque wherever the script lives.
+ */
+const INVISIBLE_SCRIPT_BODY: ReadonlySet<string> = new Set(['too-large', 'binary', 'unreadable'])
 
 /**
  * A command segment whose head cannot name an executable.
@@ -183,6 +214,23 @@ function outsideWorkspace(text: string, root: string | undefined): boolean {
 }
 
 /**
+ * Whether one path resolves inside `root`, lexically.
+ *
+ * Deliberately dependency-free (no `node:path`) and deliberately **case-sensitive**:
+ * this module is also consumed by the browser half, and a wrong "yes" here relaxes a
+ * safety screen, so an unprovable case must answer `false`. Symbol links and `..`
+ * escapes are left to `outsideWorkspace`/`irreversible.ts`; callers that relax opacity
+ * also refuse delete/remote-write outright.
+ */
+function withinRoot(root: string | undefined, p: string): boolean {
+  if (root === undefined || root === '') return false
+  const norm = (s: string): string => s.replace(/[\\/]+/g, '/').replace(/\/+$/, '')
+  const r = norm(root)
+  const t = norm(p)
+  return t === r || t.startsWith(`${r}/`)
+}
+
+/**
  * Is a script this call runs **not** visible in the workspace?
  *
  * `#56` (`python E:\other\_extract.py`) is what the U tier exists for: the code
@@ -217,6 +265,8 @@ interface Inspection {
   readonly readOnly: boolean
   readonly irreversible: boolean
   readonly unlearnable: boolean
+  readonly opaqueKind?: OpaqueKind
+  readonly workspaceBound?: boolean
 }
 
 /**
@@ -278,10 +328,19 @@ function inspect(source: AskContextSource): Inspection {
   const judged = [cmd, ...decoded, ...bodyStatements(read.map((c) => `${c.ref}\n${c.body}`))]
   const irreversible = judged.some((t) => irreversibleReason(t) !== undefined)
   const unlearnable = judged.some((t) => neverClearReason(t) !== undefined)
+  // Lexical containment of everything this call names: the fact a tier needs before it
+  // may relax location-opacity. Empty `files` counts as "nothing outside", while a
+  // missing root can never be proven, so it stays false.
+  const files = source.files ?? []
+  const workspaceBound = source.workspaceRoot !== undefined && source.workspaceRoot !== ''
+    && files.every((f) => withinRoot(source.workspaceRoot, f))
+    && !outsideWorkspace(cmd, source.workspaceRoot)
 
   if (cmd.trim() === '{}') {
-    // A tool invoked with no arguments at all: nothing to read, nothing to trust.
-    return { kind: 'unknown', resolvable: false, readOnly: false, irreversible, unlearnable }
+    // A tool invoked with no arguments at all: nothing to read, nothing to trust. The
+    // *location* is what is missing here, not the consequence — the call itself has no
+    // payload to hide behind, so a tier may relax this while still refusing encoded blobs.
+    return { kind: 'unknown', resolvable: false, readOnly: false, irreversible, unlearnable, opaqueKind: 'location', workspaceBound }
   }
   // Read-only means every stage of the pipeline only looks: a known read verb at the
   // head of each segment, nothing but reshaping filters after the pipes, and no
@@ -304,16 +363,30 @@ function inspect(source: AskContextSource): Inspection {
   const covered = source.scriptsCovered === true && read.length > 0
   const execExternal = runner && !covered && (outsideWorkspace(cmd, source.workspaceRoot) || unseenScript(cmd, source.workspaceRoot))
   const unnamed = text !== '' && unnamedOperation(text)
-  const opaque = OPAQUE.test(cmd) || execExternal
+  // Two different defects shared the old single boolean: invisible *content* and an
+  // unpinnable *location*. Only the second is a candidate for a tier-level relaxation
+  // (`consequence` still means "nobody saw what will run"). A script whose body could
+  // not be attached is invisible content **wherever it lives** — the comment above has
+  // always claimed one unreadable file keeps the call opaque, and this is the line that
+  // makes that true for a workspace-internal script too. A missing or directory-shaped
+  // target is excluded: nothing runs, so it is not invisible code.
+  const unreadableBody = (source.scriptContents ?? []).some(
+    (c) => c.unreadable !== undefined && INVISIBLE_SCRIPT_BODY.has(c.unreadable),
+  )
+  const opaque = OPAQUE.test(cmd) || execExternal || unreadableBody
+  const opaqueKind: OpaqueKind | undefined =
+    OPAQUE.test(cmd) || unnamed || unreadableBody ? 'consequence'
+      : execExternal ? 'location'
+        : undefined
 
-  if (irreversible) return { kind: 'delete', resolvable: !opaque && !unnamed, readOnly: false, irreversible, unlearnable }
+  if (irreversible) return { kind: 'delete', resolvable: !opaque && !unnamed, readOnly: false, irreversible, unlearnable, opaqueKind, workspaceBound }
   if (opaque || unnamed) {
-    return { kind: execExternal ? 'exec-external' : 'unknown', resolvable: false, readOnly: false, irreversible, unlearnable }
+    return { kind: execExternal ? 'exec-external' : 'unknown', resolvable: false, readOnly: false, irreversible, unlearnable, opaqueKind, workspaceBound }
   }
-  if (RECOVERABLE_EXTERNAL.test(cmd)) return { kind: 'remote-write', resolvable: true, readOnly: false, irreversible, unlearnable }
-  if (/\b(?:rm|del|Remove-Item|rmdir|Erase)\b/i.test(first)) return { kind: 'delete', resolvable: true, readOnly: false, irreversible, unlearnable }
-  if (readOnly) return { kind: 'read', resolvable: true, readOnly: true, irreversible, unlearnable }
-  return { kind: 'write', resolvable: true, readOnly: false, irreversible, unlearnable }
+  if (RECOVERABLE_EXTERNAL.test(cmd)) return { kind: 'remote-write', resolvable: true, readOnly: false, irreversible, unlearnable, workspaceBound }
+  if (/\b(?:rm|del|Remove-Item|rmdir|Erase)\b/i.test(first)) return { kind: 'delete', resolvable: true, readOnly: false, irreversible, unlearnable, workspaceBound }
+  if (readOnly) return { kind: 'read', resolvable: true, readOnly: true, irreversible, unlearnable, workspaceBound }
+  return { kind: 'write', resolvable: true, readOnly: false, irreversible, unlearnable, workspaceBound }
 }
 
 /**
@@ -354,6 +427,8 @@ export function buildAskContext(source: AskContextSource): AskContext {
     readOnly: seen.readOnly,
     irreversible: seen.irreversible,
     unlearnable: seen.unlearnable,
+    ...(seen.opaqueKind === undefined ? {} : { opaqueKind: seen.opaqueKind }),
+    workspaceBound: seen.workspaceBound === true,
     reversibility: grade(seen),
   }
 }

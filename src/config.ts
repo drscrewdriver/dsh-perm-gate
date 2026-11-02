@@ -146,6 +146,11 @@ export interface PermGateConfig {
    */
   readonly yolo?: boolean
   /**
+   * YOLO only: relax the "target unpinnable" opaque signal. Never relaxes invisible
+   * content, deletes, remote writes, P0, credentials or irreversible acts. Default false.
+   */
+  readonly yoloWorkspaceExempt?: boolean
+  /**
    * `safenet-pass` — the switch behind the `permissive-mech` tier: the deterministic
    * mechanical screen plus the preset opinions take over the ask. Named danger is blocked
    * and fed back to the main LLM, everything the nets cannot condemn runs. No human prompt
@@ -636,6 +641,13 @@ export const Config = z.object({
   grantMaxUses: vol(z.number().min(1).default(1)),
   permissive: vol(z.boolean().default(false)),
   yolo: vol(z.boolean().default(false)),
+  /**
+   * YOLO only: stop treating "the target could not be pinned down" as a danger signal
+   * (no-argument tool calls, a script outside the workspace whose body was not read).
+   * Invisible *content* — encoded payloads, unreadable bodies, prose — is still blocked,
+   * and delete/remote-write never qualify. Default false keeps the 5.4.3 behaviour.
+   */
+  yoloWorkspaceExempt: vol(z.boolean().default(false)),
   rulesFallback: vol(z.boolean().default(false)),
   /**
    * Retired (2026-10-17): the per-preset mode table that briefly mapped
@@ -712,7 +724,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierEffort', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'yolo', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'yoloWorkspaceExempt', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

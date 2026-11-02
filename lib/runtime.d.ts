@@ -152,6 +152,12 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
     /** Optional live source of the YOLO tier switch (never human-confirm; block-on-danger). */
     readonly readYolo?: () => boolean;
     /**
+     * Optional live source of the YOLO workspace exemption: stop treating "the target could
+     * not be pinned down" as a danger signal. Only `permissive-yolo` reads it, and only a
+     * *location*-kind opacity qualifies — invisible content, deletes and remote writes never do.
+     */
+    readonly readYoloWorkspaceExempt?: () => boolean;
+    /**
      * Optional live source of the degraded-review switch: with no reviewer able to grade
      * an ask, decide on the deterministic nets instead of parking it on a human.
      */
@@ -491,6 +497,18 @@ export declare class PermGateRuntime {
     private livePermissive;
     /** Whether YOLO mode is live (never human-confirm). */
     isYolo(): boolean;
+    /**
+     * Whether the YOLO tier should stop blocking on "target unpinnable" alone.
+     * Default false: 5.4.3 behaviour, one switch away.
+     */
+    private liveYoloWorkspaceExempt;
+    /**
+     * The one narrowing the exemption is allowed to make: the call is ordinary and visible,
+     * only its *location* was unpinnable, and everything it names is inside the workspace.
+     * Delete, remote write, invisible content, P0/irreversible and unlearnable acts are all
+     * refused here — this method can only *skip* the opaque signal, never clear a danger.
+     */
+    private yoloExemptsLocation;
     /** Whether degraded review is live (no reviewer ⇒ rule-only gate). */
     isRulesFallback(): boolean;
     /** Whether script-body review is live (default on). */

@@ -27,6 +27,11 @@ export interface PermissiveCardValue {
   /** Permissive tier: the human handles what the grader flags. */
   /** YOLO tier (`permissive-yolo`): the grader answers in the person's place, never asks. */
   yolo?: boolean
+  /**
+   * YOLO only: stop treating "the target could not be pinned down" as a danger signal.
+   * Invisible content, deletes and remote writes stay blocked; default off.
+   */
+  yoloWorkspaceExempt?: boolean
   /** Safenet-pass tier (`permissive-mech`): the mechanical screen takes over asks. */
   safenetPass?: boolean
   /** Safenet-ask tier (`permissive-snet`): mechanical screen, still asks, no grader. */
@@ -808,6 +813,18 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       hint={t('card.yoloHint')}
                       onCommit={(next) => scope.set('yolo', next)}
                     />
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-yolo-exempt" style={{ fontSize: '12px' }}>
+                        {t('card.yoloExempt')}
+                      </label>
+                      <PillSwitch
+                        id="plugin-config-perm-gate-yolo-exempt"
+                        checked={value.yoloWorkspaceExempt === true}
+                        disabled={readonly}
+                        onCommit={(next) => scope.set('yoloWorkspaceExempt', next)}
+                      />
+                    </div>
+                    <p style={hintStyle}>{t('card.yoloExemptHint')}</p>
                     <TierRow
                       id="plugin-config-perm-gate-safenet-pass"
                       label={t('card.mode.pass')}

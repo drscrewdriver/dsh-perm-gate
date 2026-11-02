@@ -8,6 +8,17 @@ export type Reversibility =
  | 'C'
 /** reversible or read-only (list, diff, build, local commit, workspace edit) */
  | 'R';
+/**
+ * Why a payload could not be inspected.
+ *
+ * `consequence` — what will run is invisible (encoded blob, unreadable script body,
+ * prose with no parseable program): no tier may treat this as "probably fine".
+ * `location` — the act itself is visible and ordinary, only its target could not be
+ * pinned down (a bare no-argument call, a script outside the workspace whose body was
+ * not read). The distinction exists so a tier can relax the second without ever
+ * relaxing the first.
+ */
+export type OpaqueKind = 'location' | 'consequence';
 /** What the call is aimed at. */
 export type TargetKind = 'read' | 'write' | 'delete' | 'remote-write' | 'exec-external' | 'unknown';
 /**
@@ -73,6 +84,14 @@ export interface AskContext extends AskContextSource {
     readonly unlearnable: boolean;
     /** Read-only commands that need no human attention at all. */
     readonly readOnly: boolean;
+    /** Set only when `targetResolvable` is false: see {@link OpaqueKind}. */
+    readonly opaqueKind?: OpaqueKind;
+    /**
+     * Whether every target this call names resolves inside `workspaceRoot`.
+     * `false`/absent means "cannot prove it stays inside", so a tier that relaxes
+     * location-opacity must not use it.
+     */
+    readonly workspaceBound?: boolean;
 }
 /**
  * Freeze one call into an {@link AskContext}. Pure and side-effect free: it reads

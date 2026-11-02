@@ -335,6 +335,7 @@ In `cordis.yml`:
       llmAssist: false           # LLM classify first, human fallback on ask/failure
       trustEscalation: true      # a cleared call's own sandbox escalation needs no prompt
     yolo: false                  # unattended: never ask a human, block danger, run the rest
+    yoloWorkspaceExempt: false    # YOLO only: stop treating "target unpinnable" as danger (see below)
     rulesFallback: false         # no reviewer available => decide on the rule nets alone
     scriptReview: true           # attach the body of a script the call runs to the review
     credentialPaths: []          # long-tail secret paths, held to the `.ssh` standard
@@ -362,6 +363,31 @@ screen, and records `yolo-allow-no-reviewer` so the history cannot read as if a 
 All five tiers ship in the plugin's own profile patch, so they are in the picker on install —
 nothing to hand-edit. Presets outside `gatePresets` never reach any of this: the whole gate
 stands down there, so there is no ask to settle.
+
+### `yoloWorkspaceExempt` — the one thing YOLO may stop blocking on
+
+Off by default. It relaxes exactly one signal: **the target could not be pinned down**. A call
+whose *content* was never seen is still blocked, so the switch only affects the two shapes where
+the act itself is ordinary and only its location is missing — a tool invoked with no arguments at
+all, and a script outside the workspace whose body was never read.
+
+| what was missing | switch off | switch on |
+| --- | --- | --- |
+| no arguments to inspect (e.g. a directory-state tool) | block `opaque-payload` | **run** (reviewed, or mechanically when no reviewer) |
+| script outside the workspace, body not read | block `opaque-payload` | **run** |
+| encoded payload (`-EncodedCommand`, `FromBase64String`, …) | block | **block** |
+| script body attached as unreadable (too large / binary) | block | **block** |
+| script body missing, or the target is a directory (nothing will run) | ordinary layers | **unchanged** |
+| prose with no parseable program | block | **block** |
+| delete / remote write | handled by the ordinary layers | **unchanged** |
+| P0, credentials, `irreversible`/`neverClear` | deny | **unchanged** |
+
+Two more preconditions are checked before the signal is skipped: every target the call names must
+resolve inside the workspace, **following links** (a prefix-only match like `/work2` is not `/work`,
+and a link that points outside is refused; a path that cannot be resolved counts as outside), and
+the ordinary write/edit contract must be intact. Only `permissive-yolo` reads the switch; the other
+tiers ignore it. Allowed calls are recorded as `yolo-allow-opaque-location-exempt` (or
+`…-exempt-no-reviewer`), so an exemption can always be told apart from "the screen found nothing".
 
 
 `trustAutoAllow` is the baseline middle tier (rule-allow auto-passes). `alwaysConfirm` surfaces

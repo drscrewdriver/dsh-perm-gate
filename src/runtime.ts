@@ -25,6 +25,7 @@ import { ArtifactRegistry } from './path.js'
 import { classifyRisk, classifyRiskWith, graderNote, RISK_SYSTEM_PROMPT_VERSION, type RiskRequest, type RiskVerdict } from './risk.js'
 import { askDoubtKinds, buildAskContext, humanBrief, humanCardLine, humanCommand, toEventFields, toGraderPayload, type AskContext } from './ask-context.js'
 import { readScriptContents, scriptRefs, scriptsFullyCovered } from './script-review.js'
+import { pathsRealInsideWorkspace } from './workspace-bound.js'
 import { redactCommandText } from './redact.js'
 import { executableVariants, normalizeCommandText } from './command-normalize.js'
 import { completeViaHost, DEFAULT_HOST_MODEL, type HostLlmLike, type HostModelSelection } from './host-llm.js'
@@ -267,6 +268,12 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
   readonly readPermissive?: () => PermissiveState
   /** Optional live source of the YOLO tier switch (never human-confirm; block-on-danger). */
   readonly readYolo?: () => boolean
+  /**
+   * Optional live source of the YOLO workspace exemption: stop treating "the target could
+   * not be pinned down" as a danger signal. Only `permissive-yolo` reads it, and only a
+   * *location*-kind opacity qualifies — invisible content, deletes and remote writes never do.
+   */
+  readonly readYoloWorkspaceExempt?: () => boolean
   /**
    * Optional live source of the degraded-review switch: with no reviewer able to grade
    * an ask, decide on the deterministic nets instead of parking it on a human.
@@ -1126,6 +1133,36 @@ export class PermGateRuntime {
   /** Whether YOLO mode is live (never human-confirm). */
   isYolo(): boolean {
     return this.options.readYolo !== undefined ? this.options.readYolo() : (this.options.yolo ?? false)
+  }
+
+  /**
+   * Whether the YOLO tier should stop blocking on "target unpinnable" alone.
+   * Default false: 5.4.3 behaviour, one switch away.
+   */
+  private liveYoloWorkspaceExempt(): boolean {
+    return this.options.readYoloWorkspaceExempt !== undefined
+      ? this.options.readYoloWorkspaceExempt()
+      : (this.options.yoloWorkspaceExempt ?? false)
+  }
+
+  /**
+   * The one narrowing the exemption is allowed to make: the call is ordinary and visible,
+   * only its *location* was unpinnable, and everything it names is inside the workspace.
+   * Delete, remote write, invisible content, P0/irreversible and unlearnable acts are all
+   * refused here — this method can only *skip* the opaque signal, never clear a danger.
+   */
+  private yoloExemptsLocation(ctx: AskContext): boolean {
+    return this.liveYoloWorkspaceExempt()
+      && ctx.opaqueKind === 'location'
+      && ctx.targetKind !== 'delete'
+      && ctx.targetKind !== 'remote-write'
+      && !ctx.irreversible
+      && !ctx.unlearnable
+      && ctx.workspaceBound === true
+      // `workspaceBound` is lexical (the shared module cannot touch the filesystem); the
+      // relaxation also has to survive link resolution, so a link inside the workspace
+      // that points outside is still refused here.
+      && pathsRealInsideWorkspace(ctx.workspaceRoot, ctx.files ?? [])
   }
 
   /** Whether degraded review is live (no reviewer ⇒ rule-only gate). */
@@ -2045,7 +2082,11 @@ export class PermGateRuntime {
   async resolveYolo(exec: ToolExecutionLike, decision: PreToolDecisionLike): Promise<PreToolDecisionLike | undefined> {
     const callId = randomId()
     const askCtx = this.unattendedContextFor(exec, decision)
-    const judged = this.mechanicalJudge(askCtx)
+    // The workspace exemption narrows exactly one signal: "the target could not be pinned
+    // down". It is decided before the screen so an exempted call reaches the reviewer (or
+    // the mechanical conclusion) as an ordinary one; every other danger signal still fires.
+    const exempt = this.yoloExemptsLocation(askCtx)
+    const judged = exempt ? null : this.mechanicalJudge(askCtx)
     let riskCategory: string | undefined
     // Whether the reviewer actually spoke. YOLO advertises "the model answers in the
     // person's place"; when there is no grader, or it gave up, the tier still refuses to ask
@@ -2071,11 +2112,15 @@ export class PermGateRuntime {
     const danger = judged !== null || riskCategory !== undefined
 
     if (!danger) {
-      const reason = reviewerAnswered
+      const exemptTag = exempt ? ' [exempt:opaque-location]' : ''
+      const reason = (reviewerAnswered
         ? `yolo: allow (no danger signal) — ${decision.reason}`
-        : `yolo: allow (no reviewer answered; mechanical screen found nothing) — ${decision.reason}`
+        : `yolo: allow (no reviewer answered; mechanical screen found nothing) — ${decision.reason}`) + exemptTag
+      const verdict = exempt
+        ? (reviewerAnswered ? 'yolo-allow-opaque-location-exempt' : 'yolo-allow-opaque-location-exempt-no-reviewer')
+        : (reviewerAnswered ? 'yolo-allow' : 'yolo-allow-no-reviewer')
       this.audit.append(makeEntry({ callId, tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
-      this.recordEvent(exec, 'auto', reason, { verdict: reviewerAnswered ? 'yolo-allow' : 'yolo-allow-no-reviewer', risk: 'safe' })
+      this.recordEvent(exec, 'auto', reason, { verdict, risk: 'safe' })
       this.untrackAsk(exec)
       return undefined
     }

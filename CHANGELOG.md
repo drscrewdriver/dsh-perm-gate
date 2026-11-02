@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 5.4.4 (2026-11-03)
+
+- **YOLO 工作区豁免开关 `yoloWorkspaceExempt`（默认关）**：`opaque` 拆成两类——`consequence`（执行内容看不见：编码载荷、正文读不到的脚本、prose）与 `location`（动作本身可见，只是落点判不清：无参数工具、工作区外未读到正文的脚本）。开关只在 `permissive-yolo` 一档上跳过 `location` 那一条，且要求目标全部落在 workspace 内、非删除/非远端写、非不可逆/不可沉淀；`consequence` 与 P0/凭据/`irreversible`/`neverClear` 一律不变。工作区边界的判定在运行时另走 `pathsRealInsideWorkspace`（`node:fs` realpath，Windows 折叠大小写），符号链接/目录联接指向外部、或路径无法解析时一律不放行；`ask-context` 仍保持无依赖的词法判定供浏览器半复用。无审查模型时被豁免调用直接放行，事件标 `yolo-allow-opaque-location-exempt(-no-reviewer)`，审计 reason 带 `[exempt:opaque-location]`，与「机械网没发现」可区分。其余四档行为零变化，关机即回到 5.4.3 行为。
+- **看不见的脚本体现在真的算 opaque**：`too-large` / `binary` / `unreadable` 的脚本正文一律使调用进入 U 档（此前只有工作区外的脚本会），与 `ask-context` 里「one unreadable file keeps the whole call opaque」的注释一致；`missing` 与 `not-a-file` 故意排除——那里根本不会执行任何东西，放宽才不会被用户当成噪音忽略。
+
 ## 5.4.3 (2026-11-03)
 
 - **#6 fail-open 修复**：宿主把 volatile 字段以**引用**交给 `apply`，此前 `...config` 把引用原样展开进运行时选项；引用对象既不等于 `deny` 也不等于 `ask`，运行时两条分支都落空，未命中任何规则的调用直接放过——即使配的是 ask / 默认审查。现在构造前先 `resolveVolatileConfig` 解引用，`coerceRuleAction` 把非三值一律 fail-closed 成 `ask`（规则文档路径同样过一遍），`defaultAction` / `caseInsensitivePaths` 改由 live 钩子读取并纳入热更新 key，改设置后 `reload()` 生效（此前只有首轮播种，改值不生效）。

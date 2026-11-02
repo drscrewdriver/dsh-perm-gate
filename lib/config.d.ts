@@ -95,6 +95,11 @@ export interface PermGateConfig {
      */
     readonly yolo?: boolean;
     /**
+     * YOLO only: relax the "target unpinnable" opaque signal. Never relaxes invisible
+     * content, deletes, remote writes, P0, credentials or irreversible acts. Default false.
+     */
+    readonly yoloWorkspaceExempt?: boolean;
+    /**
      * `safenet-pass` — the switch behind the `permissive-mech` tier: the deterministic
      * mechanical screen plus the preset opinions take over the ask. Named danger is blocked
      * and fed back to the main LLM, everything the nets cannot condemn runs. No human prompt
@@ -512,6 +517,13 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     grantMaxUses: z<number, number, "defined">;
     permissive: z<boolean, boolean, "defined">;
     yolo: z<boolean, boolean, "defined">;
+    /**
+     * YOLO only: stop treating "the target could not be pinned down" as a danger signal
+     * (no-argument tool calls, a script outside the workspace whose body was not read).
+     * Invisible *content* — encoded payloads, unreadable bodies, prose — is still blocked,
+     * and delete/remote-write never qualify. Default false keeps the 5.4.3 behaviour.
+     */
+    yoloWorkspaceExempt: z<boolean, boolean, "defined">;
     rulesFallback: z<boolean, boolean, "defined">;
     /**
      * Retired (2026-10-17): the per-preset mode table that briefly mapped
@@ -598,6 +610,13 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     grantMaxUses: z<number, number, "defined">;
     permissive: z<boolean, boolean, "defined">;
     yolo: z<boolean, boolean, "defined">;
+    /**
+     * YOLO only: stop treating "the target could not be pinned down" as a danger signal
+     * (no-argument tool calls, a script outside the workspace whose body was not read).
+     * Invisible *content* — encoded payloads, unreadable bodies, prose — is still blocked,
+     * and delete/remote-write never qualify. Default false keeps the 5.4.3 behaviour.
+     */
+    yoloWorkspaceExempt: z<boolean, boolean, "defined">;
     rulesFallback: z<boolean, boolean, "defined">;
     /**
      * Retired (2026-10-17): the per-preset mode table that briefly mapped
@@ -666,7 +685,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */
