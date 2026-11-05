@@ -7,6 +7,10 @@ import { PermGateRuntime } from '../src/runtime.js'
 import type { ToolExecutionLike } from '../src/runtime.js'
 import { pathsRealInsideWorkspace } from '../src/workspace-bound.js'
 
+// 一例直接依赖 Windows 路径/盘符抽路，Linux 上 resolveYolo 回落到 undefined
+// ⇒ 假阴。非 Windows 明确 skip，Windows dev 仍盖到。
+const ONLY_WIN = process.platform === 'win32'
+
 const RULES = undefined // no rules file: everything defaults to ask
 
 const dirs: string[] = []
@@ -93,7 +97,7 @@ describe('yoloWorkspaceExempt — location opacity is relaxed, never content', (
     expect((await r.resolveYolo(e, r.decideExecution(e) as never))?.kind).toBe('deny')
   })
 
-  it('a script body that could not be read is still blocked, switch on or off', async () => {
+  it.runIf(ONLY_WIN)('a script body that could not be read is still blocked, switch on or off', async () => {
     // A real 600 KB script outside the workspace: script-review labels it `too-large` and
     // attaches no body, so the chain must treat it as consequence opacity, not location.
     const ws = tmpDir()

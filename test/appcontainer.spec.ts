@@ -17,6 +17,13 @@ import { SandboxController, isForbiddenWorkspace, type SandboxSettings } from '.
 import { makePreExecuteListener } from '../src/index.js'
 import type { ToolExecutionLike } from '../src/runtime.js'
 
+// AppContainer 沙箱本身为 Windows-only 能力；下列三例直接依赖 OS 同盘同目录的行为
+// （home/drive-root/Windows 目录识别 + 以 workspace 派生的 config 目录名），Linux runner
+// 上即便注入 platform: () => 'win32'，isForbiddenWorkspace 仍会回落到 os.homedir()
+// = /home/runner、与断言的 C:\ 样本不同形 ⇒ 假阴。非 Windows 上明确 skip（不假装
+// 通过），Windows dev 仍盖到。
+const ONLY_WIN = process.platform === 'win32'
+
 const dirs: string[] = []
 function tmpDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'perm-gate-ac-'))
@@ -72,7 +79,7 @@ describe('container SID face', () => {
 })
 
 describe('workspace root guard (R3)', () => {
-  it('denies home, drive root, and the Windows directory', () => {
+  it.runIf(ONLY_WIN)('denies home, drive root, and the Windows directory', () => {
     expect(isForbiddenWorkspace(join(tmpdir(), 'fine'))).toBeUndefined()
     expect(isForbiddenWorkspace(process.env['USERPROFILE'] ?? 'C:\\Users\\x')).toMatch(/home directory/)
     expect(isForbiddenWorkspace('C:\\')).toMatch(/drive root/)
@@ -167,7 +174,7 @@ describe('sandbox controller decision table', () => {
     expect((await controller.wrap(ON, { name: 'pwsh', arguments: { command: 'Get-Location' } }))?.kind).toBe('wrap')
   })
 
-  it('denies forbidden workspace roots before touching the launcher (R3 / T1.10)', async () => {
+  it.runIf(ONLY_WIN)('denies forbidden workspace roots before touching the launcher (R3 / T1.10)', async () => {
     const controller = fakeLauncherController()
     const home = process.env['USERPROFILE'] ?? 'C:\\Users\\x'
     const verdict = await controller.wrap(ON, { name: 'shell', arguments: { command: 'dir' }, cwd: home })
@@ -215,7 +222,7 @@ describe('sandbox controller decision table', () => {
     expect(controller.resolveProxyUrl({ ...ON, proxy: '' })).toBe('http://127.0.0.1:18080')
   })
 
-  it('reuses one config dir across calls and cleans it (with scratch) on dispose (R5)', async () => {
+  it.runIf(ONLY_WIN)('reuses one config dir across calls and cleans it (with scratch) on dispose (R5)', async () => {
     const controller = fakeLauncherController()
     const first = await controller.wrap(ON, { name: 'shell', arguments: { command: 'a' } })
     const second = await controller.wrap(ON, { name: 'shell', arguments: { command: 'b' } })

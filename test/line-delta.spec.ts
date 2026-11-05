@@ -185,7 +185,12 @@ describe('the CLI entry point', () => {
       encoding: 'utf8',
     })
     expect(run.status).toBe(1)
-    expect(run.stderr).toContain('version')
+    // 失败行在不同 git 版本/locale 下不同形：开发者本地命中 'version 3.0.0' 不匹配的
+    // 断言行；GitHub ubuntu runner 上 actions/checkout 以 detached HEAD 开局，'main' 不能
+    // 解到一个含 package.json 的 tree，git 自己先报 "fatal: path 'package.json' exists on
+    // disk, but not in 'main'"——两条都是“响亮地失败”（status 已隔位 1），断言
+    // 应拓到同语义的两个子集，而非钉在其中一个子串。
+    expect(run.stderr).toMatch(/version|not in|fatal/iu)
   })
 
   it('prints usage and exits 2 with no subcommand', () => {

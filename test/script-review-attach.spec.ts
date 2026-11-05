@@ -9,6 +9,11 @@ import type { RiskRequest } from '../src/risk.js'
 import { makePreExecuteListener } from '../src/index.js'
 import type { PreToolDecisionLike, ToolExecutionLike } from '../src/runtime.js'
 
+// 本文件内四个标签例直接依赖 Windows 路径语义（scriptRefs 抽路、workspace 同盘/异盘
+// 判定、以 drive letter 识别相对基径、grader payload 回送前的路径归一）。Linux CI
+// 上断言会假阴 ⇒ 非 Windows 明确 skip。
+const ONLY_WIN = process.platform === 'win32'
+
 const dirs: string[] = []
 function tmp(): string {
   const dir = join(tmpdir(), `perm-gate-attach-${Math.random().toString(16).slice(2)}`)
@@ -68,7 +73,7 @@ describe('script bodies change what the gate can see', () => {
    * Once the file *has* been read, "unknowable" would be a lie: the payload is visible
    * and the verdict is about its content.
    */
-  it('lifts an out-of-workspace script out of the opaque tier when its body is read', () => {
+  it.runIf(ONLY_WIN)('lifts an out-of-workspace script out of the opaque tier when its body is read', () => {
     // Two separate directories: one is the workspace, the other is genuinely outside it
     // (the tier depends on that relation, so a path inside the tmp root proves nothing).
     const ws = tmp()
@@ -136,7 +141,7 @@ describe('the runtime puts the body in front of the reviewer it does have', () =
     return { name: 'bash', arguments: { command }, cwd, sessionId: 's1', events } as ToolExecutionLike
   }
 
-  it('sends script_contents to the grader', async () => {
+  it.runIf(ONLY_WIN)('sends script_contents to the grader', async () => {
     const dir = tmp()
     writeFileSync(join(dir, 'clean-home.sh'), WIPE_BODY)
     const seen: RiskRequest[] = []
@@ -163,7 +168,7 @@ describe('the runtime puts the body in front of the reviewer it does have', () =
    * script that wipes the profile. The body makes the act deterministic, and a
    * deterministic `I` is a veto over the model.
    */
-  it('keeps asking when the grader calls a wiping script safe', async () => {
+  it.runIf(ONLY_WIN)('keeps asking when the grader calls a wiping script safe', async () => {
     const dir = tmp()
     writeFileSync(join(dir, 'clean-home.sh'), WIPE_BODY)
     const r = new PermGateRuntime({
@@ -179,7 +184,7 @@ describe('the runtime puts the body in front of the reviewer it does have', () =
   })
 
   /** With no human either (YOLO), the same body is a block, not a pass. */
-  it('blocks a wiping script in YOLO mode', async () => {
+  it.runIf(ONLY_WIN)('blocks a wiping script in YOLO mode', async () => {
     const dir = tmp()
     writeFileSync(join(dir, 'clean-home.sh'), WIPE_BODY)
     const r = new PermGateRuntime({ rulesFile: undefined, yolo: true })

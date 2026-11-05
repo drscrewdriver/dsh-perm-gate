@@ -14,6 +14,11 @@ import { hardDenyReason } from '../src/engine'
 import { PermGateRuntime } from '../src/runtime'
 import type { ToolCallContext } from '../src/evaluate'
 
+// 一例直接依赖 Windows 盘符下的 'package' 族规则命中（.npmrc 在 C:/Users/... 前缀下
+// 才会归到 package 族）；Linux 上 homedir() = /home/runner 落入另一条硬拦 ⇒ 初始 deny
+// 来源不同，push 后仍 deny 属于假阴。非 Windows 上明确 skip。
+const ONLY_WIN = process.platform === 'win32'
+
 describe('preset table guard: paths dimension requires a tools restriction', () => {
   it('no entry selects paths without naming tools', () => {
     const doc = parsePresetDoc()
@@ -141,7 +146,7 @@ describe('setCredFamilyAction — four rungs, two stores, round trips', () => {
     expect(askRow!.enabled).toBe(false)
   })
 
-  it('热生效：同一个 runtime 实例改豁免清单，下一次调用即变（不重建）', () => {
+  it.runIf(ONLY_WIN)('热生效：同一个 runtime 实例改豁免清单，下一次调用即变（不重建）', () => {
     const exempt: string[] = []
     const rt = new PermGateRuntime({ readCredWriteExemptFamilies: () => exempt })
     const exec = {
