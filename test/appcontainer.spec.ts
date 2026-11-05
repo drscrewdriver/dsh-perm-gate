@@ -36,6 +36,11 @@ function fakeLauncherController(log: string[] = []): SandboxController {
     cwdRoot: () => 'C:\\fake-workspace',
     builtinProxyPort: () => 18080,
     log: (message: string) => { log.push(message) },
+    // sandbox controller 在 wrap() 入口硬拦非-win32：process.platform 在 Linux CI 上为
+    // 'linux' ⇒ wrap() 直接 return undefined，decision-table 断言无 deny 可匹。
+    // 单测只验纯决策逻辑，不验启动器/容器；这里注入 win32 平台固定，
+    // 既保证 Linux CI 上同一套断言可跑，也不影响 Windows dev 本机的行为。
+    platform: () => 'win32' as NodeJS.Platform,
   })
   Object.defineProperty(controller, 'ensure', {
     value: async () => ({ exePath: 'C:\\fake\\launcher.exe', hash: 'deadbeef', cached: true }),
