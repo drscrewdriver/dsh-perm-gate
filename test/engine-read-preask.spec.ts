@@ -66,3 +66,36 @@ ask:
     expect(d.action).toBe('ask')
   })
 })
+
+// PATH_AWARE_AUTO_ALLOW: apply_patch gets READ-like treatment (rule consultation, then allow).
+const patchDoc = parsePermissionsDocument(`defaultAction: allow
+deny:
+  - tools: [apply_patch]
+    args: ["*/id_rsa", "*/.ssh/*"]
+    reason: "[deny-rule:cred.ssh] patch targets a key file."
+`)
+const patchRuleset = compileDocument(patchDoc, { maxGlobStars: 2, caseInsensitivePaths: true })
+const patchHarness = { decide: (c: ToolCallContext) => decideRules(patchRuleset, c) }
+
+describe('decide — apply_patch (PATH_AWARE_AUTO_ALLOW)', () => {
+  it('normal path auto-allows', () => {
+    const d = decide({ tool: 'apply_patch', args: { input: '*** Begin Patch\n*** Update File: src/app.ts\n@@\n-old\n+new\n*** End Patch' }, cwd: '/w', home: '/w' }, patchHarness, grants)
+    expect(d.action).toBe('allow')
+    expect(d.stage).toBe('grant')
+  })
+
+  it('credential path denies via rule hit', () => {
+    const d = decide({ tool: 'apply_patch', args: { input: '*** Begin Patch\n*** Update File: /home/user/.ssh/id_rsa\n@@\n-old\n+new\n*** End Patch' }, cwd: '/w', home: '/w' }, patchHarness, grants)
+    expect(d.action).toBe('deny')
+    expect(d.reason).toContain('cred.ssh')
+  })
+
+  it('extractPathCandidates picks up Codex patch markers', async () => {
+    const { extractPathCandidates } = await import('../src/rule')
+    const paths = extractPathCandidates({ input: '*** Begin Patch\n*** Add File: a/new.txt\n*** Update File: b/old.txt\n*** Delete File: c/gone.txt\n*** Update File: d/moved.txt\n*** Move to: e/target.txt\n*** End Patch' })
+    expect(paths).toContain('a/new.txt')
+    expect(paths).toContain('b/old.txt')
+    expect(paths).toContain('c/gone.txt')
+    expect(paths).toContain('e/target.txt')
+  })
+})

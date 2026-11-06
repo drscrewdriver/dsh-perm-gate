@@ -581,6 +581,7 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
     credentialPaths: listOf(raw.credentialPaths),
     extraContentArgKeys: listOf(raw.extraContentArgKeys),
     extraOperationArgKeys: listOf(raw.extraOperationArgKeys),
+    autoAllowTools: listOf(raw.autoAllowTools),
   } as unknown as Partial<PermissiveCardValue>
   const strategies = value.permissiveStrategies ?? {}
   const hasApiKey = typeof value.classifierApiKey === 'string' && value.classifierApiKey !== ''
@@ -1497,10 +1498,21 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         : null}
                   </section>
 
-                  {/* Long-tail protection the preset cannot know about: the user's own
-                      secret paths and their own blacklist words. Kept out of the deny
-                      blacklist section because the semantics differ — that list replaces
-                      the preset, these two never do. */}
+                  {/* User-classified safe tool names: same auto-allow treatment as
+                      READ_TOOLS (path rules still consulted, P0 hard-deny still fires). */}
+                  <section style={sectionStyle}>
+                    <StringListField
+                      label={t('card.autoAllowTools')}
+                      hint={t('card.autoAllowToolsHint')}
+                      placeholder={t('card.autoAllowToolsPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.autoAllowTools ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('autoAllowTools', [...(value.autoAllowTools ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('autoAllowTools', (value.autoAllowTools ?? []).filter((_, i) => i !== index)) }}
+                    />
+                  </section>
                   <section style={sectionStyle}>
                     <StringListField
                       label={t('card.credentialPaths')}

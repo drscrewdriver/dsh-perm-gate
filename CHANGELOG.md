@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 5.5.0 (2026-11-06)
+
+- **`apply_patch` 默认自动放行（路径敏感）**：宿主 0.2.2 内建的 `apply_patch` 工具现在与 READ_TOOLS 同档处理——不弹框、不叫模型，但 P0 硬拒、凭据路径、规则层 deny/ask 仍全量生效。`extractPathCandidates` 新增 Codex patch 文本解析（`*** Add/Update/Delete File: path`、`*** Move to: path`），确保补丁目标路径可被规则匹配。
+- **`autoAllowTools` 白名单工具设置卡暴露**：用户可在设置页添加自定义工具名（与 read/grep 同档完全放行），方便第三方插件注册的安全工具免于每次弹框。字段为 volatile string[]，即时生效。
+- **0.2.2-rc.1 宿主枚举**：engines.dsh + peers 追加 `0.2.2-rc.1`（宿主现 latest），双清单同步。
+
 ## 5.4.4 (2026-11-03)
 
 - **YOLO 工作区豁免开关 `yoloWorkspaceExempt`（默认关）**：`opaque` 拆成两类——`consequence`（执行内容看不见：编码载荷、正文读不到的脚本、prose）与 `location`（动作本身可见，只是落点判不清：无参数工具、工作区外未读到正文的脚本）。开关只在 `permissive-yolo` 一档上跳过 `location` 那一条，且要求目标全部落在 workspace 内、非删除/非远端写、非不可逆/不可沉淀；`consequence` 与 P0/凭据/`irreversible`/`neverClear` 一律不变。工作区边界的判定在运行时另走 `pathsRealInsideWorkspace`（`node:fs` realpath，Windows 折叠大小写），符号链接/目录联接指向外部、或路径无法解析时一律不放行；`ask-context` 仍保持无依赖的词法判定供浏览器半复用。无审查模型时被豁免调用直接放行，事件标 `yolo-allow-opaque-location-exempt(-no-reviewer)`，审计 reason 带 `[exempt:opaque-location]`，与「机械网没发现」可区分。其余四档行为零变化，关机即回到 5.4.3 行为。

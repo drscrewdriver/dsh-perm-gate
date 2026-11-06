@@ -16,7 +16,14 @@
 export const SHELL_TOOLS = new Set(['shell', 'terminal', 'bash', 'pwsh', 'sh', 'cmd', 'powershell'])
 
 /** File mutation tools: they write paths, they do not execute their arguments. */
-export const WRITE_TOOLS = new Set(['write', 'edit'])
+export const WRITE_TOOLS = new Set(['write', 'edit', 'apply_patch'])
+
+/**
+ * Mutation tools that auto-allow (like READ_TOOLS) but still consult path rules.
+ * P0 hard-deny and credentialPaths still fire; only the human/model ask is skipped.
+ * Introduced for `apply_patch` (DSH 0.2.2 host built-in tool).
+ */
+export const PATH_AWARE_AUTO_ALLOW: ReadonlySet<string> = new Set(['apply_patch'])
 
 /**
  * Read-only tools that can never modify the workspace or execute anything. P0

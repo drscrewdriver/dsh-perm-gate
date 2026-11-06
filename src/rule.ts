@@ -355,6 +355,9 @@ export function documentHash(text: string): string {
   return hashText(text)
 }
 
+// Codex patch path markers: lines like `*** Update File: path` inside `input`.
+const CODEX_PATCH_PATH_RE = /^\*{3}\s+(?:(?:Add|Update|Delete)\s+File|Move\s+to):\s*(.+)$/gim
+
 // Candidate extraction (shared by evaluate + path rules).
 export function extractPathCandidates(args: Record<string, unknown>): string[] {
   const out: string[] = []
@@ -369,6 +372,15 @@ export function extractPathCandidates(args: Record<string, unknown>): string[] {
       if (PATH_CANDIDATE_KEYS.includes(k)) {
         if (typeof v === 'string') out.push(v)
         else if (Array.isArray(v)) for (const e of v) if (typeof e === 'string') out.push(e)
+      }
+      // Codex-style apply_patch embeds target paths in the `input` text body.
+      if (k === 'input' && typeof v === 'string' && v.includes('***')) {
+        CODEX_PATCH_PATH_RE.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = CODEX_PATCH_PATH_RE.exec(v)) !== null) {
+          const p = m[1]!.trim()
+          if (p) out.push(p)
+        }
       }
       walk(v, depth + 1)
     }

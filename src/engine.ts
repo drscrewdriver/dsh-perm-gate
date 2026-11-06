@@ -15,7 +15,7 @@ import { executableVariants, normalizeCommandText } from './command-normalize.js
 // 工具名名单归 `tool-names.ts` 所有（不得在此处再抄一份）。P0 **不看工具名白名单**：
 // 它看 `executableCommandOf`——已知非执行器（read/write/内部工具）的 `command` 参数是数据，
 // 其余任何带命令串的调用都按命令对待，所以工具叫什么（包括模型打错的 `pash`）都不是绕过面。
-import { INTERNAL_TOOLS, READ_TOOLS, executableCommandOf } from './tool-names.js'
+import { INTERNAL_TOOLS, PATH_AWARE_AUTO_ALLOW, READ_TOOLS, executableCommandOf } from './tool-names.js'
 import { familyOfPath } from './cred-families.js'
 import { type Decision, type ToolCallContext } from './evaluate.js'
 import { decomposeShellCommand, type SimpleCommand } from './shell.js'
@@ -29,8 +29,8 @@ const DESTRUCTIVE_TOOL = /(?:^|[_-])(?:delete|remove|rm|destroy|erase|purge|wipe
 /** No user-configured extra auto-allow names. */
 const NO_EXTRA_AUTO_ALLOW: ReadonlySet<string> = new Set()
 
-/** The built-in read-only / internal classification, for diagnostics and docs. */
-export const AUTO_ALLOW_TOOLS: ReadonlySet<string> = new Set([...READ_TOOLS, ...INTERNAL_TOOLS])
+/** The built-in read-only / path-aware-allow / internal classification, for diagnostics and docs. */
+export const AUTO_ALLOW_TOOLS: ReadonlySet<string> = new Set([...READ_TOOLS, ...PATH_AWARE_AUTO_ALLOW, ...INTERNAL_TOOLS])
 
 /**
  * The document-body keys the screens skip live in `scan-text.ts`, shared with the
@@ -278,7 +278,7 @@ export function decide(
   // A miss still auto-allows silently, so the popup budget is unchanged. INTERNAL
   // tools are deliberately NOT pre-queried: session/memory tools reading their own
   // stores is how the host works; a path rule blocking them would be host self-harm.
-  if (READ_TOOLS.has(ctx.tool) || autoAllowExtra.has(ctx.tool)) {
+  if (READ_TOOLS.has(ctx.tool) || PATH_AWARE_AUTO_ALLOW.has(ctx.tool) || autoAllowExtra.has(ctx.tool)) {
     const pre = ruleset.decide(ctx)
     if (pre.ruleIndex !== undefined) {
       if (pre.action === 'deny') return { ...pre, stage: 'rule' }
