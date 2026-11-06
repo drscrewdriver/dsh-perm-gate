@@ -1,6 +1,6 @@
 import { type Decision, type ToolCallContext } from './evaluate.js';
 export type EngineStage = 'hard-deny' | 'grant' | 'rule' | 'default' | 'ask' | 'classifier';
-/** The built-in read-only / internal classification, for diagnostics and docs. */
+/** The built-in read-only / path-aware-allow / internal classification, for diagnostics and docs. */
 export declare const AUTO_ALLOW_TOOLS: ReadonlySet<string>;
 /**
  * The document-body keys the screens skip live in `scan-text.ts`, shared with the

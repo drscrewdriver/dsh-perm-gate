@@ -16,6 +16,12 @@ export declare const SHELL_TOOLS: Set<string>;
 /** File mutation tools: they write paths, they do not execute their arguments. */
 export declare const WRITE_TOOLS: Set<string>;
 /**
+ * Mutation tools that auto-allow (like READ_TOOLS) but still consult path rules.
+ * P0 hard-deny and credentialPaths still fire; only the human/model ask is skipped.
+ * Introduced for `apply_patch` (DSH 0.2.2 host built-in tool).
+ */
+export declare const PATH_AWARE_AUTO_ALLOW: ReadonlySet<string>;
+/**
  * Read-only tools that can never modify the workspace or execute anything. P0
  * still protects sensitive path reads outside the workspace root, and the
  * deny-keyword layer still runs first, so a search whose query contains a
