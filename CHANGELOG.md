@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 5.5.2 (2026-11-12)
+
+- **client 类型断裂修复（5.5.0 autoAllowTools 遗留）**：`PermissiveCardValue` 补声明 `autoAllowTools?: string[]`（此前卡片直读该字段靠 `as unknown` 压过，typecheck 报 TS2339 并传染出两处隐式 any）；ja/ko/fr/de/it/ru/es 七个语言包补齐 `card.autoAllowTools` / `Hint` / `Placeholder` 三键（`Record<PermissiveKey, string>` 锚定下缺键直接编译失败，zh 包缩进一并归正）。运行期行为零变化：83 文件 / 1353 用例全绿；修复的是 `tsc -p tsconfig.client.json` 门禁与后续 client 构建。
+- 5.5.1 收回：距发布已超 72 小时窗口，npm 政策不可 unpublish，采取 deprecate + 全部宿主线 dist-tag 改指 5.5.2。
+
 ## 5.5.0 (2026-11-06)
 
 - **`apply_patch` 默认自动放行（路径敏感）**：宿主 0.2.2 内建的 `apply_patch` 工具现在与 READ_TOOLS 同档处理——不弹框、不叫模型，但 P0 硬拒、凭据路径、规则层 deny/ask 仍全量生效。`extractPathCandidates` 新增 Codex patch 文本解析（`*** Add/Update/Delete File: path`、`*** Move to: path`），确保补丁目标路径可被规则匹配。

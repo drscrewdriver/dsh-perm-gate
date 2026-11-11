@@ -71,6 +71,8 @@ export interface PermissiveCardValue {
   denyKeywordsExtra?: string[]
   /** User-declared credential paths, held to the same standard as `.ssh`. */
   credentialPaths?: string[]
+  /** User-classified safe tool names held to the same tier as the built-in read tools. */
+  autoAllowTools?: string[]
   /** Extra argument keys treated as document bodies (never replaces the built-in list). */
   extraContentArgKeys?: string[]
   /** Extra argument keys treated as operations; wins over the prose list on the same key. */
