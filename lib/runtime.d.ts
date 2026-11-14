@@ -356,6 +356,12 @@ export declare class PermGateRuntime {
     private readonly options;
     private ruleset;
     private readonly grants;
+    /** 只读授权清单（TUI `/gate grants`）：工具名 / 到期时间 / 剩余次数。 */
+    listGrants(): Array<{
+        tool: string;
+        expiresAt: number;
+        remaining: number;
+    }>;
     private readonly artifacts;
     private readonly audit;
     private readonly cache;

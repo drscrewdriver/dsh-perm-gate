@@ -625,3 +625,16 @@ npm run build
 ## License
 
 [MIT](./LICENSE)
+
+## TUI 终端面（dsh-tui）
+
+dsh-tui 不加载插件的 client 半边（面板/卡片/设置页），也调不到插件自有 RPC；工具调用只显示一行摘要。人可读、人可操作的面只剩宿主斜杠命令。输出约定：单行 ≤100 字符、总行 ≤40、无 ANSI、两空格对齐；写操作默认 dry、加 `--yes` 才执行；`--json` 输出单行 JSON。
+
+| 命令 | 作用 |
+|---|---|
+| `/gate` | 规则文件路径、默认动作、allow/deny/ask 计数 |
+| `/gate rules` | 规则计数摘要 |
+| `/gate why <command>` | 对一条命令干跑判定链（不执行） |
+| `/gate history` | 最近 10 条判定/审批（审计环，`--n=20`） |
+
+命令由插件自己在宿主侧注册（`ctx.inject(['commands'], …)`）：命令服务缺席的老宿主线上不激活、不报错。

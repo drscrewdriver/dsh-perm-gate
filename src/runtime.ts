@@ -622,6 +622,11 @@ interface ClearedCall {
 export class PermGateRuntime {
   private ruleset: CompiledRuleset
   private readonly grants: GrantRegistry
+
+  /** 只读授权清单（TUI `/gate grants`）：工具名 / 到期时间 / 剩余次数。 */
+  listGrants(): Array<{ tool: string; expiresAt: number; remaining: number }> {
+    return this.grants.list()
+  }
   private readonly artifacts = new ArtifactRegistry()
   private readonly audit = new MemoryAuditMirror()
   private readonly cache = new Map<string, CompiledRuleset>() // hash -> compiled

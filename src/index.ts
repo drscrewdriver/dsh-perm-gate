@@ -22,6 +22,7 @@ import { buildReceiverInfo } from './receiver-info.js'
 import { composeReviewOpinion } from './feedback.js'
 import { redactCommandText } from './redact.js'
 import { readRulesView, readRulesViewFromSettings } from './rules-view.js'
+import { registerGateCommand, type GateRulesView, type GateVerdict } from './tui-command.js'
 import { PermGateRuntime, type ApprovalRequestLike, type NetworkApprovalRequest, type PermissiveState, type PreToolDecisionLike, type ToolExecutionLike, type ToolResultLike } from './runtime.js'
 import { classifySessions, sweepSessionData } from './session-sweep.js'
 import { isHumanFree } from './unattended.js'
@@ -1241,6 +1242,34 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
       ruleWatcher.closeAll()
     }, 'dsh-perm-gate: rule watcher')
   }
+
+  // ── dsh-tui 终端面：`/gate` ────────────────────────────────────────
+  // TUI 下 history 卡片/规则页不执行，审批只显示 toolName 一行——无法回答
+  // 「为什么被拦」。命令面复用与面板同一条路径：规则视图 + 干跑（不执行）。
+  ;(ctx as unknown as {
+    inject?: (deps: string[], cb: (scope: Context) => void) => void
+  }).inject?.(['commands'], (scope) => {
+    registerGateCommand(scope, {
+      rules: () => {
+        const settingsDoc = readRulesDocument()
+        return (settingsDoc !== undefined
+          ? readRulesViewFromSettings(settingsDoc)
+          : readRulesView(rulesFilePath)) as unknown as GateRulesView
+      },
+      evaluate: (command) => runDryRun({ tool: 'bash', args: { command } } as never, runtime) as unknown as GateVerdict,
+      // 审计环：宿主把每次判定/审批写进 MemoryAuditMirror，这里只读最后 N 条。
+      history: (limit) => ((runtime.auditEntries ?? []) as ReadonlyArray<{
+        at: number; tool: string; outcome: string; reason: string
+      }>).slice(-limit).reverse().map((entry) => ({
+        at: entry.at,
+        tool: entry.tool,
+        decision: entry.outcome,
+        reason: entry.reason,
+      })),
+      // 会话级授权：运行时新增的只读清单（工具/到期/剩余次数）。
+      grants: () => runtime.listGrants(),
+    })
+  })
 
   return runtime
 }

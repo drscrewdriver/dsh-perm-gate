@@ -97,6 +97,20 @@ export class GrantRegistry {
     return this.grants.length
   }
 
+  /**
+   * Read-only summary of the live grants (TUI `/gate grants` 用）。
+   *
+   * 只暴露清单需要的三列：工具名、到期时间、剩余次数——不泄露指纹、
+   * 也不给任何改动入口（本方法无副作用）。
+   */
+  list(): Array<{ tool: string; expiresAt: number; remaining: number }> {
+    return this.grants.map((grant) => ({
+      tool: grant.spec.tool,
+      expiresAt: grant.expiresAt,
+      remaining: grant.remaining,
+    }))
+  }
+
   /** Mint a precise grant. Self-minting restrictions are enforced by the decision engine, not here. */
   mint(spec: Omit<GrantSpec, 'sessionId' | 'expiresAt'>): SessionGrant {
     const now = this.now()
