@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.4
+
+- 终端面（dsh-tui / Desktop 命令面板同源）：/gate 终端面（status/rules/why/history/grants）+ GrantRegistry.list()。
+
 ## Unreleased
 
 ## 5.5.2 (2026-11-12)
