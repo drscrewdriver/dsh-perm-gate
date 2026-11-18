@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 `dsh-perm-gate` version **2.4.1**. Continue with the [README](./README.md) for the
 decision chain, the rules file format and the 自动审查 tier.
@@ -22,7 +25,6 @@ decision chain, the rules file format and the 自动审查 tier.
 - The `dsh` CLI on your `PATH`.
 - A profile to install into — the browser half only ships for the `web` profile
   (`dsh.client.platform = "web"` in `package.json`).
-
 ## Pick the tag for your DSH version
 
 One build serves both DSH lines, so either tag installs working code — the tag

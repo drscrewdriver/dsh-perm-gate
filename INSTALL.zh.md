@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 `dsh-perm-gate` 版本 **2.4.1**。裁决链、规则文件格式与自动审查档位请见
 [中文 README](./README.zh.md)。
@@ -22,7 +25,6 @@
 - `dsh` CLI 已在 `PATH` 中。
 - 需要一个目标 profile —— 浏览器端只为 `web` profile 构建（`package.json`
   里 `dsh.client.platform = "web"`）。
-
 ## 按你的 DSH 版本选择 tag
 
 单一构建同时覆盖两条 DSH 线，所以任一 tag 安装的代码都能工作 —— 保留 tag

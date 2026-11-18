@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 `dsh-perm-gate` 버전 **2.4.1**. 결정 체인, 규칙 파일 형식, 自动审查 티어는
 [한국어 README](./README.ko.md)를 참고하세요.
@@ -22,7 +25,6 @@
 - `dsh` CLI가 `PATH`에 있어야 합니다.
 - 설치할 profile. 브라우저 절반은 `web` profile용으로만 빌드됩니다
   (`package.json`의 `dsh.client.platform = "web"`).
-
 ## DSH 버전에 맞는 tag 선택
 
 단일 빌드는 두 DSH 라인을 모두 커버하므로, 어느 tag를 골라도 작동하는 코드가

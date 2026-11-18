@@ -77,6 +77,9 @@ const linesPerLang = {
   'README.ko.md': [
     `- **지원하는 DSH 호스트:** ${versionList} (0.1.0 / 0.1.1 / 0.1.2 / 0.1.5 / 0.1.7 / 0.2.0 / 0.2.1 라인의 ${supportedHosts.length}개 rc)`,
   ],
+  'README.pt.md': [
+    `- **Hospedeiros DSH suportados:** ${versionList} (${supportedHosts.length} rc nas linhas 0.1.0 / 0.1.1 / 0.1.2 / 0.1.5 / 0.1.7 / 0.2.0 / 0.2.1)`,
+  ],
 }
 // 矩阵跑绿清单（.compat-results/verified.json，由 scripts/test-host-compat.mjs 写出）
 const verifiedUrl = new URL('.compat-results/verified.json', ROOT)
@@ -88,6 +91,7 @@ if (existsSync(verifiedUrl)) {
     linesPerLang['README.zh.md'].push(`- **运行时已验证：** ${list}（证据见 \`.compat-results/\`）`)
     linesPerLang['README.ja.md'].push(`- **ランタイム検証済み:** ${list}（証跡は \`.compat-results/\`）`)
     linesPerLang['README.ko.md'].push(`- **런타임 검증됨:** ${list} (증적은 \`.compat-results/\`)`)
+    linesPerLang['README.pt.md'].push(`- **Verificado em tempo de execução:** ${list} — evidências em \`.compat-results/\``)
   }
 }
 const readmeProblems = []

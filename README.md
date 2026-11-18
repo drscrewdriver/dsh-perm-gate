@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 > **Compatibility note:** v2.0.0 ships `ja` / `ko` dictionaries, but official DSH exposes
 > only `zh` / `en` through `LocaleRuntime` (`LOCALE_IDS = ["zh", "en"]`). On stock DSH,
@@ -130,7 +133,7 @@ dsh plugin --profile web add dsh-perm-gate
 
 Full install, upgrade, migration and troubleshooting steps live in the
 [Installation guide](./INSTALL.md) — also available in
-[中文](./INSTALL.zh.md) / [日本語](./INSTALL.ja.md) / [한국어](./INSTALL.ko.md).
+[中文](./INSTALL.zh.md) / [日本語](./INSTALL.ja.md) / [한국어](./INSTALL.ko.md) / [Português](./INSTALL.pt.md).
 
 ## Configuration
 

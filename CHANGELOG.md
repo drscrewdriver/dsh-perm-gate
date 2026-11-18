@@ -2,6 +2,7 @@
 
 ## 5.5.4
 
+- i18n: add Portuguese (pt-BR) locale — runtime dictionary, package metadata and README/INSTALL/CHANGELOG mirrors.
 - 终端面（dsh-tui / Desktop 命令面板同源）：/gate 终端面（status/rules/why/history/grants）+ GrantRegistry.list()。
 
 ## Unreleased

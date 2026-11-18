@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 > **兼容性说明：** v2.0.0 自带 `ja` / `ko` 字典，但官方 DSH 的 `LocaleRuntime`
 > 只暴露 `zh` / `en`（`LOCALE_IDS = ["zh", "en"]`）。在原版 DSH 上选择 `ja` / `ko`
@@ -81,7 +84,7 @@ dsh plugin --profile web add dsh-perm-gate
 ```
 
 完整的安装、升级、迁移与排查步骤见[中文安装指南](./INSTALL.zh.md)（另有
-[English](./INSTALL.md) / [日本語](./INSTALL.ja.md) / [한국어](./INSTALL.ko.md)）。
+[English](./INSTALL.md) / [日本語](./INSTALL.ja.md) / [한국어](./INSTALL.ko.md) / [Português](./INSTALL.pt.md)）。
 
 ## 配置
 

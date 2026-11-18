@@ -4,13 +4,16 @@
 - [中文 README](./README.zh.md)
 - [日本語 README](./README.ja.md)
 - [한국어 README](./README.ko.md)
+- [Português README](./README.pt.md)
 - [Installation guide](./INSTALL.md)
 - [中文安装指南](./INSTALL.zh.md)
 - [日本語インストールガイド](./INSTALL.ja.md)
 - [한국어 설치 안내](./INSTALL.ko.md)
+- [Guia de instalação em português](./INSTALL.pt.md)
 - [Changelog](./CHANGELOG.md)
 - [日本語 changelog](./CHANGELOG.ja.md)
 - [한국어 changelog](./CHANGELOG.ko.md)
+- [Changelog em português](./CHANGELOG.pt.md)
 
 `dsh-perm-gate` バージョン **2.4.1**。判定チェーン、ルールファイル形式、自动审查
 ティアについては [日本語 README](./README.ja.md) を参照してください。
@@ -22,7 +25,6 @@
 - `dsh` CLI が `PATH` に存在すること。
 - インストール先の profile。ブラウザ側は `web` profile 向けにのみビルドされます
   （`package.json` の `dsh.client.platform = "web"`）。
-
 ## DSH のバージョンに合う tag を選ぶ
 
 単一ビルドが DSH 両ラインをカバーするため、どちらの tag を選んでも動作するコードが
