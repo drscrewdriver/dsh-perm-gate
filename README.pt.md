@@ -99,12 +99,12 @@ acoplamento de versão entre plugins.
   ruidosa em regras malformadas e cache de compilação por hash da fonte.
 - **Auditoria** — cada decisão é registrada como um evento `{ignorable:true}` com seu `callId`; a
   razão visível ao modelo coincide com o resultado registrado.
-- **Nível 自动审查** (valor de máquina `permissive`, mais `permissive-full`) — um **modo de
+- **Nível «自动审查»** (valor de máquina `permissive`, mais `permissive-full`) — um **modo de
   aprovação independente** (separado dos níveis read-only, full-access e whitelist) que não é
   "aprovação automática" nem confiança indiscriminada. A interface expõe **um único interruptor**
   (`permissive`); as quatro estratégias de backend são **combináveis** e dirigidas pelas
   configurações do plugin — continua fail-closed contra o P0. O seletor de permissões e a linha de
-  configurações o mostram sob o rótulo de produto 自动审查, sem ícone. A variante `permissive-full`
+  configurações o mostram sob o rótulo de produto «自动审查», sem ícone. A variante `permissive-full`
   mantém o comportamento de aprovação idêntico, mas abandona o sandbox de arquivos embutido, que
   de outra forma nega os pipes nomeados de que `git clone` / Cygwin / ConPTY precisam.
 - **Resposta automática ao escalonamento de sandbox** (`trustEscalation`) — um escalonamento de
@@ -288,9 +288,9 @@ proxy.
 Consulte o estado ao vivo em `GET /api/dsh-perm-gate/network` (modo, bind, porta, vivacidade do
 proxy, estado da injeção de ambiente, contadores de bloqueio, bloqueios recentes).
 
-## O nível 自动审查 (valor de máquina `permissive`)
+## O nível «自动审查» (valor de máquina `permissive`)
 
-自动审查 é um **nível de aprovação independente** no seletor de permissões do DSH, paralelo a
+«自动审查» é um **nível de aprovação independente** no seletor de permissões do DSH, paralelo a
 Read Only / Workspace Write / Full access / Whitelist. **Não** é "aprovação automática" genérica e
 nunca cunha autoridade indiscriminada: ele apenas estreita ou alarga a costura *antes* do passo
 humano/LLM, enquanto a negação dura P0 permanece monotônica e inegociável **dentro do escopo próprio
@@ -310,14 +310,14 @@ independentes e acoplá-los forçava um mau negócio:
 
 | Rótulo no seletor | Valor de máquina | sandbox | approval |
 |--------------|---------------|---------|----------|
-| 自动审查 | `permissive` | `workspace-write` | `ask` |
-| 自动审查（高权限） | `permissive-full` | `danger-full-access` | `ask` |
+| «自动审查» | `permissive` | `workspace-write` | `ask` |
+| «自动审查（高权限）» | `permissive-full` | `danger-full-access` | `ask` |
 
 O nível simples mantém o sandbox de arquivos embutido. Esse sandbox também nega os pipes nomeados de
 que um processo filho precisa para iniciar, de modo que `git clone`, o `sh.exe` do MSYS2/Cygwin e o
 ConPTY falham sob ele com `Win32 error 5` / `couldn't create signal pipe`. Como o portal está ativo
 **apenas** nos níveis listados em `gatePresets`, querer o portal significava aceitar essa restrição.
-自动审查（高权限） remove o acoplamento: comportamento de aprovação idêntico, sem a restrição do
+«自动审查（高权限）» remove o acoplamento: comportamento de aprovação idêntico, sem a restrição do
 sandbox de arquivos. A descrição do próprio nível enuncia o negócio francamente — o fluxo fica mais
 suave, as aprovações continuam valendo por chamada, mas **não sobra nenhum sandbox de sistema como
 rede de proteção**. Ambos estão nos `gatePresets` padrão, então qualquer um dos dois lhe dá a cadeia
@@ -331,7 +331,7 @@ para toda sessão.
 
 O **ícone** é outra história. O mapa de glifos do composer é fechado, e seu próprio comentário
 enuncia a regra: *nomes configurados pelo host fora do conjunto de design não recebem nenhum.*
-`permissive` é um valor embutido, então 自动审查 já tem um glifo escudo+olho; `permissive-full`
+`permissive` é um valor embutido, então «自动审查» já tem um glifo escudo+olho; `permissive-full`
 recebe o mesmo glifo apenas porque `npx dsh-perm-gate-patch-glyph` o acrescenta àquele mapa. Esse
 patch edita um pacote do **host**, logo é perdido a cada upgrade do DSH — veja
 [Depois de um upgrade do DSH](./INSTALL.md#after-a-dsh-upgrade-re-apply-the-composer-glyph-patch).
@@ -435,7 +435,7 @@ recarregar.
 - `rulesFallback` — revisão degradada. Somente quando **não há revisor** (nenhum configurado, ou o
   endpoint não deu veredicto) as redes determinísticas decidem em vez de estacionar a chamada num
   popup que ninguém vai responder. Enquanto um revisor responde, nada muda. Ele rege os níveis comuns
-  自动审查 (`permissive`, `permissive-full`); os três níveis que possuem uma implementação já dizem
+  «自动审查» (`permissive`, `permissive-full`); os três níveis que possuem uma implementação já dizem
   quem responde, então este interruptor não os degrada.
 - `scriptReview` (ligado por padrão) — quando uma chamada executa um script, seu corpo é lido
   (delimitado, nunca executado) e mostrado ao modelo, ao cartão humano **e** às redes
@@ -484,7 +484,7 @@ alargamento do sandbox.
 (tendo como chave o `callId` do host, que a requisição de escalonamento repete) e responde ao
 escalonamento `allowed-once` ele próprio. Aplica-se apenas quando *tudo* vale:
 
-- o nível 自动审查 está ligado e `trustEscalation` está ligado;
+- o nível «自动审查» está ligado e `trustEscalation` está ligado;
 - a requisição traz um `callId` que o portal liberou, com um nome de ferramenta coincidente;
 - a razão é um escalonamento reconhecido nomeando `workspace-write` ou `danger-full-access`.
 
@@ -550,18 +550,18 @@ aprovação existiu), com `tools/result` liquidando o mesmo ask como reserva qua
 consegue correlacioná-lo. As aprovações reportam o progresso do aprendizado pós-aprovação
 (`n`/limiar), e a faixa de aviso rotula os três estados terminais.
 
-自动审查 e 自动审查（高权限） ambos desenham o glifo escudo+olho no seletor — o primeiro do mapa
+«自动审查» e «自动审查（高权限）» ambos desenham o glifo escudo+olho no seletor — o primeiro do mapa
 embutido do DSH, o segundo do patch de host que o guia de instalação descreve. Sem aquele patch, o
 segundo nível é só texto em toda superfície; seu rótulo e sua regência não são afetados.
 
 ### Um nível de sessão selecionável
 
 O `cordis.patch.yml` acrescenta um preset `permissive` (`sandbox: workspace-write`,
-`approval: ask`, nome **自动审查**) entre Workspace Write e Full access. O patch do bundle do DSH
+`approval: ask`, nome **«自动审查»**) entre Workspace Write e Full access. O patch do bundle do DSH
 substitui o mapa `permission.config.presets` inteiro em vez de mesclar por chave, por isso o arquivo
 também reafirma os três embutidos (`read-only` / `workspace-write` / `danger-full-access`, de
 `@deepseek-ai/dsh-base/cordis.patch.yml`); `test/patch-presets.spec.ts` fixa esse conjunto de chaves.
-Assim, o seletor de permissões da sessão oferece 自动审查 como um nível de aprovação independente e
+Assim, o seletor de permissões da sessão oferece «自动审查» como um nível de aprovação independente e
 selecionável, não um modo genérico de "aprovação automática".
 
 O portal está ativo **apenas nos níveis listados em `gatePresets`** (padrão
@@ -574,12 +574,12 @@ sobrepô-lo com um ask (inaudível ali — a costura de aprovação recusa antes
 rodar, produzindo `the user rejected tool "..."` sem painel) ou com uma negação dura contradiria em
 silêncio o nível que o usuário escolheu. `gatePresets: ['*']` torna o portal global de novo (negação
 dura inclusa); dentro de um nível ativo um `ask` ainda degrada para passthrough quando a política de
-aprovação efetiva da sessão é `never` — e é por isso que ambos os níveis 自动审查 declaram
+aprovação efetiva da sessão é `never` — e é por isso que ambos os níveis «自动审查» declaram
 `approval: ask`.
 
 ### Configurável na interface
 
-O nível também é ajustável em tempo de execução em **Settings → Plugins → 自动审查**
+O nível também é ajustável em tempo de execução em **Configurações → Plugins → «自动审查»**
 (uma página `settings.plugins.tab` renderizada pelo client de navegador do plugin): um interruptor
 alterna `permissive`, e quatro interruptores editam as `permissiveStrategies` de backend. O host lê
 o namespace ao vivo, de modo que uma mudança se aplica à próxima chamada de ferramenta sem reiniciar.
@@ -655,15 +655,15 @@ npm run build
 
 [MIT](./LICENSE)
 
-## TUI 终端面（dsh-tui）
+## Face TUI (dsh-tui)
 
-dsh-tui 不加载插件的 client 半边（面板/卡片/设置页），也调不到插件自有 RPC；工具调用只显示一行摘要。人可读、人可操作的面只剩宿主斜杠命令。输出约定：单行 ≤100 字符、总行 ≤40、无 ANSI、两空格对齐；写操作默认 dry、加 `--yes` 才执行；`--json` 输出单行 JSON。
+O dsh-tui não carrega a metade client do plugin (painéis/cartões/página de configuração) nem alcança RPC própria do plugin; chamada de ferramenta mostra só uma linha de resumo. A face legível e operável por humano que sobra são os comandos de barra do host. Convenção de saída: linha única ≤100 caracteres, ≤40 linhas no total, sem ANSI, alinhamento de dois espaços; escrita é dry-run por padrão, `--yes` executa; `--json` devolve JSON em linha única.
 
-| 命令 | 作用 |
+| Comando | Função |
 |---|---|
-| `/gate` | 规则文件路径、默认动作、allow/deny/ask 计数 |
-| `/gate rules` | 规则计数摘要 |
-| `/gate why <command>` | 对一条命令干跑判定链（不执行） |
-| `/gate history` | 最近 10 条判定/审批（审计环，`--n=20`） |
+| `/gate` | caminho do arquivo de regras, ação padrão e contagens allow/deny/ask |
+| `/gate rules` | resumo das contagens de regras |
+| `/gate why <command>` | percorre a cadeia de vereditos de um comando em dry-run (não executa) |
+| `/gate history` | as 10 decisões/aprovações mais recentes (anel de auditoria; `--n=20`) |
 
-命令由插件自己在宿主侧注册（`ctx.inject(['commands'], …)`）：命令服务缺席的老宿主线上不激活、不报错。
+O comando é registrado pelo próprio plugin no host (`ctx.inject(['commands'], …)`): em linhas antigas sem serviço de comandos ele não ativa e não gera erro.

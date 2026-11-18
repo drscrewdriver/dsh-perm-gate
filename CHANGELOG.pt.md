@@ -1,10 +1,10 @@
-# Changelog / 变更日志
+# Registro de mudanças
 
 ## 5.5.4
 
 - i18n: add Portuguese (pt-BR) locale — runtime dictionary, package metadata and README/INSTALL/CHANGELOG mirrors.
 - i18n: acrescentado o idioma português (pt-BR) — dicionário em tempo de execução, metadados do pacote e espelhos README/INSTALL/CHANGELOG.
-- 终端面（dsh-tui / Desktop 命令面板同源）：/gate 终端面（status/rules/why/history/grants）+ GrantRegistry.list()。
+- Face de terminal (dsh-tui / mesma fonte do painel de comandos do Desktop): /gate de terminal (status/rules/why/history/grants) + `GrantRegistry.list()`.
 
 ## Unreleased
 
@@ -45,7 +45,7 @@
 ## 5.3.2 (2026-10-18)
 
 - Esclarecimento de escopo: o plugin é um **guarda pré-execução** (comandos Git/destrutivos de sistema de arquivos antes de rodar; acesso a chaves SSH, .env etc. — P0 duro + revisor mecânico determinístico, ativo sem modelo de revisão).
-- Esclarecimento de nomes/descrições dos degraus: 自动审查 marcado como «自动审查（dsh沙箱中）»; filtros mecânicos rebaforam «perguntar só quando perigoso/indeterminado»; sincronizados cordis.patch.yml + cartões zh/en.
+- Esclarecimento de nomes/descrições dos degraus: «自动审查» marcado como «自动审查（dsh沙箱中）»; filtros mecânicos rebaforam «perguntar só quando perigoso/indeterminado»; sincronizados cordis.patch.yml + cartões zh/en.
 - hosts: acrescentada a enumeração declarativa 0.2.1-rc.2 (34/34 peers verificados por pacote; zero mudanças de código, release puro metadado).
 
 ## [5.3.1] - 2026-10-17
@@ -90,7 +90,7 @@
 
 ### Changed
 
-- **正式发行版**: consolida todo o trabalho verificado na linha `compat-legacy` (compat.2 … compat.15) num release formal.
+- **Versão formal**: consolida todo o trabalho verificado na linha `compat-legacy` (compat.2 … compat.15) num release formal.
 
 ## [5.1.2-compat.15] - 2026-10-12
 
@@ -138,7 +138,7 @@
 
 ### Fixed
 
-- Backslashes eram removidos de argumentos nus (regras Windows `HKLM\SYSTEM` etc. falhavam em silêncio); o separador de correntes confundia `Select-String -Pattern "…|diskpart"` com execução; `containsCredentialMaterial` negava dureza demais (`Bearer` arbitrário, sondas `Test-Path`);版本号 do `dsh.plugin.json` defasado do package.json; teste de assento obsoleto corrigido.
+- Backslashes eram removidos de argumentos nus (regras Windows `HKLM\SYSTEM` etc. falhavam em silêncio); o separador de correntes confundia `Select-String -Pattern "…|diskpart"` com execução; `containsCredentialMaterial` negava dureza demais (`Bearer` arbitrário, sondas `Test-Path`); o número da versão do `dsh.plugin.json` defasado do package.json; teste de assento obsoleto corrigido.
 
 ## [5.1.2-compat.10] - 2026-10-08
 
@@ -150,7 +150,7 @@
 
 ### Changed
 
-- Reversão da tabificação da família (decisão do usuário: a porta 自动审查 fica fora da tabificação); `settings.plugins.tab` + assento testável fixados na forma de seção única.
+- Reversão da tabificação da família (decisão do usuário: a porta «自动审查» fica fora da tabificação); `settings.plugins.tab` + assento testável fixados na forma de seção única.
 
 ## [5.1.0] - 2026-10-05
 
@@ -199,7 +199,7 @@
 
 ### Added
 
-- Uma postura-de-lado deixou de ser silenciosa: evento `stand-down` + faixa **GATE OFF**; o cartão 自动审查 afirma o próprio escopo de presets.
+- Uma postura-de-lado deixou de ser silenciosa: evento `stand-down` + faixa **GATE OFF**; o cartão «自动审查» afirma o próprio escopo de presets.
 
 ### Changed
 
@@ -238,7 +238,7 @@
 ### Added
 
 - **Superfície de execução de rede (opt-in, desligada por padrão)**: proxy HTTP/CONNECT local.
-- **Dois níveis 自动审查** (`permissive` com sandbox de arquivos; `permissive-full` sem).
+- **Dois níveis «自动审查»** (`permissive` com sandbox de arquivos; `permissive-full` sem).
 - Expansão do modelo de regras (seis dimensões novas) e recarga a quente por chokidar.
 
 ### Fixed
@@ -261,7 +261,7 @@
 
 ### Changed
 
-- A série de versões da linha `main` passou a `2.x`, acompanhando a linha do DSH que serve; o nível de permissão é rotulado 自动审查 em toda superfície, sem ícone.
+- A série de versões da linha `main` passou a `2.x`, acompanhando a linha do DSH que serve; o nível de permissão é rotulado «自动审查» em toda superfície, sem ícone.
 
 ## [0.2.1-beta.4] - 2026-09-11
 

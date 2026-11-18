@@ -16,7 +16,7 @@
 - [Changelog em português](./CHANGELOG.pt.md)
 
 `dsh-perm-gate` versão **2.4.1**. Continue com o [README](./README.md) para a cadeia de decisão,
-o formato do arquivo de regras e o nível 自动审查.
+o formato do arquivo de regras e o nível «自动审查».
 
 ## Requisitos
 
@@ -46,7 +46,7 @@ artefato cobre as duas linhas e como as tags são publicadas.
 dsh plugin --profile web add dsh-perm-gate
 ```
 
-Isso traz o pacote publicado, aplica o `cordis.patch.yml` dele (o nível de sessão 自动审查 mais a
+Isso traz o pacote publicado, aplica o `cordis.patch.yml` dele (o nível de sessão «自动审查» mais a
 entrada do plugin) e monta as duas metades.
 
 ## Instale a partir da fonte
@@ -93,7 +93,7 @@ dsh profile reload --profile web
 
 ## Depois de um **upgrade do DSH**: reaplique o patch de glifo do composer
 
-O nível 自动审查（高权限） mostra o mesmo glifo escudo+olho que 自动审查 apenas porque
+O nível «自动审查（高权限）» mostra o mesmo glifo escudo+olho que «自动审查» apenas porque
 `scripts/patch-permission-glyph.mjs` o acrescentou a um **mapa fechado dentro de um pacote do host
 DSH**. O DSH deliberadamente não dá glifo a níveis configurados pelo host — o comentário do próprio
 mapa diz *"host-configured names outside the design set get none"* — e os objetos de opção que um
@@ -148,7 +148,7 @@ espalhados entre `dsh-permission-rules`, `dsh-auto-mode`, `dsh-auto-review` e
 2. Remova os quatro plugins do `cordis.yml` e acrescente a entrada única `dsh-perm-gate` acima.
 3. Delete quaisquer sobrescritas de preset que aqueles plugins contribuíam — o `cordis.patch.yml`
    **substitui** `permission.config.presets` por inteiro, de modo que patches por-chave obsoletos de
-   outros plugins podem silenciosamente derrubar o nível 自动审查 (ou um embutido).
+   outros plugins podem silenciosamente derrubar o nível «自动审查» (ou um embutido).
 4. Recarregue o perfil e verifique com `--list` (abaixo).
 
 ## Verifique
@@ -173,7 +173,7 @@ Forma esperada da saída do `--list`:
 }
 ```
 
-Na interface, **Settings → Plugins → 自动审查** deve renderizar um interruptor mais os quatro
+Na interface, **Configurações → Plugins → «自动审查»** deve renderizar um interruptor mais os quatro
 interruptores de estratégia de backend.
 
 ## Desinstalação
@@ -183,17 +183,17 @@ dsh plugin --profile web remove dsh-perm-gate
 dsh profile reload --profile web
 ```
 
-Remover o plugin também remove sua contribuição de patch, de modo que o nível 自动审查 desaparece
+Remover o plugin também remove sua contribuição de patch, de modo que o nível «自动审查» desaparece
 de novo do seletor de permissões da sessão.
 
 ## Solução de problemas
 
-**O nível 自动审查 sumiu do seletor de permissões.**
+**O nível «自动审查» sumiu do seletor de permissões.**
 O patch do bundle do DSH substitui o mapa `permission.config.presets` inteiro em vez de mesclar por
 chave. Recarregue o perfil para que o `cordis.patch.yml` seja reaplicado, e garanta que nenhum
 plugin posterior sobrescreva `presets`.
 
-**自动审查（高权限） perdeu o ícone no composer.**
+**«自动审查（高权限）» perdeu o ícone no composer.**
 Um upgrade ou reinstalação do DSH substituiu o bundle de host no qual o glifo foi patcheado;
 reexecutar a instalação do plugin não o traz de volta. Rode `npx dsh-perm-gate-patch-glyph` e
 recarregue. O nível em si não é afetado — seu rótulo e sua regência continuam funcionando sem o patch.
@@ -205,12 +205,12 @@ nunca é desativado em silêncio.
 
 **O `llmAssist` nunca dispara.**
 Ele precisa de `classifierEndpoint`, `classifierModel` e `classifierApiKey` (defina-os em
-**Settings → Plugins → 自动审查** ou no `cordis.yml`). Qualquer valor ausente ou erro de rede cai
+**Configurações → Plugins → «自动审查»** ou no `cordis.yml`). Qualquer valor ausente ou erro de rede cai
 de volta na costura humana — o portal é fail-closed por design.
 
 **A aba Approvals fica vazia.**
 O portal tem escopo nos níveis listados em `gatePresets` (padrão `['permissive']`), de modo que não
-registra nada enquanto a sessão roda em outro nível — escolha 自动审查 no seletor de permissões para
+registra nada enquanto a sessão roda em outro nível — escolha «自动审查» no seletor de permissões para
 a sessão que quer ver registrada. Uma sessão que nunca selecionou um preset também está fora do escopo.
 Sessões novas começam no nível nomeado pela configuração `permission.defaultPreset`.
 
