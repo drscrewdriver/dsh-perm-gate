@@ -20,6 +20,14 @@ describe('familyOfPath — 族归属解析', () => {
     [`${HOME}/.ssh/id_rsa.bak`, 'ssh'],
     ['E:/w/id_ed25519.old', 'ssh'],
     [`${HOME}/.aws/credentials`, 'cloud'],
+    [`${HOME}/.kube/config`, 'cloud'],
+    [`${HOME}/.kube/config.bak`, 'cloud'],
+    [`${HOME}/.docker/config.json`, 'cloud'],
+    [`${HOME}/.gcp/credentials.json`, 'cloud'],
+    [`${HOME}/.gemini/oauth_creds.json`, 'cli'],
+    [`${HOME}/.cursor/auth.json`, 'cli'],
+    [`${HOME}/.local/share/devin/credentials.toml`, 'cli'],
+    [`${HOME}/.factory/auth.encrypted`, 'cli'],
     [`${HOME}/.npmrc`, 'package'],
     [`${HOME}/.git-credentials`, 'gitcreds'],
     ['E:/w/.env', 'env'],
@@ -38,6 +46,12 @@ describe('familyOfPath — 族归属解析', () => {
 
   it('段首锚定：ssh 变体 glob 不吞 mid-name 形态', () => {
     for (const p of ['E:/w/myid_rsa.notes', `${HOME}/Documents/kid_ed25519.txt`]) {
+      expect(familyOfPath(p)).toBeUndefined()
+    }
+  })
+
+  it('cli 扩张按 cc 精度：config 面不收（defaultOff 对齐）', () => {
+    for (const p of [`${HOME}/.gemini/settings.json`, `${HOME}/.copilot/mcp-config.json`, `${HOME}/.grok/config.toml`]) {
       expect(familyOfPath(p)).toBeUndefined()
     }
   })

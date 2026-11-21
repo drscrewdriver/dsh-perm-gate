@@ -192,6 +192,28 @@ describe('cred family rows — file-tool reads are named per family', () => {
   })
 })
 
+// cred.cloud-extended / cred.cli-extended (v5): the file-tool read half of the
+// expanded credential stores.
+describe('credential store extension rows — file-tool reads', () => {
+  it.each([
+    ['C:/Users/u/.kube/config', 'cred.cloud-extended'],
+    ['C:/Users/u/.docker/config.json', 'cred.cloud-extended'],
+    ['C:/Users/u/.gemini/oauth_creds.json', 'cred.cli-extended'],
+    ['C:/Users/u/.cursor/auth.json', 'cred.cli-extended'],
+  ])('read %s asks with tag %s', (file_path, id) => {
+    const v = decideRules(RULESET, { tool: 'read', args: { file_path }, cwd: 'E:/w' })
+    expect(v.action).toBe('ask')
+    expect(presetRuleId(v.reason)).toBe(id)
+  })
+
+  it('config faces of the same CLIs stay untouched (cc defaultOff parity)', () => {
+    for (const p of ['C:/Users/u/.gemini/settings.json', 'C:/Users/u/.copilot/mcp-config.json']) {
+      const v = decideRules(RULESET, { tool: 'read', args: { file_path: p }, cwd: 'E:/w' })
+      expect(presetRuleId(v.reason) ?? '').not.toMatch(/^cred\.cloud-extended$|^cred\.cli-extended$/)
+    }
+  })
+})
+
 // cred.ssh-variants (v3): the file-tool half of the ssh-key variant guard.
 describe('ssh-key variant rows — file-tool reads', () => {
   it.each([
