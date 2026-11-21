@@ -81,4 +81,24 @@ describe('preset deny-keyword layer (inherited from dsh-approval-gate)', () => {
     expect(DEFAULT_DENY_KEYWORDS).toContain('git reset --hard')
     expect(DEFAULT_DENY_KEYWORDS).toContain('docker system prune')
   })
+
+  /**
+   * S6 finding (cc-safety-net issue #368 family), kept as a regression mirror:
+   * a python -c one-liner destroying a tree via shutil.rmtree carries none of
+   * the shell keywords. The word-boundary layer CANNOT take this token —
+   * `grep -R "shutil.rmtree" src/` (an ordinary code review) matches the exact
+   * same scalar argument and would be denied (measured 2026-11-22; see
+   * docs/cc-safety-net-parity-audit.md). Closing this gap needs an engine-side
+   * interpreter-argument semantic screen, not a data token — the residual risk
+   * rides the LLM grader / default ask as before.
+   */
+  it('documents the known interpreter-destruction gap (not keyword-fixable)', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined })
+    const oneLiner = `python -c "import shutil; shutil.rmtree('/work/cache')"`
+    // The one-liner is NOT denied by the keyword layer (no token, by design).
+    expect(r.decideExecution(EXEC(oneLiner))?.reason).not.toContain('deny-keyword')
+    // And an innocent search of the same phrase is likewise untouched — the
+    // property that makes the data-token approach unshippable.
+    expect(r.decideExecution(EXEC(`grep -R "shutil.rmtree" src/`))?.kind).not.toBe('deny')
+  })
 })
