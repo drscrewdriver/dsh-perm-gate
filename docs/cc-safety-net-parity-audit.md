@@ -38,6 +38,12 @@ WHATWG URL 的 `hostname` 对 IPv6 主机**带方括号**返回（`http://[fd00:
 
 **修复建议**（一行，走后续 patch 段）：`parseUrlTarget` 内 `const host = u.hostname.replace(/^\[|\]$/g, '')`，与提取器同款归一化；补一条 bracketed-IPv6 的代理面单测。
 
+## E. 更正：5.5.9 CHANGELOG 的「P0 写地板覆盖」断言不成立（实测）
+
+S4 探针（`hardDenyReason(write ~/.docker/config.json)` → `undefined`）证实：`hardDenyReason` 的 credential-store 写判据前置条件是 **P0 内置 store 名单**（`credential-paths.ts`/`path.ts`），`familyOfPath` 只参与其后的 **readwrite 豁免判定**。家族扩张（kube/docker/gcp）的真实效应是：readwrite 档的写豁免判定现在覆盖这些 store——而**默认档对它们的写入本来就不硬拦**（不在内置名单）。5.5.9 CHANGELOG 里「P0 凭据写地板现在也覆盖这三个 store 的写入（默认档硬拦）」的说法是**错的**，本仓 CHANGELOG 条目已就地更正（已发布的 5.5.9 tarball 文本不可改，以本节与本更正为准）。
+
+实际语义核对 cc：cc 的 secret 保护同样以**读/访问面**为主（`.kube/config` 的读取在其 secret.home 规则内），对写入无独立硬拦——gate 现状（读 ask 经 `cred.cloud-extended` 行；写默认档放行）与 cc 对齐，无需代码变更。后续若要给 kube/docker config 的**写入**设地板，应走 P0 内置名单扩展（独立裁决，本审计不启动）。
+
 ## S1–S5 交付账目
 
 | 段 | 版本 | commit | tag | npm latest | 水位 |
@@ -55,3 +61,4 @@ WHATWG URL 的 `hostname` 对 IPv6 主机**带方括号**返回（`http://[fd00:
 1. **引擎段**：管道数据流跟踪（A）+ interpreter 参数语义屏（C）——一次解构器工程可同场。
 2. **patch 段**：`parseUrlTarget` IPv6 括号归一化（D，一行 + 单测）。
 3. **grader 段**：P3 提示词增加上传外发判据（B）。
+4. **裁决项**：kube/docker/gcp config 写入是否入 P0 内置 store 名单（E）——现状与 cc 对齐，扩张与否交所有者裁决。
