@@ -134,6 +134,9 @@ const ASK_CASES: readonly (readonly [string, string])[] = [
   // endpoint is a question, not a theft.
   ['echo http://169.254.169.254/latest/meta-data/', 'network.cloud-metadata-ips-any'],
   ['powershell Invoke-WebRequest http://metadata.goog/', 'network.cloud-metadata-domains-any'],
+  // ssh-key variants (v3): renamed/copied keys get the canonical keys' ask.
+  ['cat id_rsa.bak', 'secret.ssh-key-variants'],
+  ['cat github_deploy_ed25519', 'secret.ssh-key-variants'],
 ]
 
 describe.each(ASK_CASES)('ask example %s', (command, id) => {
@@ -181,6 +184,26 @@ describe('cred family rows — file-tool reads are named per family', () => {
   })
 })
 
+// cred.ssh-variants (v3): the file-tool half of the ssh-key variant guard.
+describe('ssh-key variant rows — file-tool reads', () => {
+  it.each([
+    ['E:/w/github_deploy_rsa', 'cred.ssh-variants'],
+    ['E:/w/id_rsa.bak', 'cred.ssh-variants'],
+    ['E:/w/credentials', 'cred.ssh-variants'],
+  ])('read %s asks with tag %s', (file_path, id) => {
+    const v = decideRules(RULESET, { tool: 'read', args: { file_path }, cwd: 'E:/w' })
+    expect(v.action).toBe('ask')
+    expect(presetRuleId(v.reason)).toBe(id)
+  })
+
+  it('ordinary files are untouched', () => {
+    for (const p of ['E:/w/src/app.ts', 'E:/w/docs/credentials-guide.md', 'E:/w/credentials.json']) {
+      const v = decideRules(RULESET, { tool: 'read', args: { file_path: p }, cwd: 'E:/w' })
+      expect(presetRuleId(v.reason)).not.toBe('cred.ssh-variants')
+    }
+  })
+})
+
 // Disturbance mirror: routine commands must not carry ANY preset tag.
 const WHITELIST: readonly string[] = [
   'git status',
@@ -200,6 +223,9 @@ const WHITELIST: readonly string[] = [
   'curl http://localhost:3000/health',
   'wget -qO- https://example.com/status',
   'git push origin main',
+  // v3 variants: prose and json neighbors of credential shapes stay untouched.
+  'cat docs/credentials-guide.md',
+  'cat config/credentials.json',
   'dd if=a.img of=b.img',
   'grep -R pattern src',
   'git worktree list',

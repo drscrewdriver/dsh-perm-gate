@@ -17,6 +17,8 @@ const write = (file_path: string, credWriteExempt?: string[]): ToolCallContext =
 describe('familyOfPath — 族归属解析', () => {
   it.each([
     [`${HOME}/.ssh/id_ed25519`, 'ssh'],
+    [`${HOME}/.ssh/id_rsa.bak`, 'ssh'],
+    ['E:/w/id_ed25519.old', 'ssh'],
     [`${HOME}/.aws/credentials`, 'cloud'],
     [`${HOME}/.npmrc`, 'package'],
     [`${HOME}/.git-credentials`, 'gitcreds'],
@@ -30,6 +32,12 @@ describe('familyOfPath — 族归属解析', () => {
 
   it('普通源码与无凭据语义的路径没有族', () => {
     for (const p of ['E:/w/src/app.ts', `${HOME}/Documents/notes.md`, 'E:/w/ambient.txt']) {
+      expect(familyOfPath(p)).toBeUndefined()
+    }
+  })
+
+  it('段首锚定：ssh 变体 glob 不吞 mid-name 形态', () => {
+    for (const p of ['E:/w/myid_rsa.notes', `${HOME}/Documents/kid_ed25519.txt`]) {
       expect(familyOfPath(p)).toBeUndefined()
     }
   })

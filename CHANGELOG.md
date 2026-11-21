@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.7 (2026-11-22)
+
+- **SSH 私钥变体覆盖（cc-safety-net `secret.variant.*` 对标）**：密钥被复制改名后（`id_rsa.bak`/`id_rsa-old`/`github_deploy_ed25519`）此前完全裸奔——现有 `*id_rsa` glob 不带尾星、裸点分名是段尾精确匹配。两层修复：① `cred-families.ts` ssh 家族补四个点分变体形状（`id_rsa.*`/`id_ed25519.*`/`id_ecdsa.*`/`id_dsa.*`，段首锚定，`myid_rsa.notes` 不吞），familyOfPath 命中 → P0 凭据写地板同步覆盖变体；② 预设表新增 2 行（表水位 v2→v3，新 id 不动旧行）——shell 读面 `secret.ssh-key-variants` 与文件工具读面 `cred.ssh-variants`，args 收 `*id_rsa*`/`*_rsa`/`*_ed25519`/`*_ecdsa` 宽底名 + 泛名 `credentials`/`*/credentials`。两行放在家族阶梯**之后**：规范形态保持家族 tag 与 rung 治理，只有阶梯漏掉的变体才落到新行；`cred.ssh-variants` 不受家族档位治理（readonly/readwrite 不静音它），误伤按行撤销。白名单对照（`docs/credentials-guide.md`、`config/credentials.json`、`credentials.yaml`）零命中。
+
 ## 5.5.6 (2026-11-22)
 
 - **云元数据端点防护（cc-safety-net `network.cloud-metadata` 对标，双面闭环）**：`curl http://169.254.169.254/latest/meta-data/…` 这类一次请求即可取回实例 IAM/STS 凭据的调用，预执行面与代理面都被拦。预设表新增 4 行（`[deny-rule:network.cloud-metadata-ips/-domains/-ips-any/-domains-any]`，表水位 v1→v2 幂等补行）：已知 HTTP 客户端/raw socket/解释器（curl/wget/nc/socat/python/node/ruby/perl/php 等 15 词）点名 8 个元数据端点（AWS/GCP/Azure ECS/阿里云，含 IPv6 形态）直接 deny；其余调用（echo、cat 等非客户端）点名端点降级 ask，误伤可逐条撤销。代理面（开网络代理时）对 attributed 流量按同一清单拦截，无需命令可见。预执行候选来自新纯模块 `src/network-extract.ts`——`decideRules` 像派生 commands/pathCands/urlCands 一样派生网络候选（commandText + url 系参数键；裸 IPv4、括号 IPv6、裸 hostname token；时间戳 `12:30:45` 不误报；候选按 host 去重、丰富形态优先，上限 16 条）。规则行只在自己的 network 子维度命中候选时才发起，普通 `curl https://registry.npmjs.org/…`、`git push origin main` 等日常动作零命中（白名单对照集全绿）。138 用例 + 15 提取器用例全绿；误伤申诉 = 设置卡把对应 `[deny-rule:network.cloud-metadata-*]` 行 `enabled:false` 或删除。

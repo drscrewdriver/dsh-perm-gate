@@ -38,9 +38,10 @@ import { CRED_FAMILY_IDS, type CredFamily } from './cred-families.js'
  * preserving) whenever the stored `presetRulesVersion` lags this number — bump it
  * whenever `PRESET_RULES_YAML` gains entries that existing installs must receive
  * (v1 added the seven `cred.*` family rows; v2 added the four
- * `network.cloud-metadata*` rows with the pre-execution extractor).
+ * `network.cloud-metadata*` rows with the pre-execution extractor; v3 added the
+ * two ssh-key-variant rows and the dotted-variant shapes to the ssh family).
  */
-export const PRESET_TABLE_VERSION = 2
+export const PRESET_TABLE_VERSION = 3
 
 /** Tag prefix carried by every preset entry's reason; locates an entry for revocation. */
 export const PRESET_RULE_MARKER = '[deny-rule:'
@@ -301,6 +302,22 @@ ask:
   - tools: [read, read_image, grep, glob, ls, lsp]
     args: ["*/.pgpass", "*pgpass", "*/.my.cnf"]
     reason: "[deny-rule:cred.db] Reading database credential files needs confirmation (family rung: ask)."
+
+  # SSH key variants (cc-safety-net secret.variant.* + the broad *_rsa|dsa|ed25519|ecdsa
+  # shape + the generic "credentials" basename): keys get copied and renamed —
+  # id_rsa.bak, github_deploy_ed25519 and id_rsa-old deserve the same ask the
+  # canonical names get. New rows (not a mutation of the seeded originals): the
+  # watermark backfill is id-based and a mutated row would never reach existing
+  # installs. They sit AFTER the family ladder so canonical shapes keep their
+  # family tag (and rung governance); only what the ladder missed falls through.
+  # The cred.ssh-variants row is NOT family-governed — a readonly/readwrite rung
+  # on the ssh family does not silence it; revoke it by row if unwanted.
+  - command: [cat, head, tail, type, "get-content", ls, dir, "get-childitem", "select-string"]
+    args: ["*id_rsa*", "*id_ed25519*", "*id_ecdsa*", "*id_dsa*", "*_rsa", "*_dsa", "*_ed25519", "*_ecdsa", "credentials", "*/credentials"]
+    reason: "[deny-rule:secret.ssh-key-variants] This path looks like a private key under a renamed or variant basename. Reading key material needs confirmation."
+  - tools: [read, read_image, grep, glob, ls, lsp]
+    args: ["*id_rsa*", "*id_ed25519*", "*id_ecdsa*", "*id_dsa*", "*_rsa", "*_dsa", "*_ed25519", "*_ecdsa", "credentials", "*/credentials"]
+    reason: "[deny-rule:cred.ssh-variants] Reading a private-key variant basename needs confirmation (not family-governed; revoke by row)."
 
   # Self-protection: editing the gate's own rule sources needs confirmation —
   # revocation must be a human act, not something an agent can slide through.
