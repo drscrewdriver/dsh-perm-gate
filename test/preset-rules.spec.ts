@@ -102,6 +102,10 @@ const DENY_CASES: readonly (readonly [string, string])[] = [
   ['rmdir /s /q .git', 'cmd.recursive-delete-git-metadata'],
   ['echo TOKEN=x > .env', 'secret.write-overwrite-env'],
   ['rm -rf ~/.ssh', 'secret.delete-credential-path'],
+  // sensitive-file extensions (v4): deletion is the deny side.
+  ['rm -rf backup.pem', 'secret.ext-delete'],
+  ['Remove-Item keys.pfx -Recurse -Force', 'secret.ext-delete'],
+  ['del /s /q old.jks', 'secret.ext-delete'],
   // network.cloud-metadata: the pre-execution half (candidates from network-extract.ts).
   ['curl http://169.254.169.254/latest/meta-data/iam/security-credentials/', 'network.cloud-metadata-ips'],
   ['wget -qO- http://100.100.100.200/latest/meta-data/', 'network.cloud-metadata-ips'],
@@ -137,6 +141,10 @@ const ASK_CASES: readonly (readonly [string, string])[] = [
   // ssh-key variants (v3): renamed/copied keys get the canonical keys' ask.
   ['cat id_rsa.bak', 'secret.ssh-key-variants'],
   ['cat github_deploy_ed25519', 'secret.ssh-key-variants'],
+  // sensitive-file extensions (v4): reading them is the ask side.
+  ['cat server.pem', 'secret.ext-read-shell'],
+  ['cat vault.kdbx', 'secret.ext-read-shell'],
+  ['cat tunnel.ovpn', 'secret.ext-read-shell'],
 ]
 
 describe.each(ASK_CASES)('ask example %s', (command, id) => {
@@ -200,6 +208,26 @@ describe('ssh-key variant rows — file-tool reads', () => {
     for (const p of ['E:/w/src/app.ts', 'E:/w/docs/credentials-guide.md', 'E:/w/credentials.json']) {
       const v = decideRules(RULESET, { tool: 'read', args: { file_path: p }, cwd: 'E:/w' })
       expect(presetRuleId(v.reason)).not.toBe('cred.ssh-variants')
+    }
+  })
+})
+
+// secret.ext-* (v4): the file-tool read half of the extension guard.
+describe('sensitive-file extension rows — file-tool reads', () => {
+  it.each([
+    ['E:/w/certs/server.pem', 'secret.ext-read'],
+    ['E:/w/vault.kdbx', 'secret.ext-read'],
+    ['E:/w/tunnel.ovpn', 'secret.ext-read'],
+  ])('read %s asks with tag %s', (file_path, id) => {
+    const v = decideRules(RULESET, { tool: 'read', args: { file_path }, cwd: 'E:/w' })
+    expect(v.action).toBe('ask')
+    expect(presetRuleId(v.reason)).toBe(id)
+  })
+
+  it('key-like names that do not END in the extension are untouched', () => {
+    for (const p of ['E:/w/src/api.key.ts', 'E:/w/docs/keystore-notes.md']) {
+      const v = decideRules(RULESET, { tool: 'read', args: { file_path: p }, cwd: 'E:/w' })
+      expect(presetRuleId(v.reason) ?? '').not.toMatch(/^secret\.ext/)
     }
   })
 })

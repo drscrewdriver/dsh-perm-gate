@@ -1,6 +1,6 @@
 {
   "name": "dsh-perm-gate",
-  "version": "5.5.7",
+  "version": "5.5.8",
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "tag": "latest"
