@@ -12,6 +12,7 @@ import {
   type RuleAction,
 } from './rule.js'
 import { commandArgv, decomposeShellCommand, isForceDeletion, isRecursiveDeletion, type SimpleCommand } from './shell.js'
+import { extractNetworkTargets, type NetworkTargetLite } from './network-extract.js'
 import { compileCidr, compilePortSpec, compileDomainPattern } from './compiler.js'
 import { dispatchCommand } from './command-dispatcher.js'
 import type { ParamCondition, NetworkDimension, WhenDimension } from './rule-dims.js'
@@ -92,7 +93,7 @@ export interface Decision {
 export const SHELL_TOOLS = IMPORTED_SHELL_TOOLS
 
 /** Whether one compiled rule matches the given call context. */
-export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[]): boolean {
+export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[], networkCands?: readonly NetworkTargetLite[]): boolean {
   if (!rule.enabled) return false
   // tools dimension: any glob matches.
   if (rule.tools.length > 0 && !rule.tools.some((t) => t.re.test(ctx.tool))) return false
@@ -164,9 +165,16 @@ export function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, comma
     // while cross-segment patterns (`curl|sh`) still read the joined string.
     if (!compiled.some((g) => g.test(pipelineText) || argvs.some((s) => g.test(s)))) return false
   }
-  // network dimension: all present sub-dimensions must match.
+  // network dimension: all present sub-dimensions must match. Pre-execution
+  // candidates (harvested from the call's own command text and url-ish args,
+  // see network-extract.ts) match when ANY of them satisfies every present
+  // sub-dimension — one URL naming a metadata endpoint is enough, a rule may
+  // not rely on the other URLs in the same command being benign. A hand-built
+  // context with a single explicit `network` target keeps its original shape.
   if (rule.network !== undefined) {
-    if (!matchNetwork(rule.network, ctx.network)) return false
+    const dim = rule.network
+    const candidates: readonly NetworkTargetLite[] = networkCands ?? (ctx.network !== undefined ? [ctx.network] : [])
+    if (!candidates.some((t) => matchNetworkOne(dim, t))) return false
   }
   // branch dimension: git semantics only; non-git commands satisfy no branch
   // dimension (per sub-dimension above). Never throws — a parser is pure, and
@@ -288,10 +296,16 @@ export function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Dec
   const commands = shellText !== undefined ? decomposeSafe(shellText) : []
   const pathCands = extractPathCandidates(ctx.args)
   const urlCands = extractUrlCandidates(ctx.args)
+  // Network candidates are derived like every other candidate family: from the
+  // call's own text and arguments, so hand-built contexts (tests, embedders)
+  // get the same treatment as runtime calls. An explicit single target, when
+  // the caller pins one (dry-run rules panel), is consulted first.
+  const networkCands = extractNetworkTargets(shellText, ctx.args)
+  if (ctx.network !== undefined) networkCands.unshift(ctx.network)
 
   const scan = (list: readonly CompiledRuleEntry[], _action: RuleAction): Decision | undefined => {
     for (const rule of list) {
-      if (ruleMatches(rule, ctx, commands, pathCands, urlCands)) {
+      if (ruleMatches(rule, ctx, commands, pathCands, urlCands, networkCands)) {
         return { action: rule.action, reason: rule.reason, ruleIndex: rule.index }
       }
     }
@@ -424,10 +438,11 @@ function matchWhen(when: WhenDimension): boolean {
 }
 
 /**
- * Match the network dimension: all present sub-dimensions must match.
- * Within a sub-dimension, entries are OR.
+ * Match the network dimension against ONE target: all present sub-dimensions
+ * must match. Within a sub-dimension, entries are OR. Multi-candidate matching
+ * (any-of) happens at the call site, over the harvested candidates.
  */
-function matchNetwork(network: NetworkDimension, ctx?: { domain?: string; ip?: string; port?: number; scheme?: string }): boolean {
+function matchNetworkOne(network: NetworkDimension, ctx?: { domain?: string; ip?: string; port?: number; scheme?: string }): boolean {
   if (ctx === undefined) return false
   // domains
   if (network.domains !== undefined && network.domains.length > 0) {

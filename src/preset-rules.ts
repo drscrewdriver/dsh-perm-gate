@@ -37,9 +37,10 @@ import { CRED_FAMILY_IDS, type CredFamily } from './cred-families.js'
  * Shipped version of the preset table. Activation backfills (idempotent, revocation-
  * preserving) whenever the stored `presetRulesVersion` lags this number — bump it
  * whenever `PRESET_RULES_YAML` gains entries that existing installs must receive
- * (v1 added the seven `cred.*` family rows).
+ * (v1 added the seven `cred.*` family rows; v2 added the four
+ * `network.cloud-metadata*` rows with the pre-execution extractor).
  */
-export const PRESET_TABLE_VERSION = 1
+export const PRESET_TABLE_VERSION = 2
 
 /** Tag prefix carried by every preset entry's reason; locates an entry for revocation. */
 export const PRESET_RULE_MARKER = '[deny-rule:'
@@ -168,6 +169,23 @@ deny:
     args: ["*/dev/sd*", "*/dev/nvme*", "*/dev/disk*", "*/dev/mmcblk*"]
     reason: "[deny-rule:redirect.block-device] Redirect target resolving to a disk device path."
 
+  # ── Network ───────────────────────────────────────────────────────────────
+  # Cloud metadata endpoints (cc-safety-net network.cloud-metadata): one request
+  # returns the instance's IAM/STS credentials. The known HTTP clients, raw
+  # sockets and interpreters are denied outright; anything else that merely
+  # names an endpoint escalates to ask (the catch-all rows in the ask section).
+  # ips and domains live on separate rows — the dimension's sub-dimensions are
+  # AND, and one target can only ever be one of the two shapes. At the proxy
+  # face these rows fire for attributed traffic regardless of the command
+  # (command is invisible there); pre-execution the network candidates come
+  # from network-extract.ts.
+  - command: [curl, wget, http, httpie, nc, ncat, netcat, socat, python, python3, node, deno, ruby, perl, php]
+    network: { ips: ["169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23", "100.100.100.200"] }
+    reason: "[deny-rule:network.cloud-metadata-ips] A cloud metadata endpoint returns the instance's IAM credentials to whoever asks. Fetch through the platform SDK or IMDSv2 session auth — never a bare client call."
+  - command: [curl, wget, http, httpie, nc, ncat, netcat, socat, python, python3, node, deno, ruby, perl, php]
+    network: { domains: ["metadata.google.internal", "metadata.goog"] }
+    reason: "[deny-rule:network.cloud-metadata-domains] A cloud metadata endpoint returns the instance's IAM credentials to whoever asks. Fetch through the platform SDK or IMDSv2 session auth — never a bare client call."
+
   # ── PowerShell ───────────────────────────────────────────────────────────
   # Command words are lowercased by the decomposer — command dimensions must
   # carry the lowercased verb (Remove-Item → remove-item).
@@ -238,6 +256,13 @@ ask:
   # NOTE: cc's git checkout <ref> <path> ambiguity (G5) is NOT ported — a glob
   # cannot tell ref candidates from paths, and a broad pattern would prompt on
   # every git checkout -b new-branch. Documented residual gap.
+
+  # The catch-all half of the metadata guard: a non-client call (echo, cat, a
+  # script) that merely names an endpoint is a question, not a theft — ask.
+  - network: { ips: ["169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23", "100.100.100.200"] }
+    reason: "[deny-rule:network.cloud-metadata-ips-any] This call names a cloud metadata endpoint. Confirm why instance credentials are being addressed before it runs."
+  - network: { domains: ["metadata.google.internal", "metadata.goog"] }
+    reason: "[deny-rule:network.cloud-metadata-domains-any] This call names a cloud metadata endpoint. Confirm why instance credentials are being addressed before it runs."
 
   # Credential reads: ask (A2 ruling kept; egress combos stay in the prompt layer).
   - command: [cat, head, tail, type, "get-content", ls, dir, "get-childitem", "select-string"]

@@ -102,6 +102,13 @@ const DENY_CASES: readonly (readonly [string, string])[] = [
   ['rmdir /s /q .git', 'cmd.recursive-delete-git-metadata'],
   ['echo TOKEN=x > .env', 'secret.write-overwrite-env'],
   ['rm -rf ~/.ssh', 'secret.delete-credential-path'],
+  // network.cloud-metadata: the pre-execution half (candidates from network-extract.ts).
+  ['curl http://169.254.169.254/latest/meta-data/iam/security-credentials/', 'network.cloud-metadata-ips'],
+  ['wget -qO- http://100.100.100.200/latest/meta-data/', 'network.cloud-metadata-ips'],
+  ['nc 169.254.169.254 80', 'network.cloud-metadata-ips'],
+  ["python3 -c \"urllib.request.urlopen('http://fd00:ec2::254/latest/meta-data/')\"", 'network.cloud-metadata-ips'],
+  ['curl http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', 'network.cloud-metadata-domains'],
+  ['node -e "fetch(\'http://metadata.goog/\').then(r => r.text())"', 'network.cloud-metadata-domains'],
 ]
 
 describe.each(DENY_CASES)('deny example %s', (command, id) => {
@@ -123,6 +130,10 @@ const ASK_CASES: readonly (readonly [string, string])[] = [
   ['cmd /c rmdir /s /q build', 'cmd.recursive-delete-nested'],
   ['cat .env', 'secret.read-credential-file'],
   ['ls ~/.aws', 'secret.read-home-credential-dirs'],
+  // network.cloud-metadata catch-all: a non-client call that merely NAMES an
+  // endpoint is a question, not a theft.
+  ['echo http://169.254.169.254/latest/meta-data/', 'network.cloud-metadata-ips-any'],
+  ['powershell Invoke-WebRequest http://metadata.goog/', 'network.cloud-metadata-domains-any'],
 ]
 
 describe.each(ASK_CASES)('ask example %s', (command, id) => {
@@ -184,8 +195,11 @@ const WHITELIST: readonly string[] = [
   'npm publish --tag beta',
   'ls dist',
   'rm -rf ./build',
-  'find . -name "*.log"',
-  'rsync -av ./src/ ./dst/',
+  // Ordinary network calls: no metadata endpoint, no preset hit.
+  'curl https://registry.npmjs.org/dsh-perm-gate',
+  'curl http://localhost:3000/health',
+  'wget -qO- https://example.com/status',
+  'git push origin main',
   'dd if=a.img of=b.img',
   'grep -R pattern src',
   'git worktree list',

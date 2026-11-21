@@ -1,5 +1,6 @@
 import { type CompiledRuleEntry, type CompiledRuleset, type RuleAction } from './rule.js';
 import { type SimpleCommand } from './shell.js';
+import { type NetworkTargetLite } from './network-extract.js';
 import type { ScanKeyPolicy } from './scan-text.js';
 export interface ToolCallContext {
     readonly tool: string;
@@ -67,6 +68,6 @@ export interface Decision {
  */
 export declare const SHELL_TOOLS: Set<string>;
 /** Whether one compiled rule matches the given call context. */
-export declare function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[]): boolean;
+export declare function ruleMatches(rule: CompiledRuleEntry, ctx: ToolCallContext, commands: readonly SimpleCommand[], pathCands: readonly string[], urlCands: readonly string[], networkCands?: readonly NetworkTargetLite[]): boolean;
 /** Compute the deterministic first-match decision (P2 chain). */
 export declare function decideRules(ruleset: CompiledRuleset, ctx: ToolCallContext): Decision;
