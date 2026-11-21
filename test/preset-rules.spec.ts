@@ -113,6 +113,11 @@ const DENY_CASES: readonly (readonly [string, string])[] = [
   ["python3 -c \"urllib.request.urlopen('http://fd00:ec2::254/latest/meta-data/')\"", 'network.cloud-metadata-ips'],
   ['curl http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', 'network.cloud-metadata-domains'],
   ['node -e "fetch(\'http://metadata.goog/\').then(r => r.text())"', 'network.cloud-metadata-domains'],
+  // unshare user-namespace (v6): the sandbox-escape first hop.
+  ['unshare -r id', 'exec.unshare-user-ns'],
+  ['unshare --map-root-user bash', 'exec.unshare-user-ns'],
+  ['unshare -U -r true', 'exec.unshare-user-ns'],
+  ['unshare --map-auto /bin/sh', 'exec.unshare-user-ns'],
 ]
 
 describe.each(DENY_CASES)('deny example %s', (command, id) => {
@@ -276,6 +281,9 @@ const WHITELIST: readonly string[] = [
   // v3 variants: prose and json neighbors of credential shapes stay untouched.
   'cat docs/credentials-guide.md',
   'cat config/credentials.json',
+  // v6: plain namespace isolation is not a user-namespace escape.
+  'unshare --mount /mnt/point',
+  'unshare -n true',
   'dd if=a.img of=b.img',
   'grep -R pattern src',
   'git worktree list',

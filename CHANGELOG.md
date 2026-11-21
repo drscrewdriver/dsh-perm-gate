@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.5.10 (2026-11-22)
+
+- **unshare 用户命名空间阻断（cc-safety-net `unshare.user-namespace` 对标）**：`unshare -r`/`-U`/`--user`/`--map-*`/`-c` 把受限会话映射成 namespace root——沙箱逃逸的标准第一跳，预设表 deny 区新增 `exec.unshare-user-ns` 行（表水位 v5→v6），argv pipeline 9 个形态覆盖裸旗标与中缀组合（大小写敏感，`-C/--cgroup` 非本裁决面；裸 `--mount`/`-n` 隔离用法按裁决不拦）。
+
 ## 5.5.9 (2026-11-22)
 
 - **凭据库扩张（cc-safety-net `secret.home.*` / `secret.cli.*` 对标）**：cloud 家族收编 `~/.gcp`、`~/.kube/config`（含 .bak/.old 等备份后缀变体）、`~/.docker/config.json`（docker login 存活的 registry 凭据）——**注意：familyOfPath 随之扩大，P0 凭据写地板现在也覆盖这三个 store 的写入**（写 kubeconfig/docker config = 安装集群/registry 凭据，默认档硬拦）。cli 家族按 cc 的**文件精度**收编 10 个 coding-CLI 凭据库：gemini（oauth_creds/mcp-oauth-tokens/a2a-oauth-tokens/gemini-credentials）、copilot（config.json/mcp-oauth-config/mcp-secrets）、kimi(-code)（credentials/server.token/mcp-oauth）、opencode（auth.json/mcp-auth.json/opencode.db）、pi、amp（secrets.json/oauth）、cursor（auth.json/projects/*/mcp-auth.json）、grok（mcp_credentials.json）、factory（auth.*）、devin（~/.local/share/devin/*）——**config 面刻意不收**（cc 把 config 类 defaultOff 的同一 FP 理由）。预设表新增 2 行（表水位 v4→v5，新 id 不动旧行）：`cred.cloud-extended` / `cred.cli-extended`（文件工具读 ask，阶梯之后、家族 rung 不治理，误伤按行撤销）。glob 编译器双星上限决定了 cli 面走精确文件枚举（与 cc 目录原形态一致）；新 CLI 文件名出现时走后续水位版本补行。
