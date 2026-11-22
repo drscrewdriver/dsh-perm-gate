@@ -11,8 +11,8 @@
  * Kept dependency-free beyond react: the scope is subscribed with
  * `useSyncExternalStore`, and the controls are plain HTML.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties, JSX } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties, JSX, ReactNode } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsDocHandle } from './compat.ts'
 import { pendingAfterFailure, pendingAfterSync, shownValue, SWITCH_SETTLE_MS } from './switch-state.ts'
@@ -362,7 +362,7 @@ const CRED_RUNG_LABEL_KEY = {
   readwrite: 'card.credRung.readwrite',
 } as const
 
-function CredLadderSection(props: { t: PermissiveCardProps['t']; readonly: boolean }) {
+function CredLadderSection(props: { t: PermissiveCardProps['t']; readonly: boolean; onRungs?: (rungs: Record<string, string>) => void }) {
   const { t, readonly } = props
   const [rungs, setRungs] = useState<Record<string, string> | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
@@ -374,7 +374,12 @@ function CredLadderSection(props: { t: PermissiveCardProps['t']; readonly: boole
     let alive = true
     fetch('/api/dsh-perm-gate/cred', { headers: { 'cache-control': 'no-cache' } })
       .then((r) => r.json())
-      .then((b: { rungs?: Record<string, string> }) => { if (alive && b?.rungs !== undefined) setRungs(b.rungs) })
+      .then((b: { rungs?: Record<string, string> }) => {
+        if (alive && b?.rungs !== undefined) {
+          setRungs(b.rungs)
+          props.onRungs?.(b.rungs)
+        }
+      })
       .catch(() => { /* route unavailable: the section keeps showing the loading line */ })
     return () => { alive = false }
   }, [])
@@ -393,7 +398,10 @@ function CredLadderSection(props: { t: PermissiveCardProps['t']; readonly: boole
     })
       .then((r) => r.json())
       .then((b: { ok?: boolean; rungs?: Record<string, string>; error?: string }) => {
-        if (b?.ok === true && b.rungs !== undefined) setRungs(b.rungs)
+        if (b?.ok === true && b.rungs !== undefined) {
+          setRungs(b.rungs)
+          props.onRungs?.(b.rungs)
+        }
         else setRowError({ family, msg: String(b?.error ?? 'failed') })
       })
       .catch((e: unknown) => {
@@ -539,22 +547,172 @@ function StringListField(props: {
   )
 }
 
+/** Stable snapshot served while the real scope has not resolved yet — the
+ * store hook needs a referentially stable object; the diagnostic placeholder
+ * renders instead of the card body in that case. */
+const EMPTY_SNAPSHOT: { status: string; value: unknown; writable: boolean } = {
+  status: 'unavailable',
+  value: null,
+  writable: false,
+}
+
+const drawerGroupStyle: CSSProperties = {
+  border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,0.35))',
+  borderRadius: '10px',
+  background: 'var(--dsw-alias-bg-surface, transparent)',
+  overflow: 'hidden',
+}
+
+const drawerHeaderStyle: CSSProperties = {
+  appearance: 'none',
+  width: '100%',
+  font: 'inherit',
+  color: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+  background: 'none',
+  border: 0,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '10px 12px',
+}
+
+const drawerTitleStyle: CSSProperties = {
+  fontSize: '13px',
+  fontWeight: 600,
+  color: 'var(--dsw-alias-label-primary)',
+  flex: '0 1 auto',
+  minWidth: 0,
+}
+
+const drawerSummaryStyle: CSSProperties = {
+  flex: '1 1 auto',
+  minWidth: 0,
+  textAlign: 'right',
+  fontSize: '12px',
+  lineHeight: '18px',
+  color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8))',
+  overflowWrap: 'anywhere',
+}
+
+const drawerBodyStyle: CSSProperties = { padding: '2px 12px 12px' }
+
+/**
+ * One denylist row: keyword + remove. `muted` marks built-in preset words —
+ * visually quieter, because they are the default rather than a decision the
+ * person made (they live inside the collapsed built-ins sublist).
+ */
+function DenyRow(props: {
+  readonly keyword: string
+  readonly index: number
+  readonly muted: boolean
+  readonly locked: boolean
+  readonly removeLabel: string
+  readonly onRemove: (index: number) => void
+}): JSX.Element {
+  const { keyword, index, muted, locked, removeLabel, onRemove } = props
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '4px 8px',
+      borderRadius: '6px',
+      border: '1px solid var(--dsw-alias-border-l2)',
+      background: 'var(--dsw-alias-bg-surface, transparent)',
+    }}>
+      <code style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere', font: '500 12px/18px var(--ds-font-family-code, monospace)', color: muted ? 'var(--dsw-alias-label-tertiary)' : 'var(--dsw-alias-label-primary)' }}>
+        {keyword}
+      </code>
+      <button
+        type="button"
+        aria-label={removeLabel}
+        title={removeLabel}
+        disabled={locked}
+        onClick={() => { onRemove(index) }}
+        style={{
+          flex: '0 0 auto',
+          width: '20px',
+          height: '20px',
+          border: 'none',
+          borderRadius: '999px',
+          background: 'transparent',
+          color: 'var(--dsw-alias-label-tertiary)',
+          cursor: locked ? 'default' : 'pointer',
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+/**
+ * One collapsible group inside the settings card.
+ *
+ * The card body is cut into titled drawers so the front switch and the preset
+ * scope note stay first-screen while every block (tiers / strategies / testing
+ * / lists / credentials / network) folds behind a header. The header always
+ * shows a live state summary — a drawer communicates what it is doing without
+ * being opened, mirroring the outer disclosure pattern this card already uses
+ * (and the multi-group precedent in thinking-levels' card).
+ *
+ * `onFirstOpen` fires once, on the first expansion: groups whose content costs
+ * a fetch (the rules viewer) load lazily instead of on mount.
+ */
+function DrawerGroup(props: {
+  readonly id: string
+  readonly title: string
+  readonly summary?: string | undefined
+  readonly onFirstOpen?: (() => void) | undefined
+  readonly children: ReactNode
+}): JSX.Element {
+  const { id, title, summary, onFirstOpen, children } = props
+  const [open, setOpen] = useState(false)
+  const firedRef = useRef(false)
+  const toggle = (): void => {
+    const next = !open
+    setOpen(next)
+    if (next && onFirstOpen !== undefined && !firedRef.current) {
+      firedRef.current = true
+      onFirstOpen()
+    }
+  }
+  return (
+    <section style={drawerGroupStyle}>
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={toggle} style={drawerHeaderStyle}>
+        <svg
+          width="14" height="14" viewBox="0 0 16 16" aria-hidden
+          style={{
+            color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8))',
+            flex: '0 0 auto',
+            transition: 'transform 0.16s',
+            transform: open ? 'rotate(180deg)' : 'none',
+          }}
+        >
+          <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span style={drawerTitleStyle}>{title}</span>
+        {summary !== undefined && summary !== ''
+          ? <span style={drawerSummaryStyle}>{summary}</span>
+          : <span aria-hidden style={{ flex: '1 1 auto' }} />}
+      </button>
+      {open
+        ? <div id={id} style={drawerBodyStyle}>{children}</div>
+        : null}
+    </section>
+  )
+}
+
 /**
  * The card body, wrapped in a disclosure shell like every peer settings card:
- * a header (name + description + chevron) toggling the body, expanded by
- * default so the section reads as an open page of drawers.
+ * a header (name + description + chevron) toggling the body. The body keeps
+ * the front switch and the preset-scope note first-screen, then cuts the rest
+ * into six titled drawers (see DrawerGroup) so the page reads as a short
+ * index with live summaries instead of one long form.
  */
 export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
-  // 诊断守卫（2026-10-07）：scope 未解析时不能在 render 里炸——宿主设置壳对
-  // 内容槽异常静默吞（面板空白无报错），无法与「根本没渲染」区分。守卫后
-  // 面板显式出占位文案，把「渲染了但 scope 没到」与「没渲染」分开。
-  // 注意：守卫分支跳过了下方 hooks，scope 到位后该实例 hook 数会变——
-  // 仅作诊断用途，定位后移除或改为 hook 稳定形态。
-  if (!scope) {
-    return <div style={{ padding: 16, color: 'var(--dsw-alias-label-tertiary, #888)' }}>
-      {t('card.unavailable')}（scope 未解析 — 诊断占位）
-    </div>
-  }
   const [open, setOpen] = useState(true)
   // The api key is kept OUT of the visible value (secret): a fresh typed draft
   // overwrites on blur; an already-set key shows only a masked placeholder.
@@ -564,8 +722,10 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   const [allowText, setAllowText] = useState('')
   const [allowDirty, setAllowDirty] = useState(false)
   const snapshot = useSyncExternalStore(
-    (listener) => scope.subscribe(listener),
-    () => scope.getSnapshot(),
+    scope
+      ? (listener) => scope.subscribe(listener)
+      : (listener) => { void listener; return () => {} },
+    () => (scope ? scope.getSnapshot() : EMPTY_SNAPSHOT),
   )
   const unavailable = snapshot.status === 'unavailable'
   const readonly = unavailable || !snapshot.writable
@@ -682,7 +842,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
       .catch((e: unknown) => { setRulesError(String((e as Error)?.message ?? e)) })
       .finally(() => { setRulesBusy(false) })
   }
-  useEffect(() => { loadRules() }, [])
+  // Rules load lazily: the testing drawer's `onFirstOpen` triggers the first
+  // fetch, so a person who never opens diagnostics never pays the request.
+  // (The refresh button inside the drawer re-fetches any time.)
   // Receiver introspection: the live provider/model-group catalog (host mode)
   // and the provider/model the gate will actually use right now.
   const receiverSource = (value.classifierSource ?? 'custom') === 'host' ? 'host' : 'custom'
@@ -724,6 +886,67 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   }
   const restoreDeny = (): void => {
     void scope.unset('denyKeywords')
+  }
+
+  // Denylist split: the built-in preset words fold into a collapsed sublist
+  // (they dominate the row count and are the ones a person rarely edits);
+  // custom words and the add row stay visible. Indexes stay bound to the
+  // combined `denylist` array so removeDeny keeps one code path.
+  const [presetDenyOpen, setPresetDenyOpen] = useState(false)
+  const denyPairs = denylist.map((keyword, index) => ({
+    keyword,
+    index,
+    preset: (DEFAULT_DENY_KEYWORDS as readonly string[]).includes(keyword),
+  }))
+  const customDeny = denyPairs.filter((pair) => !pair.preset)
+  const presetDeny = denyPairs.filter((pair) => pair.preset)
+
+  // Credential-family rungs arrive from CredLadderSection's own fetch (and its
+  // POST round-trips); the readwrite count surfaces in the credentials drawer
+  // summary — a rung that steps a piece of P0 aside is worth seeing without
+  // opening the drawer.
+  const [credRwCount, setCredRwCount] = useState<number | null>(null)
+  const handleCredRungs = (rungs: Record<string, string>): void => {
+    setCredRwCount(Object.values(rungs).filter((rung) => rung === 'readwrite').length)
+  }
+
+  // Drawer summaries: live projections of the snapshot, so each header states
+  // what its block is currently doing without being opened.
+  const enabledTiers = [
+    ...(value.yolo === true ? ['YOLO'] : []),
+    ...(value.safenetPass !== false ? [t('card.mode.pass')] : []),
+    ...(value.safenetAsk === true ? [t('card.mode.ask')] : []),
+  ]
+  const tiersSummary = enabledTiers.length > 0 ? enabledTiers.join(' · ') : t('card.summaryNone')
+  const enabledStrategies = [
+    strategies.trustAutoAllow ?? true,
+    strategies.alwaysConfirm ?? false,
+    strategies.llmAssist ?? false,
+    strategies.trustEscalation ?? true,
+  ].filter((flag) => flag === true).length
+  const strategiesSummary = (enabledStrategies === 0
+    ? t('card.summaryNone')
+    : t('card.summaryStrategies').replace('%n', String(enabledStrategies)))
+    + (strategies.llmAssist === true ? ' · llmAssist' : '')
+  const listsSummary = t('card.summaryLists')
+    .replace('%a', String(patterns.length + (value.autoAllowTools ?? []).length))
+    .replace('%d', String((denyActive ? denylist.length : 0) + (value.denyKeywordsExtra ?? []).length))
+  const credSummary = credRwCount === null
+    ? undefined
+    : t('card.summaryCredRw').replace('%n', String(credRwCount))
+  const networkSummary = t('card.summaryNetwork')
+    .replace('%net', value.networkEnabled === true ? t('card.summaryOn') : t('card.summaryOff'))
+    .replace('%w', value.watch !== false ? t('card.summaryOn') : t('card.summaryOff'))
+
+  // 诊断守卫（2026-10-07 立项；2026-11-22 改为 hook 稳定形态）：scope 未解析时
+  // 不能在 render 里炸——宿主设置壳对内容槽异常静默吞（面板空白无报错），守卫
+  // 让面板显式出占位文案，把「渲染了但 scope 没到」与「没渲染」分开。守卫放在
+  // 全部 hooks 之后：提前 return 会跳过下方 hooks，scope 到位后 hook 数漂移
+  // （React 违例）；上方 store 钩子在 scope 缺席时回落 EMPTY_SNAPSHOT。
+  if (!scope) {
+    return <div style={{ padding: 16, color: 'var(--dsw-alias-label-tertiary, #888)' }}>
+      {t('card.unavailable')}（scope 未解析 — 诊断占位）
+    </div>
   }
 
   return (
@@ -800,12 +1023,15 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     {t('card.scopeNote').replace('%scope', gateScope.join(' / '))}
                   </p>
 
+                  {/* Six titled drawers (DrawerGroup): each header carries a live state
+                      summary, and the testing drawer lazy-loads the rules viewer on
+                      first expansion. */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px' }}>
                   {/* Each unattended implementation owns one preset and one switch, so the
                       rows below cannot cross: a switch changes the behaviour of the tier
                       named beside it and of no other. Script review is independent of all
                       of them and on by default. */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.unattended')}</p>
+                  <DrawerGroup id="pg-drawer-unattended" title={t('card.unattended')} summary={tiersSummary}>
                     <p style={hintStyle}>{t('card.unattendedHint')}</p>
                     <TierRow
                       id="plugin-config-perm-gate-yolo"
@@ -846,7 +1072,6 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       hint={t('card.askHint')}
                       onCommit={(next) => scope.set('safenetAsk', next)}
                     />
-                    <p style={hintStyle}>{t('card.tierScopeHint').replace('%scope', gateScope.join(' / '))}</p>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-rules-fallback" style={{ fontSize: '12px' }}>{t('card.rulesFallback')}</label>
                       <PillSwitch
@@ -877,10 +1102,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       />
                     </div>
                     <p style={hintStyle}>{t('card.scriptReviewHint')}</p>
-                  </section>
+                  </DrawerGroup>
 
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.strategies')}</p>
+                  <DrawerGroup id="pg-drawer-strategies" title={t('card.strategies')} summary={strategiesSummary}>
                     <div style={rowStyle}>
                       <label htmlFor="plugin-config-perm-gate-trust" style={{ fontSize: '12px' }}>{t('card.strategy.trustAutoAllow')}</label>
                       <PillSwitch
@@ -1188,8 +1412,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         </section>
                       )
                       : null}
-                  </section>
+                  </DrawerGroup>
 
+                  <DrawerGroup id="pg-drawer-testing" title={t('card.testing')} onFirstOpen={loadRules}>
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.dryRun')}</p>
                     <p style={hintStyle}>{t('card.dryRunHint')}</p>
@@ -1368,7 +1593,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       </>
                     )}
                   </section>
+                  </DrawerGroup>
 
+                  <DrawerGroup id="pg-drawer-lists" title={t('card.lists')} summary={listsSummary}>
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.allowlist')}</p>
                     <p style={hintStyle}>{t('card.allowlistHint')}</p>
@@ -1517,18 +1744,6 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                   </section>
                   <section style={sectionStyle}>
                     <StringListField
-                      label={t('card.credentialPaths')}
-                      hint={t('card.credentialPathsHint')}
-                      placeholder={t('card.credentialPathsPlaceholder')}
-                      addLabel={t('card.denylistAdd')}
-                      removeLabel={t('card.listRemove')}
-                      items={value.credentialPaths ?? []}
-                      locked={readonly}
-                      onAdd={(entry) => { void scope.set('credentialPaths', [...(value.credentialPaths ?? []), entry]) }}
-                      onRemove={(index) => { void scope.set('credentialPaths', (value.credentialPaths ?? []).filter((_, i) => i !== index)) }}
-                    />
-                    <div style={{ height: '10px' }} />
-                    <StringListField
                       label={t('card.denyKeywordsExtra')}
                       hint={t('card.denyKeywordsExtraHint')}
                       placeholder={t('card.denylistPlaceholder')}
@@ -1565,69 +1780,69 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                     />
                   </section>
 
-                  {/* Credential-family ladder: rows live in the rules document (section +
-                      enabled) and in credWriteExemptFamilies — read and written through
-                      the cred route, never mirrored here. */}
-                  <CredLadderSection t={t} readonly={readonly} />
-
+                  {/* Denylist: custom words and the add row stay visible; the built-in
+                      preset words fold into a collapsed sublist (they are the default,
+                      not a decision — the grouping replaces the old preset/custom tag
+                      chips). Removing a preset word still works from inside the sublist;
+                      the restore button brings the inherited defaults back. */}
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.denylist')}</p>
                     <p style={hintStyle}>{t('card.denylistHint')}</p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '6px 0' }}>
-                            {denylist.map((keyword, index) => {
-                              const preset = (DEFAULT_DENY_KEYWORDS as readonly string[]).includes(keyword)
-                              return (
-                                <div
-                                  key={`${index}:${keyword}`}
-                                  style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '8px',
-                                    padding: '4px 8px',
-                                    borderRadius: '6px',
-                                    border: '1px solid var(--dsw-alias-border-l2)',
-                                    background: 'var(--dsw-alias-bg-surface, transparent)',
-                                  }}
-                                >
-                                  <code style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere', font: '500 12px/18px var(--ds-font-family-code, monospace)', color: 'var(--dsw-alias-label-primary)' }}>
-                                    {keyword}
-                                  </code>
-                                  <span
-                                    style={{
-                                      flex: '0 0 auto',
-                                      fontSize: '11px',
-                                      lineHeight: '16px',
-                                      padding: '0 6px',
-                                      borderRadius: '8px',
-                                      color: preset ? 'var(--dsw-alias-label-tertiary)' : 'var(--dsw-alias-label-secondary, inherit)',
-                                      border: '1px solid var(--dsw-alias-border-l2)',
-                                    }}
-                                  >
-                                    {preset ? t('card.denylistTagPreset') : t('card.denylistTagCustom')}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    aria-label={t('card.denylistRemove')}
-                                    title={t('card.denylistRemove')}
-                                    disabled={readonly}
-                                    onClick={() => { removeDeny(index) }}
-                                    style={{
-                                      flex: '0 0 auto',
-                                      width: '20px',
-                                      height: '20px',
-                                      border: 'none',
-                                      borderRadius: '999px',
-                                      background: 'transparent',
-                                      color: 'var(--dsw-alias-label-tertiary)',
-                                      cursor: readonly ? 'default' : 'pointer',
-                                    }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              )
-                            })}
-                          </div>
+                    {customDeny.length > 0 && (
+                      <p style={{ ...labelStyle, fontSize: '12px' }}>{t('card.denylistCustom')}</p>
+                    )}
+                    {customDeny.map((pair) => (
+                      <div key={`${pair.index}:${pair.keyword}`} style={{ margin: '6px 0' }}>
+                        <DenyRow
+                          keyword={pair.keyword}
+                          index={pair.index}
+                          muted={false}
+                          locked={readonly}
+                          removeLabel={t('card.denylistRemove')}
+                          onRemove={removeDeny}
+                        />
+                      </div>
+                    ))}
+                    {presetDeny.length > 0 && (
+                      <>
+                        <button
+                          type="button"
+                          aria-expanded={presetDenyOpen}
+                          onClick={() => { setPresetDenyOpen((current) => !current) }}
+                          style={{ ...drawerHeaderStyle, width: 'auto', alignSelf: 'flex-start', padding: '6px 4px' }}
+                        >
+                          <svg
+                            width="12" height="12" viewBox="0 0 16 16" aria-hidden
+                            style={{
+                              color: 'var(--dsw-alias-label-tertiary, rgba(127,127,127,0.8))',
+                              flex: '0 0 auto',
+                              transition: 'transform 0.16s',
+                              transform: presetDenyOpen ? 'rotate(180deg)' : 'none',
+                            }}
+                          >
+                            <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          {t('card.denylistPresetCollapse').replace('%n', String(presetDeny.length))}
+                        </button>
+                        {presetDenyOpen
+                          ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '6px 0' }}>
+                                {presetDeny.map((pair) => (
+                                  <DenyRow
+                                    key={`${pair.index}:${pair.keyword}`}
+                                    keyword={pair.keyword}
+                                    index={pair.index}
+                                    muted
+                                    locked={readonly}
+                                    removeLabel={t('card.denylistRemove')}
+                                    onRemove={removeDeny}
+                                  />
+                                ))}
+                              </div>
+                            )
+                          : null}
+                      </>
+                    )}
                     <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
                       <input
                         type="text"
@@ -1670,12 +1885,34 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         )
                         : null}
                   </section>
+                  </DrawerGroup>
 
-                  {/* ─── Network master switch (Phase 2) ─── */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.networkEnabled')}</p>
-                    <p style={hintStyle}>{t('card.networkEnabledHint')}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                  <DrawerGroup id="pg-drawer-credentials" title={t('card.credentials')} summary={credSummary}>
+                    <section style={sectionStyle}>
+                      <StringListField
+                        label={t('card.credentialPaths')}
+                        hint={t('card.credentialPathsHint')}
+                        placeholder={t('card.credentialPathsPlaceholder')}
+                        addLabel={t('card.denylistAdd')}
+                        removeLabel={t('card.listRemove')}
+                        items={value.credentialPaths ?? []}
+                        locked={readonly}
+                        onAdd={(entry) => { void scope.set('credentialPaths', [...(value.credentialPaths ?? []), entry]) }}
+                        onRemove={(index) => { void scope.set('credentialPaths', (value.credentialPaths ?? []).filter((_, i) => i !== index)) }}
+                      />
+                    </section>
+
+                    {/* Credential-family ladder: rows live in the rules document (section +
+                        enabled) and in credWriteExemptFamilies — read and written through
+                        the cred route, never mirrored here. Rung changes report through
+                        `onRungs` so the drawer summary tracks readwrite without mirroring
+                        the rung state here. */}
+                    <CredLadderSection t={t} readonly={readonly} onRungs={handleCredRungs} />
+                  </DrawerGroup>
+
+                  <DrawerGroup id="pg-drawer-network" title={t('card.networkOps')} summary={networkSummary}>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-network-enabled" style={{ fontSize: '12px' }}>{t('card.networkEnabled')}</label>
                       <PillSwitch
                         id="plugin-config-perm-gate-network-enabled"
                         label={t('card.networkEnabled')}
@@ -1684,14 +1921,11 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         onCommit={(next) => scope.set('networkEnabled', next)}
                       />
                     </div>
+                    <p style={hintStyle}>{t('card.networkEnabledHint')}</p>
                     <p style={hintStyle}>{t('card.networkRebindNote')}</p>
-                  </section>
-
-                  {/* ─── Network env injection (Phase 2) ─── */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.networkInjectEnv')}</p>
-                    <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                    <div style={{ height: '8px' }} />
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-network-inject-env" style={{ fontSize: '12px' }}>{t('card.networkInjectEnv')}</label>
                       <PillSwitch
                         id="plugin-config-perm-gate-network-inject-env"
                         label={t('card.networkInjectEnv')}
@@ -1700,13 +1934,10 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         onCommit={(next) => scope.set('networkInjectEnv', next)}
                       />
                     </div>
-                  </section>
-
-                  {/* ─── Hot reload switch (Phase 3) ─── */}
-                  <section style={sectionStyle}>
-                    <p style={labelStyle}>{t('card.watch')}</p>
-                    <p style={hintStyle}>{t('card.watchHint')}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                    <p style={hintStyle}>{t('card.networkInjectEnvHint')}</p>
+                    <div style={{ height: '8px' }} />
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-watch" style={{ fontSize: '12px' }}>{t('card.watch')}</label>
                       <PillSwitch
                         id="plugin-config-perm-gate-watch"
                         label={t('card.watch')}
@@ -1715,7 +1946,9 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                         onCommit={(next) => scope.set('watch', next)}
                       />
                     </div>
-                  </section>
+                    <p style={hintStyle}>{t('card.watchHint')}</p>
+                  </DrawerGroup>
+                  </div>
 
                   {!snapshot.writable
                     && <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('card.readonly')}</p>}

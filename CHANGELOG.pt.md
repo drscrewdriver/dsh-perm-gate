@@ -1,5 +1,9 @@
 # Registro de mudanças
 
+## 5.6.0 (2026-11-23)
+
+- **Gavetização do cartão de configurações (refatoração só do client, comportamento inalterado nas seis linhas de host)**: o "Portal de revisão automática" passa de ~10 seções planas para "chave frontal permanente + seis gavetas recolhíveis" — níveis não supervisionados / estratégias de aprovação e classificador LLM / testes e diagnóstico / listas de permissão e bloqueio / proteção de credenciais / rede e recarga a quente. Cada cabeçalho de gaveta traz um resumo de estado ao vivo (níveis ativos, contagem de estratégias, permissões/bloqueios, famílias readwrite, estados de rede/recarga), legível sem abrir. Otimizações de conteúdo: a dica `tierScopeHint`, duplicada com `card.scopeNote`, foi removida (10 idiomas); o visualizador do documento de regras passou de busca no mount para busca na primeira expansão (o dry-run continua sob clique); as palavras predefinidas embutidas da denylist ficam recolhidas em "Palavras integradas (%n)" por padrão, com palavras personalizadas e linha de adição sempre visíveis (os antigos chips de etiqueta preset/custom são substituídos pelo agrupamento); título `card.unattended` encurtado (o parêntese foi para o hint existente); as três seções de rede foram fundidas em um grupo. A vaga `plugins.bundle.config` usa o mesmo cartão e recebe a mudança junto. O guarda de diagnóstico virou forma estável de hooks (corrige o risco de ordem do return precoce que pulava hooks). Ids de controles, caminhos de envio, máquina de estados do interruptor otimista, half de host e rotas de server permanecem intocados.
+
 ## 5.5.4
 
 - i18n: add Portuguese (pt-BR) locale — runtime dictionary, package metadata and README/INSTALL/CHANGELOG mirrors.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 5.6.0 (2026-11-23)
+
+- **设置卡抽屉化（纯 client 端重构，六线宿主行为不变）**：「自动审查门」从 ~10 个平铺 section 收成「主开关常驻 + 六组折叠抽屉」——无人值守档位 / 审批策略与 LLM 分类器 / 测试与诊断 / 放行与拦截清单 / 凭据保护 / 网络与热重载；每个抽屉头带实时状态摘要（已启用档位、策略数、放行/拦截计数、readwrite 族数、网络/热重载开关态），不展开也能读到当前状态。内容优化：与 `card.scopeNote` 重复的 `tierScopeHint` 提示删除（十语）；规则文档查看器从 mount 即拉改为首次展开才拉（dry-run 仍在点击时才测）；denylist 内置 preset 词默认收进「内置词（N）」子折叠，自定义词与添加行常驻可见（旧的 preset/custom 标签章由分组本身替代）；`card.unattended` 标题缩短（括注并入既有 hint）；网络三节合并为一组。`plugins.bundle.config` 席位同卡同改。诊断守卫改为 hook 稳定形态（提前 return 跳过 hooks 的顺序隐患修正）。控件 id、提交路径、乐观开关状态机、host 半与 server 路由全部不动。
+
 ## 5.5.10 (2026-11-22)
 
 - **unshare 用户命名空间阻断（cc-safety-net `unshare.user-namespace` 对标）**：`unshare -r`/`-U`/`--user`/`--map-*`/`-c` 把受限会话映射成 namespace root——沙箱逃逸的标准第一跳，预设表 deny 区新增 `exec.unshare-user-ns` 行（表水位 v5→v6），argv pipeline 9 个形态覆盖裸旗标与中缀组合（大小写敏感，`-C/--cgroup` 非本裁决面；裸 `--mount`/`-n` 隔离用法按裁决不拦）。
