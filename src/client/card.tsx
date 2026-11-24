@@ -716,7 +716,7 @@ function DrawerGroup(props: {
  */
 export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
   const [open, setOpen] = useState(true)
-  // 首次使用引导：本地标记持久化；卡底「重新查看引导」清标记就地重开。
+  // 首次使用引导：本地标记持久化；设置面上方的「重新查看引导」清标记就地重开。
   const [guideOpen, setGuideOpen] = useState(() => !isGuideSkipped('perm-gate'))
   // The api key is kept OUT of the visible value (secret): a fresh typed draft
   // overwrites on blur; an already-set key shows only a masked placeholder.
@@ -1008,6 +1008,10 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
               : (
                 <>
                   <style>{switchCss}</style>
+                  {/* 引导重启入口放在设置面上方：跳过之后想重新看贴士，不必滚到卡底。 */}
+                  <p style={{ margin: '0 0 10px' }}>
+                    <GuideRestartButton ns="perm-gate" onOpen={() => { setGuideOpen(true) }} />
+                  </p>
                   {guideOpen
                     ? (
                       <GuidePanel
@@ -1965,10 +1969,6 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
 
                   {!snapshot.writable
                     && <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' }}>{t('card.readonly')}</p>}
-                  {/* 引导重启入口：跳过之后想再看一次，不需要清浏览器存储。 */}
-                  <p style={{ margin: '10px 0 0' }}>
-                    <GuideRestartButton ns="perm-gate" onOpen={() => { setGuideOpen(true) }} />
-                  </p>
                 </>
               )}
           </div>
