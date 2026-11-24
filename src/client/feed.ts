@@ -239,50 +239,51 @@ export function presentation(kind: GateEvent['kind']): { color: string; bg: stri
 }
 
 /**
- * Decision-path labels shown beside an event's tool name. Kept alongside
- * `presentation` (not in the dictionary) because they name host-internal
- * decision sources; an unknown value falls through to its raw string.
+ * Decision-path labels shown beside an event's tool name. The values are
+ * `verdict.*` dictionary keys (not copy): the history view renders them
+ * through `tr()`, so ru/es read their own language instead of the Chinese
+ * source. An unknown verdict falls through to its raw string.
  */
 export const VERDICT_LABELS: Readonly<Record<string, string>> = {
-  rule: '规则命中',
-  grant: '会话授权',
-  'hard-deny': '硬拒绝',
-  'deny-keyword': '黑名单关键词',
-  default: '默认策略',
-  ask: '默认策略',
-  permissive: '自动审查放行',
-  classifier: 'LLM 裁决',
-  'llm-safe': 'LLM 判定安全',
-  'llm-learned': 'LLM 学习放行',
-  'learned-sediment': '沉淀规则放行',
-  'learned-confirm': '学习确认',
-  'human-approved': '人工通过',
-  'human-rejected': '人工拒绝',
-  'human-cancelled': '人工取消',
-  'no-approval-channel': '无审批通道',
+  rule: 'verdict.rule',
+  grant: 'verdict.grant',
+  'hard-deny': 'verdict.hard-deny',
+  'deny-keyword': 'verdict.deny-keyword',
+  default: 'verdict.default',
+  ask: 'verdict.ask',
+  permissive: 'verdict.permissive',
+  classifier: 'verdict.classifier',
+  'llm-safe': 'verdict.llm-safe',
+  'llm-learned': 'verdict.llm-learned',
+  'learned-sediment': 'verdict.learned-sediment',
+  'learned-confirm': 'verdict.learned-confirm',
+  'human-approved': 'verdict.human-approved',
+  'human-rejected': 'verdict.human-rejected',
+  'human-cancelled': 'verdict.human-cancelled',
+  'no-approval-channel': 'verdict.no-approval-channel',
   // The degrade that hides an ask: the tier declares `approval: ask`, but the
   // session was overridden to `never`, so the gate's ask became a passthrough.
   // Without this label the approvals history shows the raw event string — for
   // the one event that explains why a flagged call ran unreviewed.
-  'preset-passthrough': '审批策略 never · 已放行',
-  'stand-down': '门禁停用',
+  'preset-passthrough': 'verdict.preset-passthrough',
+  'stand-down': 'verdict.stand-down',
   // The unattended tiers never raise a prompt, so the approvals history is the only
   // place their decisions surface — an untranslated tag there reads as a leak.
-  'yolo-allow': 'YOLO 放行',
+  'yolo-allow': 'verdict.yolo-allow',
   // The YOLO tier advertises a reviewer model. When none answered, the tier still refuses to
   // ask a person and settles mechanically — and the history has to say that out loud, or the
   // two human-free tiers silently become one.
-  'yolo-allow-no-reviewer': 'YOLO 放行（无审查模型·机械处置）',
-  'yolo-block': 'YOLO 拦截',
-  'rules-fallback-allow': '无模型规则闸门放行',
-  'rules-fallback-block': '无模型规则闸门拦截',
-  'safety-net-passthrough-allow': '机械审查放行（零模型）',
-  'safety-net-passthrough-block': '机械审查拦截（零模型）',
+  'yolo-allow-no-reviewer': 'verdict.yolo-allow-no-reviewer',
+  'yolo-block': 'verdict.yolo-block',
+  'rules-fallback-allow': 'verdict.rules-fallback-allow',
+  'rules-fallback-block': 'verdict.rules-fallback-block',
+  'safety-net-passthrough-allow': 'verdict.safety-net-passthrough-allow',
+  'safety-net-passthrough-block': 'verdict.safety-net-passthrough-block',
   // Longer-standing paths that also reach the feed without a label.
-  'cleanup-safe': '清理类安全放行',
-  'escalation-auto': '沙箱升级自动放行',
-  'learned-granted': '学习授权放行',
-  'network-ask': '网络审批',
+  'cleanup-safe': 'verdict.cleanup-safe',
+  'escalation-auto': 'verdict.escalation-auto',
+  'learned-granted': 'verdict.learned-granted',
+  'network-ask': 'verdict.network-ask',
 }
 
 /** Compact wall-clock rendering of an ISO timestamp. */

@@ -521,7 +521,13 @@ export function HistoryView({ t, ...props }: HistoryViewProps): JSX.Element | nu
                 {events.map((ev) => {
                   const style = presentation(ev.kind)
                   const mark = glyphOf(ev.kind)
-                  const verdict = ev.verdict === undefined ? '' : (VERDICT_LABELS[ev.verdict] ?? ev.verdict)
+                  // VERDICT_LABELS 的值是 `verdict.*` 字典键（不是文案），必须过 t()
+                  // 才上屏——否则历史里会直接显示「verdict.rule」这种原始键名。
+                  // 未知 verdict 保持原样穿透（宿主内部来源，值得看见原字符串）。
+                  const label = ev.verdict === undefined ? undefined : VERDICT_LABELS[ev.verdict]
+                  const verdict = ev.verdict === undefined
+                    ? ''
+                    : (label === undefined ? ev.verdict : t(label as Parameters<typeof t>[0]))
                   const files = ev.files ?? []
                   // One chip per distinct basename (a decision may name the same
                   // file both absolutely and relatively).
