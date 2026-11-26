@@ -22,6 +22,7 @@ import { DEFAULT_GATE_PRESETS } from '../preset.ts'
 import { SedimentSection } from './sediment.tsx'
 import { GuidePanel, GuideRestartButton, guideSteps, isGuideSkipped } from './guide.tsx'
 import { PERM_GATE_GUIDE_STEPS } from './guide-steps.ts'
+import { mountStarRow } from './star-row-copy.ts'
 
 /** The settings namespace value the host registers (kept in lockstep with src/index.ts). */
 export interface PermissiveCardValue {
@@ -1974,6 +1975,10 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
           </div>
         )
         : null}
+      <span
+        ref={(node: HTMLElement | null) => {
+          if (node && !node.firstChild) node.appendChild(mountStarRow())        }}
+      />
     </div>
   )
 }
