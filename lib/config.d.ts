@@ -74,6 +74,12 @@ export interface PermGateConfig {
      * user promotes it explicitly. The on-disk file is unchanged either way.
      */
     readonly learningScope?: 'global' | 'session';
+    /** Show the ask in the decision strip. Default true (existing behaviour). */
+    readonly attentionToast?: boolean;
+    /** Play a short chime when an ask arrives. Default false. */
+    readonly attentionSound?: boolean;
+    /** Minimum gap between two chimes for the same session, in ms. Default 30000. */
+    readonly attentionMinGapMs?: number;
     /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
     readonly learningFile?: string;
     /** Persistence path for the decision-event feed; defaults to `<dshHome>/perm-gate/events.jsonl`. */
@@ -520,6 +526,15 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     classifierProvider: z<string, string, "plain">;
     riskThreshold: z<number, number, "defined">;
     learningScope: z<"global" | "session", "global" | "session", "defined">;
+    /**
+     * Ask attention. Two INDEPENDENT switches, defaults chosen so an upgrade is
+     * invisible: the decision strip keeps working exactly as before and the
+     * chime stays off until someone asks for it.
+     */
+    attentionToast: z<boolean, boolean, "defined">;
+    attentionSound: z<boolean, boolean, "defined">;
+    /** Minimum gap between two chimes for the SAME session (ms). */
+    attentionMinGapMs: z<number, number, "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
     grantTtlMs: z<number, number, "defined">;
@@ -614,6 +629,15 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     classifierProvider: z<string, string, "plain">;
     riskThreshold: z<number, number, "defined">;
     learningScope: z<"global" | "session", "global" | "session", "defined">;
+    /**
+     * Ask attention. Two INDEPENDENT switches, defaults chosen so an upgrade is
+     * invisible: the decision strip keeps working exactly as before and the
+     * chime stays off until someone asks for it.
+     */
+    attentionToast: z<boolean, boolean, "defined">;
+    attentionSound: z<boolean, boolean, "defined">;
+    /** Minimum gap between two chimes for the SAME session (ms). */
+    attentionMinGapMs: z<number, number, "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
     grantTtlMs: z<number, number, "defined">;
@@ -695,7 +719,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "learningScope", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "learningScope", "attentionToast", "attentionSound", "attentionMinGapMs", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */

@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, JSX, ReactNode } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { chime } from './attention.ts'
 import type { SettingsDocHandle } from './compat.ts'
 import { pendingAfterFailure, pendingAfterSync, shownValue, SWITCH_SETTLE_MS } from './switch-state.ts'
 import { DEFAULT_DENY_KEYWORDS } from '../deny-defaults.ts'
@@ -66,6 +67,10 @@ export interface PermissiveCardValue {
   riskThreshold?: number
   /** Learning sedimentation: threshold-reached samples become deterministic auto-allows. */
   riskSediment?: boolean
+  learningScope?: 'global' | 'session'
+  attentionToast?: boolean
+  attentionSound?: boolean
+  attentionMinGapMs?: number
   /** Editable whitelist (allow-list command patterns), one per entry. */
   allowlist?: string[]
   /** Editable deny-keyword blacklist; unset applies the inherited preset list. */
@@ -1419,6 +1424,23 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                                   />
                                 </div>
                                 <p style={hintStyle}>{t('card.riskSedimentHint')}</p>
+                                <div style={rowStyle}>
+                                  <label htmlFor="plugin-config-perm-gate-learning-scope" style={{ fontSize: '12px' }}>{t('card.learningScope')}</label>
+                                  <select
+                                    id="plugin-config-perm-gate-learning-scope"
+                                    value={value.learningScope ?? 'global'}
+                                    disabled={readonly || !effective}
+                                    style={{ ...controlStyle, width: '180px' }}
+                                    onChange={(event) => {
+                                      const next = event.currentTarget.value === 'session' ? 'session' : 'global'
+                                      void scope.set('learningScope', next)
+                                    }}
+                                  >
+                                    <option value="global">{t('card.learningScopeGlobal')}</option>
+                                    <option value="session">{t('card.learningScopeSession')}</option>
+                                  </select>
+                                </div>
+                                <p style={hintStyle}>{t('card.learningScopeHint')}</p>
                                 <div style={sectionStyle}>
                                   <p style={labelStyle}>{t('card.sediment')}</p>
                                   <p style={hintStyle}>{t('card.sedimentHint')}</p>
@@ -1433,6 +1455,53 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                   </DrawerGroup>
 
                   <DrawerGroup id="pg-drawer-testing" title={t('card.testing')} onFirstOpen={loadRules}>
+                  <section style={sectionStyle}>
+                    <p style={labelStyle}>{t('attention.title')}</p>
+                    <p style={hintStyle}>{t('attention.hint')}</p>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-attention-toast" style={{ fontSize: '12px' }}>{t('attention.toast')}</label>
+                      <PillSwitch
+                        id="plugin-config-perm-gate-attention-toast"
+                        checked={value.attentionToast ?? true}
+                        disabled={readonly || !effective}
+                        onCommit={(next) => scope.set('attentionToast', next)}
+                      />
+                    </div>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-attention-sound" style={{ fontSize: '12px' }}>{t('attention.sound')}</label>
+                      <PillSwitch
+                        id="plugin-config-perm-gate-attention-sound"
+                        checked={value.attentionSound ?? false}
+                        disabled={readonly || !effective}
+                        onCommit={(next) => scope.set('attentionSound', next)}
+                      />
+                    </div>
+                    <div style={rowStyle}>
+                      <label htmlFor="plugin-config-perm-gate-attention-gap" style={{ fontSize: '12px' }}>{t('attention.gap')}</label>
+                      <input
+                        id="plugin-config-perm-gate-attention-gap"
+                        type="number"
+                        min={0}
+                        max={600000}
+                        step={5000}
+                        value={value.attentionMinGapMs ?? 30000}
+                        disabled={readonly || !effective}
+                        style={{ ...controlStyle, width: '110px' }}
+                        onChange={(event) => {
+                          const n = Number.parseInt(event.currentTarget.value, 10)
+                          if (Number.isFinite(n) && n >= 0) void scope.set('attentionMinGapMs', n)
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={readonly || !effective}
+                      style={{ ...controlStyle, marginTop: '6px', cursor: 'pointer' }}
+                      onClick={() => { try { chime() } catch { /* silence */ } }}
+                    >
+                      {t('attention.test')}
+                    </button>
+                  </section>
                   <section style={sectionStyle}>
                     <p style={labelStyle}>{t('card.dryRun')}</p>
                     <p style={hintStyle}>{t('card.dryRunHint')}</p>

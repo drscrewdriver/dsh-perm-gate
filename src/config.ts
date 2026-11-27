@@ -125,6 +125,12 @@ export interface PermGateConfig {
    * user promotes it explicitly. The on-disk file is unchanged either way.
    */
   readonly learningScope?: 'global' | 'session'
+  /** Show the ask in the decision strip. Default true (existing behaviour). */
+  readonly attentionToast?: boolean
+  /** Play a short chime when an ask arrives. Default false. */
+  readonly attentionSound?: boolean
+  /** Minimum gap between two chimes for the same session, in ms. Default 30000. */
+  readonly attentionMinGapMs?: number
   /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
   readonly learningFile?: string
   /** Persistence path for the decision-event feed; defaults to `<dshHome>/perm-gate/events.jsonl`. */
@@ -644,6 +650,15 @@ export const Config = z.object({
   classifierProvider: vol(z.string()),
   riskThreshold: vol(z.number().min(1).max(10).default(1)),
   learningScope: vol(z.union(['global', 'session'] as const).default('global')),
+  /**
+   * Ask attention. Two INDEPENDENT switches, defaults chosen so an upgrade is
+   * invisible: the decision strip keeps working exactly as before and the
+   * chime stays off until someone asks for it.
+   */
+  attentionToast: vol(z.boolean().default(true)),
+  attentionSound: vol(z.boolean().default(false)),
+  /** Minimum gap between two chimes for the SAME session (ms). */
+  attentionMinGapMs: vol(z.number().min(0).max(600_000).default(30_000)),
   learningFile: z.string(),
   eventsFile: z.string(),
   grantTtlMs: vol(z.number().min(1).default(5 * 60_000)),
@@ -732,7 +747,8 @@ export type VolatileRef<T> = Volatile<T>
 export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierEffort', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
-  'classifierSource', 'classifierProvider', 'riskThreshold', 'learningScope', 'grantTtlMs', 'grantMaxUses',
+  'classifierSource', 'classifierProvider', 'riskThreshold', 'learningScope',
+  'attentionToast', 'attentionSound', 'attentionMinGapMs', 'grantTtlMs', 'grantMaxUses',
   'permissive', 'yolo', 'yoloWorkspaceExempt', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',

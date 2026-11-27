@@ -1,5 +1,25 @@
 # Changelog
 
+## 5.10.0 (2026-11-27)
+
+**审批到达时，用户若不在会话输入框附近就完全无感，ask 可能长期悬挂。**
+本版把已有的决策条（`src/client/notice.tsx`）变成可关的，并加一路独立的可选提示音——**不重写 toast**。
+
+- **新增 `src/client/attention.ts`**：两个**独立布尔**而非互斥枚举——
+  `toast`（决策条是否显示 ask，默认 true = 现有行为）与 `sound`（是否响提示音，默认 false）。
+  「toast 关、声音开」是合法组合，枚举表达不了。默认组合 `{toast:true, sound:false}` **等于今天的体验，升级零感知**。
+- **提示音用 WebAudio 合成两音**，不引入音频资源文件：零体积、离线可用、没有路径解析问题；
+  浏览器拒绝启动 AudioContext 时降级为静音而不是报错。
+- **去抖按会话分桶**：同一 `sessionId` 在 `attentionMinGapMs`（默认 30s）内只响一次，**不同会话互不影响**；
+  用户切回标签页（`visibilitychange` → visible）时清零，让下一条 ask 立刻可闻。
+- **设置面**：`attentionToast` / `attentionSound` / `attentionMinGapMs` 三项进设置卡「测试与诊断」组，
+  外加一个**试听**按钮（直接调用 `chime()`，不改任何状态）。
+- **10 语字典补齐**：`attention.title|hint|toast|sound|gap|test` 六个键在 zh/en/ja/ko/fr/de/it/ru/es/pt
+  **全部补齐**（`Record<keyof typeof zh, string>` 在编译期拦截遗漏）。
+- **不动 allow / deny 的渲染逻辑**：只有 ask 分支受 `toast` 开关控制。纯 client 侧、零宿主依赖，老线同样可用。
+- **全量**：90 test files / 1495 tests 通过（新增 `test/attention.spec.ts` 9 例：两开关 4 组合矩阵、
+  跨会话去抖、确认后清零、播放器抛错降级、无 WebAudio 时 `chime()` 不抛）。
+
 ## 5.9.0 (2026-11-27)
 
 **安全修复：学习数据是单文件全局共享，任一会话重复触发同一操作即可"养"出对所有会话生效的自动放行规则。**

@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { followEvents, presentation, resolveSessionId, type FeedSlotsProps, type GateEvent, type GateFeedBatch } from './feed.ts'
+import { ATTENTION_DEFAULTS, acknowledge, escalateAsk, type AttentionConfig } from './attention.ts'
 import type { PermissiveKey } from './locales.ts'
 
 const AUTO_HIDE_MS = 4_000
@@ -33,6 +34,15 @@ function manualTagKey(kind: GateEvent['kind']): 'history.tag.manualApproved' | '
 
 export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | null {
   const sessionId = resolveSessionId(props)
+  // Both attention switches are read from the settings scope the slot injects;
+  // an older host that does not deliver it keeps today's behaviour (toast on,
+  // sound off), so nothing silently starts or stops ringing.
+  const raw = (props as { settings?: { attentionToast?: boolean; attentionSound?: boolean; attentionMinGapMs?: number } }).settings
+  const attention: AttentionConfig = {
+    toast: raw?.attentionToast ?? ATTENTION_DEFAULTS.toast,
+    sound: raw?.attentionSound ?? ATTENTION_DEFAULTS.sound,
+    gapMs: raw?.attentionMinGapMs ?? ATTENTION_DEFAULTS.gapMs,
+  }
   const [notice, setNotice] = useState<GateEvent | null>(null)
   const sinceRef = useRef(0)
   const shownIdRef = useRef(0)
@@ -59,6 +69,14 @@ export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | nu
       }
       if (last.id <= shownIdRef.current) return
       shownIdRef.current = last.id
+      // An ask is the one event that needs the human OUT of the current view:
+      // sound (or nothing at all) is what covers "the tab is in the background".
+      if (last.kind === 'ask') escalateAsk({ config: attention, sessionId: sessionId ?? undefined })
+      // The strip itself is switchable; allow/deny keep their own behaviour.
+      if (last.kind === 'ask' && !attention.toast) {
+        setNotice(null)
+        return
+      }
       setNotice(last)
       if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current)
       if (!presentation(last.kind).sticky) {
@@ -73,6 +91,19 @@ export function NoticeStrip({ t, ...props }: NoticeStripProps): JSX.Element | nu
       close()
       if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current)
     }
+  }, [sessionId])
+
+  // Returning to the tab clears the debounce so the next ask is audible at
+  // once, instead of being swallowed by a window that opened while hidden.
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        acknowledge({ sessionId: sessionId ?? undefined })
+      }
+    }
+    if (typeof document === 'undefined') return
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { document.removeEventListener('visibilitychange', onVisible) }
   }, [sessionId])
 
   if (notice === null) return null
