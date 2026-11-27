@@ -372,6 +372,14 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
   readonly readApprovalPolicy?: (exec: ToolExecutionLike) => string | undefined
   /** Persistence path for verdict learning; `undefined` keeps it in memory. */
   readonly learningFile?: string
+  /**
+   * Learning scope; a live getter so the setting takes effect without a restart.
+   * `global` (default) keeps the historical cross-session behaviour, `session`
+   * isolates the store so one session cannot farm a rule for the others.
+   */
+  readonly readLearningScope?: () => 'global' | 'session'
+  /** The session the runtime acts for (used by `session` scope). */
+  readonly sessionId?: string | (() => string | undefined)
   /** Persistence path for the decision-event feed; `undefined` disables it. */
   readonly eventsFile?: string
   /**
@@ -692,12 +700,38 @@ export class PermGateRuntime {
     this.networkGrantTtlMs = options.networkGrantTtlMs ?? 30 * 60_000
     this.learning = new RiskLearning(options.learningFile, {
       threshold: () => this.liveRiskLearning().threshold,
+      scope: () => this.options.readLearningScope?.() ?? this.options.learningScope ?? 'global',
+      // The store is one instance shared by every session, so the identity
+      // must be supplied per DECISION, not per instance: each learning call is
+      // wrapped in withLearningSession(exec). A static getter here would put
+      // every session's confirmations into the namespace of whatever session
+      // happened to call first.
+      sessionId: () => this.learningSession,
       now: options.now,
     })
     this.events = options.eventsFile !== undefined
       ? new EventLog(options.eventsFile, options.now, options.snapshotsDir)
       : undefined
     this.ruleset = this.compileInline(options)
+  }
+
+  /** The session the in-flight learning operation acts for (see withLearningSession). */
+  private learningSession: string | undefined
+
+  /**
+   * Run one learning operation as the session that owns `exec`. `session`
+   * scope keys every confirmation by this identity, so it must be set at the
+   * call, not at construction; the finally-clause keeps a stale identity from
+   * leaking into an unrelated session's decision.
+   */
+  private withLearningSession<T>(exec: ToolExecutionLike | undefined, fn: () => T): T {
+    const previous = this.learningSession
+    this.learningSession = exec === undefined ? previous : sessionIdOf(exec) || undefined
+    try {
+      return fn()
+    } finally {
+      this.learningSession = previous
+    }
   }
 
   private compileInline(options: PermGateRuntimeOptions): CompiledRuleset {
@@ -1875,7 +1909,7 @@ export class PermGateRuntime {
     if (learning.enabled && this.liveRiskSediment()) {
       const fp = operationFingerprint(exec.name, exec.arguments ?? {}, exec.commandText)
       const key = learnKey(exec.name, 'neutral', fp)
-      if (this.learning.shouldAutoAllow(key, fp)) {
+      if (this.withLearningSession(exec, () => this.learning.shouldAutoAllow(key, fp))) {
         const reason = `learned sediment allow (${key}, ${fp})`
         this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
         this.recordEvent(exec, 'learned', reason, { risk: 'neutral', verdict: 'learned-sediment', category: 'neutral' })
@@ -2037,7 +2071,7 @@ export class PermGateRuntime {
       const learning = this.liveRiskLearning()
       const fp = operationFingerprint(exec.name, exec.arguments ?? {}, exec.commandText)
       const key = learnKey(exec.name, risk.category, fp)
-      if (learning.enabled && this.learning.shouldAutoAllow(key, fp)) {
+      if (learning.enabled && this.withLearningSession(exec, () => this.learning.shouldAutoAllow(key, fp))) {
         const reason = `llm-assist learned allow (${key}, ${fp})`
         this.audit.append(makeEntry({ callId: randomId(), tool: exec.name, outcome: 'allow', source: 'classifier', reason, at: Date.now() }))
         this.recordEvent(exec, 'auto', reason, { risk: risk.category, verdict: 'llm-learned', category: risk.category })
@@ -2456,7 +2490,7 @@ export class PermGateRuntime {
     if (candidate === undefined) return
     this.pending.delete(callKey)
     if (!this.liveRiskLearning().enabled) return
-    this.learning.confirm(candidate.key, candidate.fp, candidate.ctx)
+    this.withLearningSession(exec, () => { this.learning.confirm(candidate.key, candidate.fp, candidate.ctx) })
     this.recordEvent(exec, 'learned', `confirmed ${candidate.key} (${candidate.fp})`, { risk: 'neutral', verdict: 'learned-confirm', category: 'neutral' })
   }
 

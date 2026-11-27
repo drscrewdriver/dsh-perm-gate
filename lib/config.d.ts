@@ -66,6 +66,14 @@ export interface PermGateConfig {
     readonly classifierProvider?: string;
     /** Confirmations required before a neutral-risk re-run may auto-allow. Default 3. */
     readonly riskThreshold?: number;
+    /**
+     * Learning scope. `global` (default) keeps the historical behaviour: a rule
+     * a session farms applies to every session. `session` isolates the store per
+     * session, so farming one session's repetition cannot lower the bar for
+     * another — and a pre-existing `global` rule stops auto-allowing until the
+     * user promotes it explicitly. The on-disk file is unchanged either way.
+     */
+    readonly learningScope?: 'global' | 'session';
     /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
     readonly learningFile?: string;
     /** Persistence path for the decision-event feed; defaults to `<dshHome>/perm-gate/events.jsonl`. */
@@ -511,6 +519,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     classifierSource: z<"host" | "custom", "host" | "custom", "defined">;
     classifierProvider: z<string, string, "plain">;
     riskThreshold: z<number, number, "defined">;
+    learningScope: z<"global" | "session", "global" | "session", "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
     grantTtlMs: z<number, number, "defined">;
@@ -604,6 +613,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     classifierSource: z<"host" | "custom", "host" | "custom", "defined">;
     classifierProvider: z<string, string, "plain">;
     riskThreshold: z<number, number, "defined">;
+    learningScope: z<"global" | "session", "global" | "session", "defined">;
     learningFile: z<string, string, "plain">;
     eventsFile: z<string, string, "plain">;
     grantTtlMs: z<number, number, "defined">;
@@ -685,12 +695,12 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "learningScope", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */
 export declare function resolveVolatileConfig(config: object): Record<string, unknown>;
-export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>> & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierEffort' | 'classifierApiKey' | 'learningFile' | 'eventsFile'> & {
+export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold' | 'learningScope'>> & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierEffort' | 'classifierApiKey' | 'learningFile' | 'eventsFile'> & {
     readonly permissiveStrategies: PermissiveStrategies;
     readonly gatePresets: readonly string[];
 };

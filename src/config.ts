@@ -117,6 +117,14 @@ export interface PermGateConfig {
   readonly classifierProvider?: string
   /** Confirmations required before a neutral-risk re-run may auto-allow. Default 3. */
   readonly riskThreshold?: number
+  /**
+   * Learning scope. `global` (default) keeps the historical behaviour: a rule
+   * a session farms applies to every session. `session` isolates the store per
+   * session, so farming one session's repetition cannot lower the bar for
+   * another — and a pre-existing `global` rule stops auto-allowing until the
+   * user promotes it explicitly. The on-disk file is unchanged either way.
+   */
+  readonly learningScope?: 'global' | 'session'
   /** Persistence path for verdict learning; defaults to `<dshHome>/perm-gate/learning.json`. */
   readonly learningFile?: string
   /** Persistence path for the decision-event feed; defaults to `<dshHome>/perm-gate/events.jsonl`. */
@@ -635,6 +643,7 @@ export const Config = z.object({
   classifierSource: vol(z.union(['custom', 'host'] as const).default('custom')),
   classifierProvider: vol(z.string()),
   riskThreshold: vol(z.number().min(1).max(10).default(1)),
+  learningScope: vol(z.union(['global', 'session'] as const).default('global')),
   learningFile: z.string(),
   eventsFile: z.string(),
   grantTtlMs: vol(z.number().min(1).default(5 * 60_000)),
@@ -723,7 +732,7 @@ export type VolatileRef<T> = Volatile<T>
 export const VOLATILE_CONFIG_KEYS = [
   'defaultAction', 'caseInsensitivePaths', 'classifierEnabled', 'classifierEndpoint',
   'classifierModel', 'classifierEffort', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
-  'classifierSource', 'classifierProvider', 'riskThreshold', 'grantTtlMs', 'grantMaxUses',
+  'classifierSource', 'classifierProvider', 'riskThreshold', 'learningScope', 'grantTtlMs', 'grantMaxUses',
   'permissive', 'yolo', 'yoloWorkspaceExempt', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
@@ -752,7 +761,7 @@ export function resolveVolatileConfig(config: object): Record<string, unknown> {
   return out
 }
 
-export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold'>>
+export type ResolvedPermGateConfig = Required<Pick<PermGateConfig, 'caseInsensitivePaths' | 'grantTtlMs' | 'grantMaxUses' | 'permissive' | 'riskTimeoutMs' | 'riskLearning' | 'riskThreshold' | 'learningScope'>>
   & Pick<PermGateConfig, 'rulesFile' | 'dshHome' | 'defaultAction' | 'classifierEnabled' | 'classifierEndpoint' | 'classifierModel' | 'classifierEffort' | 'classifierApiKey' | 'learningFile' | 'eventsFile'>
   & { readonly permissiveStrategies: PermissiveStrategies; readonly gatePresets: readonly string[] }
 
@@ -777,6 +786,7 @@ export function resolveConfig(config: PermGateConfig = {}): ResolvedPermGateConf
     riskTimeoutMs: parsed.riskTimeoutMs ?? 20_000,
     riskLearning: parsed.riskLearning ?? false,
     riskThreshold: parsed.riskThreshold ?? 3,
+    learningScope: parsed.learningScope ?? 'global',
     learningFile: parsed.learningFile,
     eventsFile: parsed.eventsFile,
     grantTtlMs: parsed.grantTtlMs ?? 5 * 60_000,

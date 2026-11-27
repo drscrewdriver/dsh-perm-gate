@@ -1,5 +1,25 @@
 # Changelog
 
+## 5.9.0 (2026-11-27)
+
+**安全修复：学习数据是单文件全局共享，任一会话重复触发同一操作即可"养"出对所有会话生效的自动放行规则。**
+新增按会话隔离模式（默认仍为 `global`，升级零感知），隔离下只能显式提升。
+
+- **键空间分层（不改文件格式）**：`confirmed` / `samples` 的键从 `tool|fp` 扩展为
+  `global|tool|fp` 与 `session:<id>|tool|fp`。**无需迁移**——无前缀键按 `global|` 读取，
+  且 `global` 模式**继续写原来的裸键**，现有用户的 `learning.json` 字节不变。
+- **新增设置项 `learningScope`**（`global` 默认 / `session`）：getter 形式热生效，与 `riskThreshold` 一致。
+  `session` 下：
+  - `confirm()` 写 `session:<id>|` 键；
+  - `shouldAutoAllow()` **只**看本会话命名空间，不再回落 `global|`；
+  - 此前沉淀的 `global|` 规则在 `sedimented()` 里以 `promoted: false` 呈现，而不是被静默丢弃。
+- **显式提升通道 `promoteToGlobal(key, fp)`**：只在用户主动操作时发生（`pendingPromotions()` 供 UI 列出待提升项）。
+  自动提升正是被修掉的那个"养规则"行为，因此这里坚持显式。
+- **会话身份按决策供给**：`RiskLearning` 是跨会话共享的单个实例，所以 identity 在**每一次判定**处注入
+  （`withLearningSession(exec)`），而不是在构造时固定——否则所有确认都会落进第一个调用它的会话。
+- **只收紧不放宽**：任何模式下都不会因新逻辑让原本要问的调用变成自动放行。
+- **全量**：89 test files / 1486 tests 通过（新增 `test/learning-scope.spec.ts` 11 例）。
+
 ## 5.8.1 (2026-11-27)
 
 **安全修复：PowerShell 别名 `rd` / `ri` 触发的删除此前不被识别为删除程序。**

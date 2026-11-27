@@ -255,6 +255,14 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
     readonly readApprovalPolicy?: (exec: ToolExecutionLike) => string | undefined;
     /** Persistence path for verdict learning; `undefined` keeps it in memory. */
     readonly learningFile?: string;
+    /**
+     * Learning scope; a live getter so the setting takes effect without a restart.
+     * `global` (default) keeps the historical cross-session behaviour, `session`
+     * isolates the store so one session cannot farm a rule for the others.
+     */
+    readonly readLearningScope?: () => 'global' | 'session';
+    /** The session the runtime acts for (used by `session` scope). */
+    readonly sessionId?: string | (() => string | undefined);
     /** Persistence path for the decision-event feed; `undefined` disables it. */
     readonly eventsFile?: string;
     /**
@@ -412,6 +420,15 @@ export declare class PermGateRuntime {
      */
     private readonly cleared;
     constructor(options?: PermGateRuntimeOptions);
+    /** The session the in-flight learning operation acts for (see withLearningSession). */
+    private learningSession;
+    /**
+     * Run one learning operation as the session that owns `exec`. `session`
+     * scope keys every confirmation by this identity, so it must be set at the
+     * call, not at construction; the finally-clause keeps a stale identity from
+     * leaking into an unrelated session's decision.
+     */
+    private withLearningSession;
     private compileInline;
     /**
      * The root default action, read live (the config field is volatile) and
