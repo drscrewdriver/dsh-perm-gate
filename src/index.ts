@@ -14,6 +14,7 @@ import { appendAllowToSettings, readRulesFileDoc, replaceAllowInSettings, type S
 import { mergePresetIntoRaw, PRESET_TABLE_VERSION } from './preset-rules.js'
 import { CRED_FAMILY_IDS } from './cred-families.js'
 import { runDryRun } from './dry-run.js'
+import { configureRouteGuard, type GuardConnection } from './route-guard.js'
 import { registerDryRunRoute, registerEventsRoute, registerHealthRoute, registerLearningRoute, registerNetworkRoute, registerReceiverRoute, registerReviewRoutes, registerRulesRoute, registerCredRoute, type SessionSender, type WebServerLike } from './events.js'
 // T12 设置数据桥（describe/mutate；client BridgeDocHandle 消费）
 import { registerSettingsBridgeRoutes } from './bridge.js'
@@ -902,6 +903,14 @@ export function apply(ctx: Context, config: Record<string, unknown> = {}): PermG
   // Event feed HTTP API (best effort): the dsh webServer service exposes the
   // JSONL decision events to the browser half; without it events stay on disk.
   try {
+    // Route admission is wired once, before the first registration: every
+    // guardedRegister() call after this point reads these capabilities. The
+    // `connection` service is probed through fallbackGet and deliberately NOT
+    // added to `inject` - making it a hard dependency would refuse to load the
+    // whole plugin on hosts that do not ship it (and the plugin is useful
+    // without the HTTP routes). Absent service => the guard falls back to the
+    // host-declared `auth` policy, then to the cookie fence.
+    configureRouteGuard({ connection: fallbackGet('connection') as GuardConnection | undefined })
     const webServerCandidate = (injected.webServer ?? fallbackGet('webServer')) as { register?: unknown } | undefined
     const webServer = webServerCandidate !== null && typeof webServerCandidate === 'object' && typeof webServerCandidate.register === 'function'
       ? webServerCandidate as unknown as WebServerLike

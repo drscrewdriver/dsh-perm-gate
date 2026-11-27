@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path'
 import type { RulesView } from './rules-view.js'
 import { credRungsOf, setCredFamilyAction, type CredRung } from './preset-rules.js'
 import { CRED_FAMILY_IDS, type CredFamily } from './cred-families.js'
+import { guardedRegister, type GuardRoute } from './route-guard.js'
 
 /** One gate decision event. `kind` drives the client notice strip styling. */
 export interface GateEvent {
@@ -468,13 +469,21 @@ export class EventLog {
  * (typed locally — never value-imported; provided by the dsh runtime).
  */
 export interface WebServerLike {
-  register(route: { kind: 'exact'; path: string; handler: (req: unknown, res: unknown) => unknown }): () => void
+  /**
+   * The route shape is {@link GuardRoute} so the admission policy (`auth`)
+   * travels with the registration. Host types are version-specific and this
+   * plugin loads on every supported line, so the face stays declared locally —
+   * the older hosts simply ignore the key the guard adds.
+   */
+  register(route: GuardRoute): () => void
 }
 
 /** Minimal request/response faces for the route handlers. */
 interface RouteReq {
   method?: string
   url?: string
+  /** Present on a real http.IncomingMessage — the fences read `cookie`/Origin from here. */
+  headers?: Record<string, string | string[] | undefined>
   on?: (event: string, cb: (chunk?: unknown) => void) => unknown
 }
 interface RouteRes {
@@ -568,9 +577,10 @@ export const RULES_ROUTE = '/api/dsh-perm-gate/rules'
 export function registerEventsRoute(server: unknown, log: EventLog): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: EVENTS_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -617,9 +627,10 @@ const STREAM_PING_MS = 15_000
 export function registerStreamRoute(server: unknown, log: EventLog): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: STREAM_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -705,9 +716,10 @@ export function registerReviewRoutes(
   const { log, snapshotsDir, send, audit } = deps
   const offs: (() => void)[] = []
 
-  offs.push(ws.register({
+  offs.push(guardedRegister(ws, {
     kind: 'exact',
     path: DIFF_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -758,9 +770,10 @@ export function registerReviewRoutes(
     },
   }))
 
-  offs.push(ws.register({
+  offs.push(guardedRegister(ws, {
     kind: 'exact',
     path: REVERT_ROUTE,
+    methodKind: 'write',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -803,9 +816,10 @@ export function registerReviewRoutes(
     },
   }))
 
-  offs.push(ws.register({
+  offs.push(guardedRegister(ws, {
     kind: 'exact',
     path: SNAPSHOTS_STATS_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -844,9 +858,10 @@ export function registerReviewRoutes(
     },
   }))
 
-  offs.push(ws.register({
+  offs.push(guardedRegister(ws, {
     kind: 'exact',
     path: SNAPSHOTS_CLEAR_ROUTE,
+    methodKind: 'write',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -908,9 +923,10 @@ function statSize(absPath: string): number {
 export function registerReceiverRoute(server: unknown, provider: { info(): Promise<unknown> }): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: RECEIVER_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -934,9 +950,10 @@ export function registerReceiverRoute(server: unknown, provider: { info(): Promi
 export function registerHealthRoute(server: unknown, provider: { check(): Promise<{ ok: boolean; ms: number; detail: string }> }): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: HEALTH_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -973,9 +990,10 @@ export interface NetworkRouteProvider {
 export function registerNetworkRoute(server: unknown, provider: NetworkRouteProvider): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: NETWORK_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -1031,9 +1049,10 @@ export interface DryRunRouteProvider {
 export function registerDryRunRoute(server: unknown, provider: DryRunRouteProvider): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: DRY_RUN_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -1092,9 +1111,10 @@ export interface RulesRouteProvider {
 export function registerRulesRoute(server: unknown, provider: RulesRouteProvider): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: RULES_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -1120,9 +1140,10 @@ export function registerRulesRoute(server: unknown, provider: RulesRouteProvider
 export function registerLearningRoute(server: unknown, provider: LearningRouteProvider): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: LEARNING_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       const req = rawReq as RouteReq
       const res = rawRes as RouteRes
@@ -1173,9 +1194,10 @@ export interface CredRouteProvider {
 export function registerCredRoute(server: unknown, provider: CredRouteProvider): (() => void) | undefined {
   const ws = routeServer(server)
   if (ws === undefined) return undefined
-  return ws.register({
+  return guardedRegister(ws, {
     kind: 'exact',
     path: CRED_ROUTE,
+    methodKind: 'read',
     handler: (rawReq, rawRes) => {
       void (async () => {
         const req = rawReq as RouteReq

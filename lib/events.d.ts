@@ -1,4 +1,5 @@
 import type { RulesView } from './rules-view.js';
+import { type GuardRoute } from './route-guard.js';
 /** One gate decision event. `kind` drives the client notice strip styling. */
 export interface GateEvent {
     /** Monotonic id (resumed from the file across restarts). */
@@ -163,11 +164,13 @@ export declare class EventLog {
  * (typed locally — never value-imported; provided by the dsh runtime).
  */
 export interface WebServerLike {
-    register(route: {
-        kind: 'exact';
-        path: string;
-        handler: (req: unknown, res: unknown) => unknown;
-    }): () => void;
+    /**
+     * The route shape is {@link GuardRoute} so the admission policy (`auth`)
+     * travels with the registration. Host types are version-specific and this
+     * plugin loads on every supported line, so the face stays declared locally —
+     * the older hosts simply ignore the key the guard adds.
+     */
+    register(route: GuardRoute): () => void;
 }
 export declare const EVENTS_ROUTE = "/api/dsh-perm-gate/events";
 export declare const STREAM_ROUTE = "/api/dsh-perm-gate/stream";

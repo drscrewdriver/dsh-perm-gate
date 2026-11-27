@@ -33,9 +33,18 @@ function makeServer() {
       const out = { code: 0, body: undefined as unknown }
       const handler = routes.get(url.split('?')[0] ?? url)
       if (handler === undefined) throw new Error(`no route for ${url}`)
+      // The cross-origin fence (src/request-fence.ts) requires a same-origin
+      // Origin + JSON content-type on writes and refuses cross-site reads; a
+      // same-origin browser call always looks like this.
+      const headers: Record<string, string> = {
+        host: '127.0.0.1:3618',
+        origin: 'http://127.0.0.1:3618',
+        'content-type': 'application/json',
+      }
       const req = {
         method,
         url,
+        headers,
         on(event: string, cb: (chunk?: unknown) => void): unknown {
           if (event === 'data' && payload !== undefined) cb(JSON.stringify(payload))
           if (event === 'end') cb()

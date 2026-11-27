@@ -1,5 +1,29 @@
 # Changelog
 
+## 5.8.0-rc.1 (2026-11-27)
+
+**安全修复：13 条 HTTP 路由此前对任何本机调用者（含用户浏览器里的任意网页）完全开放。**
+一次收口认证 + 跨源两道独立防线，并入同一个 `guardedRegister()` 收口点。
+
+- **新增 `src/route-guard.ts`（路由认证收口点）**：`src/events.ts` 的 13 处 `ws.register()` 全部改走
+  `guardedRegister(ws, route, deps)`，"注册了"与"受控了"从此是同一个结构性事实，而不是靠下一条路由记得加。
+  三态能力探测（不按版本号判断——0.2.2 桌面端 `connection.requestRejection` 是真实代码，
+  0.2.3-alpha.2 已 0 处引用，同一 minor 内可见性都不同）：
+  - `host`：逐请求调 `connection.requestRejection({headers})`，非空即 401 且 **handler 不被调用**；探针抛错一律 fail-closed。
+  - `pass`：`register({ auth: 'required' })` 交宿主裁决；宿主不认该选项抛错时降级 `cookie` 并重注册一次（不会留下未注册/未保护的路由）。
+  - `cookie`：兜底嗅探 `dsh-auth-*` cookie，缺即 401。
+  - 逃生舱 `DSH_PERM_GATE_ROUTE_AUTH=host|pass|cookie|off`：`off` 只放行但每次启动 WARN 一行，绝不静默。
+- **新增 `src/request-fence.ts`（跨源围栏）**：认证回答"谁在调用"，围栏回答"从哪发起"，任一半缺失都是完整绕过面。
+  读（GET/HEAD）无 Origin 放行（EventSource 不发该头，SSE 必须继续工作），有 Origin 则 **scheme+host+port 三元组**全比对
+  （只比 host 会被 `http://` → `https://` 同 host 绕过，即 DNS rebinding）；写（POST）无 Origin 直接 403，
+  `Content-Type` 必须 `application/json`（否则 415）——这是封死跨站 `text/plain` 简单请求（不触发预检）的唯一手段。
+  `Sec-Fetch-Site: cross-site` 一律 403。
+- **`health` / `dry-run` / `learning` / `cred` 显式标为读语义**：它们是 POST 只因需携带 body，无副作用；
+  按写语义判会让 `curl -X POST` 探活与试跑全部 403——把安全加固做成可用性事故。
+- **`inject` 未动**：`connection` 经 `fallbackGet` 鸭子探测，不加进 `inject`——硬依赖会让没有该服务的宿主直接拒载整插件。
+- **`RouteReq` 补 `headers`**：此前连 Origin / Cookie 都读不到，任何"加个 Origin 校验"的写法都会恒为 `undefined === undefined`。
+- **全量**：86 test files / 1435 tests 通过（新增 `test/route-guard.spec.ts` 13 例、`test/request-fence.spec.ts` 17 例）。
+
 ## 5.7.3 (2026-11-26)
 
 **设置卡底栏 Star 快车道：★ 直接打开仓库页（不再只静默收起），隐藏独立成 ×。**
