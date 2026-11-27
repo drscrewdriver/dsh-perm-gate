@@ -1,5 +1,23 @@
 # Changelog
 
+## 5.8.1 (2026-11-27)
+
+**安全修复：PowerShell 别名 `rd` / `ri` 触发的删除此前不被识别为删除程序。**
+`rd "C:\Windows\System32" -Recurse -Force` 走的是 `Remove-Item`，但四张删除程序表里都没有 `rd`/更细的别名，
+于是 P0 判据（强制递归删除 / 自身状态目录删除）全部落空。
+
+- **新增 `src/pwsh-alias.ts`**：一张可维护的 PowerShell 别名表（`PWSH_ALIASES`）+ `expandPwshAlias` /
+  `pwshAliasVariants` / `expandLeadingProgram`。只列**破坏性/写入**别名（删除、移动、复制、内容写入、下载、执行），
+  刻意不含 `ls`/`dir`/`cat`/`gc`/`type` 等只读别名——展开它们只增加判定噪声，不影响任何一条 P0 判据。
+- **根因修复而非补两个词**：`src/irreversible.ts` 里同一张删除程序表被硬编码了 **4 次**，四处都缺别名。
+  现在收成一个 `DELETE_PROGRAMS` 常量，四处统一引用；`WIPE_IN_BODY` 与正文正则同步补 `rd|ri|rmo`。
+- **并集而非替换**：`command-normalize` 在原有形态之外追加一个别名展开变体（`via: 'alias'`）。
+  用户自己定义的 `function rd {}` **不会**盖住 PowerShell 内置别名，所以两个形态都必须参与判定；
+  原 token 保留，日志与原因里仍显示用户实际写的命令。
+- **方向只收紧**：展开只能让一次调用看起来更危险，绝不因别名而放宽任何判定。
+- **全量**：88 test files / 1475 tests 通过（新增 `test/pwsh-alias.spec.ts` 23 例，含 `rd`/`ri` 的 P0 复现与
+  `Format-Table`、`Get-Date -Format` 的零误报回归）。
+
 ## 5.8.0 (2026-11-27)
 
 **安全修复：13 条 HTTP 路由此前对任何本机调用者（含用户浏览器里的任意网页）完全开放。**

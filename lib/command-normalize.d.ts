@@ -30,7 +30,7 @@
 /** Where a decoded string came from, and whether the original runs it as code. */
 export interface NormalizedText {
     readonly text: string;
-    readonly via: 'base64' | 'hex' | 'varsub';
+    readonly via: 'base64' | 'hex' | 'varsub' | 'alias';
     /**
      * True when the payload is handed to an execution primitive
      * (`-EncodedCommand`, `FromBase64String`, `Invoke-Expression`, `eval`,

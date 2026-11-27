@@ -28,10 +28,12 @@
  * that could not have been reached honestly.
  */
 
+import { expandLeadingProgram } from './pwsh-alias.js'
+
 /** Where a decoded string came from, and whether the original runs it as code. */
 export interface NormalizedText {
   readonly text: string
-  readonly via: 'base64' | 'hex' | 'varsub'
+  readonly via: 'base64' | 'hex' | 'varsub' | 'alias'
   /**
    * True when the payload is handed to an execution primitive
    * (`-EncodedCommand`, `FromBase64String`, `Invoke-Expression`, `eval`,
@@ -259,6 +261,17 @@ export function normalizeCommandText(text: string, options: NormalizeOptions = {
         // payload, so it always counts as executed.
         push({ text: expanded, via: 'varsub', executed: true })
         next.push({ text: expanded, executed: true })
+      }
+
+      // PowerShell aliases: UNION, never a replacement. `rd C:\x -Recurse -Force`
+      // must be judged both as written (so the log quotes the user's command) and
+      // as `remove-item` (so the destructive tables see it). A user function
+      // named like an alias does not shadow the alias in PowerShell, which is
+      // why dropping the original would lose a real verdict.
+      const aliased = expandLeadingProgram(item.text)
+      if (aliased !== undefined) {
+        push({ text: aliased, via: 'alias', executed: runsCode })
+        next.push({ text: aliased, executed: runsCode })
       }
       if (out.length >= opts.maxVariants) break
     }
