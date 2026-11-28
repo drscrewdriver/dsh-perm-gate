@@ -343,6 +343,7 @@ In `cordis.yml`:
     scriptReview: true           # attach the body of a script the call runs to the review
     credentialPaths: []          # long-tail secret paths, held to the `.ssh` standard
     denyKeywordsExtra: []        # appended blacklist words (never replaces the preset)
+    denyKeywordExemptTools: [run_code]  # tool names the blacklist layer skips (issue #11); [] restores full scan
     extraContentArgKeys: []      # argument fields that are documents, not operations
     extraOperationArgKeys: []    # argument fields that ARE executed code (wins on conflict)
     safenetPass: true            # the permissive-mech implementation exists (mechanical takeover)
@@ -440,6 +441,12 @@ or `plan` would silently re-create a bug this gate already fixed:
 - `denyKeywordsExtra` — words appended to whichever blacklist is live (preset or your own
   `denyKeywords`), so a company CLI subcommand or token prefix gets a deterministic block without
   you copying fifty preset entries into your profile.
+- `denyKeywordExemptTools` — tool names the deny-keyword layer skips entirely (issue #11). A
+  code-mode wrapper such as `run_code` passes other tools' document text in its `code` argument, so a
+  blacklist hit there was a false positive that rejected the whole call. This preset ships `run_code`
+  so the fix lands on upgrade; set it to `[]` to scan everything again, or add your own wrapper names.
+  Being listed exempts a call from **this one layer only** — P0, the credential pre-screen and explicit
+  `deny:` rules still run against it, and a listed tool never gains an auto-allow.
 - `extraContentArgKeys` / `extraOperationArgKeys` — which argument fields are prose and which are
   operations. The first stops a host tool's `steps`/`notes` field from being read as an act (that
   is how issue #2 happened: an honest plan naming `rm -rf` got refused for describing it). The

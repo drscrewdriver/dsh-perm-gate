@@ -77,6 +77,8 @@ export interface PermissiveCardValue {
   denyKeywords?: string[]
   /** Keywords appended to whichever blacklist is live (never replaces it). */
   denyKeywordsExtra?: string[]
+  /** Tool names skipped by the deny-keyword layer ONLY (issue #11); preset includes `run_code`. */
+  denyKeywordExemptTools?: string[]
   /** User-declared credential paths, held to the same standard as `.ssh`. */
   credentialPaths?: string[]
   /** User-classified safe tool names held to the same tier as the built-in read tools. */
@@ -750,6 +752,7 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
     allowlist: listOf(raw.allowlist),
     denyKeywords: listOf(raw.denyKeywords),
     denyKeywordsExtra: listOf(raw.denyKeywordsExtra),
+    denyKeywordExemptTools: listOf(raw.denyKeywordExemptTools),
     credentialPaths: listOf(raw.credentialPaths),
     extraContentArgKeys: listOf(raw.extraContentArgKeys),
     extraOperationArgKeys: listOf(raw.extraOperationArgKeys),
@@ -1840,6 +1843,21 @@ export function PermissiveCard({ t, scope }: PermissiveCardProps): JSX.Element {
                       locked={readonly}
                       onAdd={(entry) => { void scope.set('denyKeywordsExtra', [...(value.denyKeywordsExtra ?? []), entry]) }}
                       onRemove={(index) => { void scope.set('denyKeywordsExtra', (value.denyKeywordsExtra ?? []).filter((_, i) => i !== index)) }}
+                    />
+                    <div style={{ height: '10px' }} />
+                    {/* issue #11: code-mode wrappers (e.g. run_code) carry other tools' document
+                        text, so a keyword hit on that prose was a false positive. These tool names
+                        skip ONLY the blacklist layer — P0, the credential screen and deny rules run. */}
+                    <StringListField
+                      label={t('card.denyKeywordExemptTools')}
+                      hint={t('card.denyKeywordExemptToolsHint')}
+                      placeholder={t('card.denyKeywordExemptToolsPlaceholder')}
+                      addLabel={t('card.denylistAdd')}
+                      removeLabel={t('card.listRemove')}
+                      items={value.denyKeywordExemptTools ?? []}
+                      locked={readonly}
+                      onAdd={(entry) => { void scope.set('denyKeywordExemptTools', [...(value.denyKeywordExemptTools ?? []), entry]) }}
+                      onRemove={(index) => { void scope.set('denyKeywordExemptTools', (value.denyKeywordExemptTools ?? []).filter((_, i) => i !== index)) }}
                     />
                     <div style={{ height: '10px' }} />
                     <StringListField

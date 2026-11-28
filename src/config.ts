@@ -9,6 +9,7 @@ import z from '@deepseek-ai/schemastery'
 import type { Volatile, VolatileSnapshot } from '@deepseek-ai/cosmokit'
 import type { RuleAction } from './rule.js'
 import { DEFAULT_GATE_PRESETS, resolveGatePresets } from './preset.js'
+import { DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS } from './deny-defaults.js'
 
 /**
  * The DSH home directory: an explicit `dshHome`, else `$DSH_HOME`, else
@@ -282,6 +283,16 @@ export interface PermGateConfig {
    * without having to copy fifty preset entries into your profile and keep them current.
    */
   readonly denyKeywordsExtra?: string[]
+  /**
+   * Tool names exempted from the **deny-keyword blacklist layer only**. Defaults to
+   * {@link DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS} (code-mode wrappers such as `run_code`, whose
+   * `code` argument carries other tools' document text — issue #11). An explicit empty array
+   * restores the scan-everything behaviour.
+   *
+   * Being listed grants no auto-allow: it only skips this one veto layer. P0, the credential
+   * pre-screen, explicit `deny:` rules and every later stage still run against these tools.
+   */
+  readonly denyKeywordExemptTools?: string[]
   /**
    * Credential paths beyond the built-in store list (`.ssh`, `.aws`, `.npmrc`,
    * `credentials.yaml`, …), which P0 refuses to read from outside the workspace and
@@ -702,6 +713,7 @@ export const Config = z.object({
   allowlist: vol(z.array(z.string())),
   denyKeywords: vol(z.array(z.string())),
   denyKeywordsExtra: vol(z.array(z.string()).default([])),
+  denyKeywordExemptTools: vol(z.array(z.string()).default([...DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS])),
   credentialPaths: vol(z.array(z.string()).default([])),
   extraContentArgKeys: vol(z.array(z.string()).default([])),
   extraOperationArgKeys: vol(z.array(z.string()).default([])),
@@ -749,7 +761,7 @@ export const VOLATILE_CONFIG_KEYS = [
   'classifierModel', 'classifierEffort', 'classifierApiKey', 'riskTimeoutMs', 'riskLearning', 'riskSediment',
   'classifierSource', 'classifierProvider', 'riskThreshold', 'learningScope',
   'attentionToast', 'attentionSound', 'attentionMinGapMs', 'grantTtlMs', 'grantMaxUses',
-  'permissive', 'yolo', 'yoloWorkspaceExempt', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
+  'permissive', 'yolo', 'yoloWorkspaceExempt', 'rulesFallback', 'unattendedTiers', 'safenetPass', 'safenetAsk', 'allowProtectedBranchPush', 'credWriteExemptFamilies', 'presetRulesVersion', 'scriptReview', 'permissiveStrategies', 'allowlist', 'denyKeywords', 'denyKeywordsExtra', 'denyKeywordExemptTools', 'credentialPaths', 'extraContentArgKeys', 'extraOperationArgKeys', 'presetRulesSeeded', 'autoAllowTools',
   'sessionSweep', 'searchUp', 'badFilePolicy', 'maxChainLength',
   'networkEnabled', 'networkMode', 'networkUnlisted', 'networkUnattributed', 'networkLoopback',
   'networkBind', 'networkPort', 'networkNoProxy', 'networkInjectEnv', 'networkAskTimeoutMs',

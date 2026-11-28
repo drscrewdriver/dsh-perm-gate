@@ -45,7 +45,7 @@ import { decomposeShellCommand } from './shell.js'
 import type { NetworkTarget } from './network.js'
 import { extractAgentCandidates } from './agent-identity.js'
 import { resolveRuleChain } from './rule-chain.js'
-import { DEFAULT_DENY_KEYWORDS } from './deny-defaults.js'
+import { DEFAULT_DENY_KEYWORDS, DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS } from './deny-defaults.js'
 import { permissionPresetOf, presetInScope, type SessionEventLike } from './preset.js'
 import { resolveTierMode, type UnattendedMode } from './unattended.js'
 import { resolveGatePresets } from './config.js'
@@ -351,6 +351,14 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
    * long-tail secret without copying fifty preset entries into a profile.
    */
   readonly readDenyKeywordsExtra?: () => readonly string[] | undefined
+  /**
+   * Optional live source of the tool names exempted from the deny-keyword layer ONLY
+   * (issue #11). `undefined` from the reader (or an absent reader) applies the preset
+   * `DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS`; an explicit empty array disables every
+   * exemption. Listing a tool never auto-allows it — P0, the credential pre-screen and
+   * the rule chain still run against it.
+   */
+  readonly readDenyKeywordExemptTools?: () => readonly string[] | undefined
   /**
    * Optional live source of the user-declared credential paths, consulted by P0's read
    * and mutation checks (see `config.credentialPaths`).
@@ -1373,6 +1381,20 @@ export class PermGateRuntime {
     return this.options.readAllowProtectedBranchPush?.() ?? this.options.allowProtectedBranchPush ?? false
   }
 
+  /**
+   * The tool names skipped by the deny-keyword layer ONLY (issue #11). Read live so a
+   * settings-card edit lands on the next call. `undefined` from the reader (or an absent
+   * reader) falls back to the preset; an explicit empty array means "exempt nothing" and
+   * restores the scan-everything behaviour.
+   */
+  private liveDenyKeywordExemptTools(): ReadonlySet<string> {
+    const read = this.options.readDenyKeywordExemptTools
+    const list = read !== undefined
+      ? (read() ?? DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS)
+      : (this.options.denyKeywordExemptTools ?? DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS)
+    return new Set(Array.isArray(list) ? list.filter((s): s is string => typeof s === 'string' && s.trim() !== '') : [])
+  }
+
   private effectiveDenyKeywords(): readonly string[] {
     const keywords = this.liveDenyKeywords()
     if (!this.liveAllowProtectedBranchPush()) return keywords
@@ -1420,6 +1442,11 @@ export class PermGateRuntime {
    * call, the reason, or the event: the reason names the keyword, never the blob.
    */
   private denyKeywordHit(exec: ToolExecutionLike): string | undefined {
+    // issue #11: a code-mode wrapper's `code` body is other tools' document text, so a
+    // keyword hit on that prose is a false positive. Exempt the whole tool from THIS
+    // layer only — P0 (runs earlier, never here), the credential pre-screen and the
+    // explicit `deny:` rules are untouched, and an exempted tool gains no auto-allow.
+    if (this.liveDenyKeywordExemptTools().has(exec.name)) return undefined
     const keywords = this.effectiveDenyKeywords()
     if (keywords.length === 0) return undefined
     const text = keywordScanText(exec.name, exec.arguments ?? {}, exec.commandText, this.liveScanKeys())

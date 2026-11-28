@@ -7,6 +7,16 @@
 
 > 참고: 2.4.1부터 5.1.2까지는 영문 `CHANGELOG.md`에만 기록되어 있습니다 (ko판은 아직 미추적).
 
+## 5.10.1 (2026-11-29)
+
+**code-mode wrapper(`run_code` 등)의 `code` 인수는 다른 도구의 문서 본문을 담기 때문에, 거기서 블랙리스트 단어가 나타나면 호출 전체가 오탐으로 거부되어 있었다 (issue #11).** 이번 버전은 `denyKeywordExemptTools`를 추가해 지정 도구를 **deny-keyword 블랙리스트 층**에서 면제한다.
+
+- **블랙리스트 한 층에만** 작용: 면제는 `denyKeywordHit`만 건너뛴다. P0 하드 거부(자격증명·보호 경로·위험 shell)·credential 사전 선별·명시적 `deny:` 규칙·후속 grant/rule/LLM/ask는 모두 그대로 동작하며, 목록 도구는 auto-allow를 얻지 못한다.
+- **`run_code` 프리셋**: `DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS = ['run_code']`로 업그레이드 직후 바로 완화. 명시적으로 `[]`로 두면 면제를 완전 해제(구버전 전량 스캔으로 복귀).
+- **핫 반영**: `VOLATILE_CONFIG_KEYS`에 편입, `denyKeywords`와 동일한 live reader. 설정 카드 변경이 다음 호출부터 적용.
+- **설정 카드**: 블랙리스트 영역에 `StringListField` 추가(10개 언어 동기화).
+- **테스트**: `test/deny-keywords.spec.ts`에 6개 사례 추가. 전체 90 files / 1501 tests 통과.
+
 ## 5.6.0 (2026-11-23)
 
 - **설정 카드 드로어화(client 반만 재구성, 6개 호스트 라인 동작 불변)**: 「자동 심사 게이트」를 약 10개의 평면 섹션에서 「전면 스위치 상주 + 6개 접이식 드로어」로 재편 — 무인 등급 / 승인 전략과 LLM 분류기 / 테스트 및 진단 / 허용·차단 목록 / 자격 증명 보호 / 네트워크 및 핫 리로드. 각 드로어 헤더에 실시간 상태 요약(활성 등급, 전략 수, 허용/차단 건수, readwrite 패밀리 수, 네트워크/핫 리로드 상태)을 표시해 열지 않고도 현재 상태를 읽을 수 있다. 내용 최적화: `card.scopeNote`와 중복된 `tierScopeHint` 삭제(10개 언어); 규칙 문서 뷰어는 마운트 즉시 가져오기에서 첫 확장 시 가져오기로 변경(dry-run은 기존대로 클릭 시); 블랙리스트 내장 프리셋 단어는 「내장 키워드(N)」 하위 접기로 기본 수납, 사용자 지정 단어와 추가 행은 항상 표시(기존 preset/custom 태그 칩은 그룹화로 대체); `card.unattended` 제목 단축(괄호 설명은 기존 hint로); 네트워크 3개 섹션을 1개 그룹으로 통합. `plugins.bundle.config` 자리는 같은 카드라 함께 적용. 진단 가드는 hook 안정형으로 수정(조기 return이 hooks를 건너뛰는 순서 리스크). 컨트롤 id·제출 경로·낙관 스위치 상태 기계·host 반과 server 라우트는 모두 불변.

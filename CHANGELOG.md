@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.10.1 (2026-11-29)
+
+**code-mode wrapper（如 `run_code`）的 `code` 参数携带其它工具的文档正文，正文里出现黑名单关键词就整包被误拒（issue #11）。**
+本版新增 `denyKeywordExemptTools`，把指定工具从 **deny-keyword 黑名单层**中豁免。
+
+- **只作用于黑名单一层**：豁免只跳过 `denyKeywordHit`。P0 硬拒（凭据/保护路径/危险 shell）、
+  credential 预筛、显式 `deny:` 规则、后面的 grant/rule/LLM/ask 各层照常运行；名单中的工具**不会**获得 auto-allow。
+- **预置 `run_code`**：`DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS = ['run_code']`，升级即开箱缓解 #11；
+  显式置 `[]` 完全关闭豁免（恢复旧版全量扫描），也可自行增删 wrapper 名。
+- **热生效**：新字段进 `VOLATILE_CONFIG_KEYS`，与 `denyKeywords` 同款 live reader，设置卡改值下一次调用即生效。
+- **settings 卡片**：「黑名单」区新增一个 `StringListField`（10 语同步），增/删走 `scope.set`。
+- **测试**：`test/deny-keywords.spec.ts` 新增 6 例（预置生效/显式 `[]` 恢复/名单加减/规则层仍拦/普通工具仍拦/热生效）；
+  全量 90 files / 1501 tests 通过。
+
 ## 5.10.0 (2026-11-27)
 
 **审批到达时，用户若不在会话输入框附近就完全无感，ask 可能长期悬挂。**

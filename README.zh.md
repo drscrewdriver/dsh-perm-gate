@@ -242,6 +242,7 @@ outside the design set get none*。`permissive` 是内置值，所以「自动�
     scriptReview: true           # 把调用所跑脚本的正文随审查一并附上
     credentialPaths: []          # 长尾凭据路径，按 `.ssh` 同档保护
     denyKeywordsExtra: []        # 追加黑名单词（不替换预置表）
+    denyKeywordExemptTools: [run_code]  # 黑名单层跳过的工具名（issue #11）；置 [] 恢复全量扫描
     extraContentArgKeys: []      # 哪些参数是文档而非操作
     extraOperationArgKeys: []    # 哪些参数确实是会被执行的代码（撞名时本表胜）
     safenetPass: true            # permissive-mech 档的实现存在（机械接管 ask）
@@ -285,6 +286,7 @@ outside the design set get none*。`permissive` 是内置值，所以「自动�
 
 - `credentialPaths` — 路径 glob（双星跨目录、单星与问号限一段；无通配符时按整个路径片段匹配；`~/` 展开为你的 home；相对写法也在任意深度匹配）。列入的路径与 `.ssh` 同档：工作区外读取被拒、被 `write`/`edit` 改写被拒。该档是 P0（不可申诉、审查模型也放行不了），这正是它是配置项而非 `rules.yaml` 规则的原因：只读工具在规则链**之前**就被自动放行了，规则看不见这类调用。
 - `denyKeywordsExtra` — 向当前生效的黑名单（预置或你替换后的表）**追加**词项，为公司 CLI 的吊销子命令或自有令牌前缀加一道确定性拦截，而不必把 50 条预置抄进 profile。
+- `denyKeywordExemptTools` — 黑名单层整段跳过的工具名（issue #11）。code-mode wrapper（如 `run_code`）把其它工具的文档正文塞在 `code` 参数里，命中黑名单多为误拒。预置已含 `run_code`，升级即开箱缓解；置 `[]` 恢复全量扫描，也可自行增删 wrapper 名。被列名只豁免**这一层**——P0、凭据预筛与显式 `deny:` 规则照常运行，也不会因此获得 auto-allow。
 - `extraContentArgKeys` / `extraOperationArgKeys` — 哪些参数是文档、哪些是操作。前者阻止宿主工具的 `steps`/`notes` 正文被当成操作读（issue #2 就是这么发生的：一份诚实的计划写了 `rm -rf` 反而因“描述”被拒）；后者为 `workflowYaml` 这种“正文真的会被执行”的字段反向开口，且与前者撞名时本表获胜。把真正的文档字段写进来，就等于让“计划里提到 `rm -rf`”重新变成拒绝理由，所以默认关。
 
 把 `command` 或 `file_path` 声明为文档并不能削弱门禁：被执行的命令与被改写的路径由各自的判据路径负责，不走这张表（已有断言测试钉住）。

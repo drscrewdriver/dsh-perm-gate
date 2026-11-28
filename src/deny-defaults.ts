@@ -18,3 +18,16 @@ export const DEFAULT_DENY_KEYWORDS: readonly string[] = [
   '清空数据库', '删除数据库', '格式化', 'sudo rm', 'chmod 777 /',
   'git reset --hard', 'git clean -fd', 'docker rm', 'docker system prune',
 ]
+
+/**
+ * Tool names whose `code`-style argument is a code-mode wrapper: its body is other
+ * tools' document text, so a deny-keyword hit on that prose is a false positive
+ * (issue #11). Applied as the default of `denyKeywordExemptTools` — an explicit empty
+ * array disables every exemption and restores the scan-everything behaviour. The
+ * exemption reaches the deny-keyword layer ONLY; P0, the credential pre-screen and
+ * explicit `deny:` rules keep running.
+ *
+ * Import-free on purpose, like the blacklist above: the same preset seeds both the
+ * node runtime and the client bundle's settings card.
+ */
+export const DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS: readonly string[] = ['run_code']

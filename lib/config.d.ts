@@ -232,6 +232,16 @@ export interface PermGateConfig {
      */
     readonly denyKeywordsExtra?: string[];
     /**
+     * Tool names exempted from the **deny-keyword blacklist layer only**. Defaults to
+     * {@link DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS} (code-mode wrappers such as `run_code`, whose
+     * `code` argument carries other tools' document text — issue #11). An explicit empty array
+     * restores the scan-everything behaviour.
+     *
+     * Being listed grants no auto-allow: it only skips this one veto layer. P0, the credential
+     * pre-screen, explicit `deny:` rules and every later stage still run against these tools.
+     */
+    readonly denyKeywordExemptTools?: string[];
+    /**
      * Credential paths beyond the built-in store list (`.ssh`, `.aws`, `.npmrc`,
      * `credentials.yaml`, …), which P0 refuses to read from outside the workspace and
      * refuses to mutate through a file tool.
@@ -583,6 +593,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     allowlist: z<string[], string[], "plain">;
     denyKeywords: z<string[], string[], "plain">;
     denyKeywordsExtra: z<string[], string[], "defined">;
+    denyKeywordExemptTools: z<string[], string[], "defined">;
     credentialPaths: z<string[], string[], "defined">;
     extraContentArgKeys: z<string[], string[], "defined">;
     extraOperationArgKeys: z<string[], string[], "defined">;
@@ -686,6 +697,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
     allowlist: z<string[], string[], "plain">;
     denyKeywords: z<string[], string[], "plain">;
     denyKeywordsExtra: z<string[], string[], "defined">;
+    denyKeywordExemptTools: z<string[], string[], "defined">;
     credentialPaths: z<string[], string[], "defined">;
     extraContentArgKeys: z<string[], string[], "defined">;
     extraOperationArgKeys: z<string[], string[], "defined">;
@@ -719,7 +731,7 @@ export declare const Config: z<Schemastery.ObjectS<NoInfer<{
 /** Live reference the 0.1.7 loader hands `apply` for `.volatile()` config fields. */
 export type VolatileRef<T> = Volatile<T>;
 /** The config fields marked `.volatile()` — live refs inside `apply`'s config. */
-export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "learningScope", "attentionToast", "attentionSound", "attentionMinGapMs", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
+export declare const VOLATILE_CONFIG_KEYS: readonly ["defaultAction", "caseInsensitivePaths", "classifierEnabled", "classifierEndpoint", "classifierModel", "classifierEffort", "classifierApiKey", "riskTimeoutMs", "riskLearning", "riskSediment", "classifierSource", "classifierProvider", "riskThreshold", "learningScope", "attentionToast", "attentionSound", "attentionMinGapMs", "grantTtlMs", "grantMaxUses", "permissive", "yolo", "yoloWorkspaceExempt", "rulesFallback", "unattendedTiers", "safenetPass", "safenetAsk", "allowProtectedBranchPush", "credWriteExemptFamilies", "presetRulesVersion", "scriptReview", "permissiveStrategies", "allowlist", "denyKeywords", "denyKeywordsExtra", "denyKeywordExemptTools", "credentialPaths", "extraContentArgKeys", "extraOperationArgKeys", "presetRulesSeeded", "autoAllowTools", "sessionSweep", "searchUp", "badFilePolicy", "maxChainLength", "networkEnabled", "networkMode", "networkUnlisted", "networkUnattributed", "networkLoopback", "networkBind", "networkPort", "networkNoProxy", "networkInjectEnv", "networkAskTimeoutMs", "networkGrantTtlMs", "rules", "sandboxEnabled", "sandboxMode", "sandboxProxy", "sandboxLoopback"];
 /** Resolve one possibly-volatile field: a live ref on 0.1.7+, a plain value otherwise. */
 export declare function readVolatileValue<T>(value: T | Volatile<T> | undefined): VolatileSnapshot<T> | undefined;
 /** Shallow-resolve every volatile field into a plain snapshot (one per read). */

@@ -235,6 +235,14 @@ export interface PermGateRuntimeOptions extends PermGateConfig {
      */
     readonly readDenyKeywordsExtra?: () => readonly string[] | undefined;
     /**
+     * Optional live source of the tool names exempted from the deny-keyword layer ONLY
+     * (issue #11). `undefined` from the reader (or an absent reader) applies the preset
+     * `DEFAULT_DENY_KEYWORD_EXEMPT_TOOLS`; an explicit empty array disables every
+     * exemption. Listing a tool never auto-allows it — P0, the credential pre-screen and
+     * the rule chain still run against it.
+     */
+    readonly readDenyKeywordExemptTools?: () => readonly string[] | undefined;
+    /**
      * Optional live source of the user-declared credential paths, consulted by P0's read
      * and mutation checks (see `config.credentialPaths`).
      */
@@ -617,6 +625,13 @@ export declare class PermGateRuntime {
      * the P0 protected-branch floor; the opt-out exempts exactly these, nothing more.
      */
     private liveAllowProtectedBranchPush;
+    /**
+     * The tool names skipped by the deny-keyword layer ONLY (issue #11). Read live so a
+     * settings-card edit lands on the next call. `undefined` from the reader (or an absent
+     * reader) falls back to the preset; an explicit empty array means "exempt nothing" and
+     * restores the scan-everything behaviour.
+     */
+    private liveDenyKeywordExemptTools;
     private effectiveDenyKeywords;
     /** The user-declared credential paths, as configured (may be empty). */
     private liveCredentialPaths;

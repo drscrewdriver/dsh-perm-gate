@@ -102,3 +102,62 @@ describe('preset deny-keyword layer (inherited from dsh-approval-gate)', () => {
     expect(r.decideExecution(EXEC(`grep -R "shutil.rmtree" src/`))?.kind).not.toBe('deny')
   })
 })
+
+const WRAPPER = (args: Record<string, unknown>) => ({ name: 'run_code', arguments: args, cwd: '/work', sessionId: 's1' })
+
+/**
+ * issue #11 — a code-mode wrapper (`run_code`) carries other tools' document text in its
+ * `code` argument, so a deny-keyword hit on that prose was a false positive. `denyKeywordExemptTools`
+ * skips ONLY the keyword layer for listed tools; the preset ships `run_code` so the fix is
+ * visible on upgrade, and an explicit [] restores the old scan-everything behaviour.
+ */
+describe('denyKeywordExemptTools (issue #11)', () => {
+  it('预置名单：run_code 的文档文本不再被关键词拦', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined })
+    expect(r.decideExecution(WRAPPER({ code: 'grep "rm -rf" docs' }))?.kind).not.toBe('deny')
+  })
+  it('显式空名单恢复旧行为', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined, denyKeywordExemptTools: [] })
+    expect(r.decideExecution(WRAPPER({ code: 'grep "rm -rf" docs' }))?.kind).toBe('deny')
+  })
+  it('自定义名单可加减', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined, denyKeywordExemptTools: ['my_wrapper'] })
+    // run_code 不在自定义名单里 → 照旧被拦
+    expect(r.decideExecution(WRAPPER({ code: 'grep "rm -rf" docs' }))?.kind).toBe('deny')
+    // my_wrapper 被豁免
+    expect(r.decideExecution({ name: 'my_wrapper', arguments: { code: 'grep "rm -rf" docs' }, cwd: '/work', sessionId: 's1' })?.kind).not.toBe('deny')
+  })
+  it('豁免只作用于关键词层：显式 deny: 规则对 run_code 仍拦', () => {
+    // R3 / checklist “显式 deny 规则对豁免工具仍生效”: a rule-layer deny keyed on the
+    // tool name must still veto run_code even though it is exempt from the keyword layer.
+    // (P0 and the credential pre-screen key on real shell/file inputs, not a wrapper's
+    // `code` prose, so they never fired on run_code bodies to begin with — the exemption
+    // does not change them. The rule layer is the correct later-floor to prove.
+    const r = new PermGateRuntime({
+      rulesFile: undefined,
+      readRulesDocument: () => ({
+        defaultAction: 'ask',
+        deny: [{ tools: ['run_code'], reason: 'rule floor' }],
+        allow: [],
+        ask: [],
+      }) as never,
+    })
+    const decision = r.decideExecution(WRAPPER({ code: 'echo hello' }))
+    expect(decision?.kind).toBe('deny')
+    // The deny came from the rule floor, never the keyword layer (run_code is exempt there).
+    expect(decision?.reason).not.toContain('deny-keyword')
+  })
+  it('普通执行工具照旧被拦', () => {
+    const r = new PermGateRuntime({ rulesFile: undefined })
+    expect(r.decideExecution(EXEC('rm -rf /work/build'))?.kind).toBe('deny')
+  })
+  it('热生效：reader 变化立即不同', () => {
+    let list: readonly string[] | undefined = undefined
+    const r = new PermGateRuntime({ rulesFile: undefined, readDenyKeywordExemptTools: () => list })
+    // reader undefined → 回退预置 → run_code 豁免
+    expect(r.decideExecution(WRAPPER({ code: 'grep "rm -rf" docs' }))?.kind).not.toBe('deny')
+    // reader 显式 [] → 关闭豁免 → 回到旧行为
+    list = []
+    expect(r.decideExecution(WRAPPER({ code: 'grep "rm -rf" docs' }))?.kind).toBe('deny')
+  })
+})
